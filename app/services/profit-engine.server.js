@@ -356,57 +356,69 @@ async function updateDailyMetrics(tx, payload) {
     refunds: payload.refundCount ?? 0,
   };
 
-  await tx.dailyMetric.upsert({
+  // 1️⃣ 先处理 TOTAL 行：不能用 upsert，因为 productSku 为 null
+  const existingTotal = await tx.dailyMetric.findFirst({
     where: {
-      storeId_channel_productSku_date: {
-        storeId: payload.storeId,
-        channel: "TOTAL",
-        productSku: null,
-        date: metricDate,
-      },
-    },
-    create: {
       storeId: payload.storeId,
       channel: "TOTAL",
       productSku: null,
       date: metricDate,
-      currency: payload.currency,
-      orders: delta.orders,
-      units: delta.units,
-      revenue: delta.revenue,
-      adSpend: 0,
-      cogs: delta.cogs,
-      shippingCost: delta.shippingCost,
-      paymentFees: delta.paymentFees,
-      refundAmount: delta.refundAmount,
-      refunds: delta.refunds,
-      grossProfit: delta.grossProfit,
-      netProfit: delta.netProfit,
-    },
-    update: {
-      orders: { increment: delta.orders },
-      units: { increment: delta.units },
-      revenue: { increment: delta.revenue },
-      cogs: { increment: delta.cogs },
-      shippingCost: { increment: delta.shippingCost },
-      paymentFees: { increment: delta.paymentFees },
-      refundAmount: { increment: delta.refundAmount },
-      refunds: { increment: delta.refunds },
-      grossProfit: { increment: delta.grossProfit },
-      netProfit: { increment: delta.netProfit },
     },
   });
 
+  if (!existingTotal) {
+    await tx.dailyMetric.create({
+      data: {
+        storeId: payload.storeId,
+        channel: "TOTAL",
+        productSku: null,
+        date: metricDate,
+        currency: payload.currency,
+        orders: delta.orders,
+        units: delta.units,
+        revenue: delta.revenue,
+        adSpend: 0,
+        cogs: delta.cogs,
+        shippingCost: delta.shippingCost,
+        paymentFees: delta.paymentFees,
+        refundAmount: delta.refundAmount,
+        refunds: delta.refunds,
+        grossProfit: delta.grossProfit,
+        netProfit: delta.netProfit,
+      },
+    });
+  } else {
+    await tx.dailyMetric.update({
+      where: { id: existingTotal.id },
+      data: {
+        orders: { increment: delta.orders },
+        units: { increment: delta.units },
+        revenue: { increment: delta.revenue },
+        cogs: { increment: delta.cogs },
+        shippingCost: { increment: delta.shippingCost },
+        paymentFees: { increment: delta.paymentFees },
+        refundAmount: { increment: delta.refundAmount },
+        refunds: { increment: delta.refunds },
+        grossProfit: { increment: delta.grossProfit },
+        netProfit: { increment: delta.netProfit },
+      },
+    });
+  }
+
+  // 2️⃣ 再按 SKU 维度做 PRODUCT 行：这里 productSku 不为 null，可以继续用 upsert
   for (const line of payload.lineRecords) {
     if (!line.sku) continue;
+
     const revenueShare =
       payload.revenue > 0 ? line.revenue / payload.revenue : 0;
+
     const refundAllocation = resolveRefundForLine(
       line.sku,
       payload.refundBySku,
       payload.refundAmount,
       revenueShare,
     );
+
     await tx.dailyMetric.upsert({
       where: {
         storeId_channel_productSku_date: {
@@ -433,7 +445,10 @@ async function updateDailyMetrics(tx, payload) {
         refunds: refundAllocation > 0 ? 1 : 0,
         grossProfit: line.revenue - line.cogs,
         netProfit:
-          line.revenue - line.cogs - payload.shippingCost * revenueShare - payload.paymentFees * revenueShare,
+          line.revenue -
+          line.cogs -
+          payload.shippingCost * revenueShare -
+          payload.paymentFees * revenueShare,
       },
       update: {
         orders: { increment: 1 },
@@ -441,8 +456,7 @@ async function updateDailyMetrics(tx, payload) {
         revenue: { increment: line.revenue },
         cogs: { increment: line.cogs },
         shippingCost: {
-          increment:
-            payload.shippingCost * revenueShare,
+          increment: payload.shippingCost * revenueShare,
         },
         paymentFees: {
           increment: payload.paymentFees * revenueShare,
