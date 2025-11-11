@@ -1,0 +1,488 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+enum PlanTier {
+  BASIC
+  PRO
+}
+
+enum StoreStatus {
+  ACTIVE
+  DISCONNECTED
+}
+
+enum TeamRole {
+  OWNER
+  FINANCE
+  MARKETING
+}
+
+enum CredentialProvider {
+  META_ADS
+  GOOGLE_ADS
+  PAYPAL
+  STRIPE
+  SHOPIFY_PAYMENTS
+}
+
+enum CostType {
+  COGS
+  SHIPPING
+  PAYMENT_FEE
+  PLATFORM_FEE
+  CUSTOM
+}
+
+enum ReconciliationIssueType {
+  SHOPIFY_VS_PAYMENT
+  SHOPIFY_VS_ADS
+}
+
+enum IssueStatus {
+  OPEN
+  RESOLVED
+}
+
+enum ReportFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum SyncJobType {
+  AD_SPEND
+  PAYMENT_PAYOUT
+}
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+}
+
+model MerchantAccount {
+  id              String                @id @default(cuid())
+  name            String?
+  ownerEmail      String?
+  primaryCurrency String                @default("USD")
+  primaryTimezone String                @default("UTC")
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  stores          Store[]
+  subscription    Subscription?
+  members         TeamMember[]
+  credentials     AdAccountCredential[]
+  reportSchedules ReportSchedule[]
+  fixedCosts      FixedCost[]
+  notificationChannels NotificationChannel[]
+}
+
+model Store {
+  id                   String                @id @default(cuid())
+  merchant             MerchantAccount       @relation(fields: [merchantId], references: [id])
+  merchantId           String
+  shopDomain           String                @unique
+  shopGid              String?
+  status               StoreStatus           @default(ACTIVE)
+  currency             String                @default("USD")
+  timezone             String                @default("UTC")
+  installedAt          DateTime              @default(now())
+  disconnectedAt       DateTime?
+  paymentsLastSyncedAt DateTime?
+  parentStore          Store?                @relation("StoreSubstores", fields: [parentStoreId], references: [id])
+  parentStoreId        String?
+  childStores          Store[]               @relation("StoreSubstores")
+  lastNetLossAlertAt   DateTime?
+  lastRefundSpikeAlertAt DateTime?
+  orders               Order[]
+  skuCosts             SkuCost[]
+  costTemplates        CostTemplate[]
+  dailyMetrics         DailyMetric[]
+  reconciliation       ReconciliationIssue[]
+  adAccountCredentials AdAccountCredential[]
+  payouts              PaymentPayout[]
+  syncJobs             SyncJob[]
+  adSpendRecords       AdSpendRecord[]
+  refunds              RefundRecord[]
+
+  @@index([merchantId])
+}
+
+model NotificationChannel {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  type       String
+  label      String?
+  config     Json?
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([merchantId, type])
+}
+
+model Subscription {
+  id               String          @id @default(cuid())
+  merchant         MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId       String          @unique
+  plan             PlanTier        @default(BASIC)
+  shopifyBillingId String?
+  status           String          @default("ACTIVE")
+  trialEndsAt      DateTime?
+  nextBillingAt    DateTime?
+  orderLimit       Int             @default(500)
+  storeLimit       Int             @default(1)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model TeamMember {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  email      String
+  name       String?
+  role       TeamRole        @default(FINANCE)
+  invitedAt  DateTime        @default(now())
+  joinedAt   DateTime?
+  status     String          @default("INVITED")
+
+  @@unique([merchantId, email])
+}
+
+model AdAccountCredential {
+  id              String             @id @default(cuid())
+  merchant        MerchantAccount    @relation(fields: [merchantId], references: [id])
+  merchantId      String
+  store           Store?             @relation(fields: [storeId], references: [id])
+  storeId         String?
+  provider        CredentialProvider
+  accountName     String?
+  accountId       String?
+  encryptedSecret String
+  expiresAt       DateTime?
+  scopes          String?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([merchantId])
+  @@index([storeId])
+}
+
+model SkuCost {
+  id            String    @id @default(cuid())
+  store         Store     @relation(fields: [storeId], references: [id])
+  storeId       String
+  sku           String
+  variantId     String?
+  costCurrency  String    @default("USD")
+  costAmount    Decimal
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  source        String    @default("MANUAL")
+
+  @@index([storeId, sku])
+}
+
+model CostTemplate {
+  id        String             @id @default(cuid())
+  store     Store              @relation(fields: [storeId], references: [id])
+  storeId   String
+  name      String
+  type      CostType
+  config    Json?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  lines     CostTemplateLine[]
+
+  @@index([storeId])
+}
+
+model CostTemplateLine {
+  id             String       @id @default(cuid())
+  template       CostTemplate @relation(fields: [templateId], references: [id])
+  templateId     String
+  label          String
+  percentageRate Decimal?
+  flatAmount     Decimal?
+  appliesTo      String       @default("ORDER")
+}
+
+model Order {
+  id                  String            @id @default(cuid())
+  store               Store             @relation(fields: [storeId], references: [id])
+  storeId             String
+  shopifyOrderId      String            @unique
+  orderNumber         String?
+  currency            String            @default("USD")
+  presentmentCurrency String?
+  subtotal            Decimal           @default(0)
+  shipping            Decimal           @default(0)
+  tax                 Decimal           @default(0)
+  discount            Decimal           @default(0)
+  total               Decimal           @default(0)
+  financialStatus     String?
+  processedAt         DateTime
+  sourceName          String?
+  customerCountry     String?
+  attribution         OrderAttribution?
+  lineItems           OrderLineItem[]
+  costs               OrderCost[]
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  refunds             RefundRecord[]
+
+  @@index([storeId])
+  @@index([processedAt])
+}
+
+model OrderLineItem {
+  id        String  @id @default(cuid())
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   String
+  productId String?
+  variantId String?
+  sku       String?
+  title     String?
+  quantity  Int
+  price     Decimal
+  discount  Decimal @default(0)
+  revenue   Decimal @default(0)
+  cogs      Decimal @default(0)
+}
+
+model OrderCost {
+  id       String   @id @default(cuid())
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId  String
+  type     CostType
+  amount   Decimal
+  currency String   @default("USD")
+  source   String?
+}
+
+model OrderAttribution {
+  id               String              @id @default(cuid())
+  order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId          String              @unique
+  provider         CredentialProvider?
+  campaignId       String?
+  campaignName     String?
+  adSetId          String?
+  adSetName        String?
+  adId             String?
+  adName           String?
+  attributionModel String?             @default("LAST_TOUCH")
+  clickTimestamp   DateTime?
+  viewTimestamp    DateTime?
+  spendAllocated   Decimal             @default(0)
+  currency         String              @default("USD")
+}
+
+model DailyMetric {
+  id           String   @id @default(cuid())
+  store        Store    @relation(fields: [storeId], references: [id])
+  storeId      String
+  date         DateTime
+  channel      String   @default("ORGANIC")
+  productSku   String?
+  currency     String   @default("USD")
+  orders       Int      @default(0)
+  units        Int      @default(0)
+  revenue      Decimal  @default(0)
+  adSpend      Decimal  @default(0)
+  cogs         Decimal  @default(0)
+  shippingCost Decimal  @default(0)
+  paymentFees  Decimal  @default(0)
+  refundAmount Decimal  @default(0)
+  refunds      Int      @default(0)
+  grossProfit  Decimal  @default(0)
+  netProfit    Decimal  @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([storeId, channel, productSku, date])
+  @@index([storeId, date])
+  @@index([storeId, channel, date])
+}
+
+model ReconciliationIssue {
+  id          String                  @id @default(cuid())
+  store       Store                   @relation(fields: [storeId], references: [id])
+  storeId     String
+  issueType   ReconciliationIssueType
+  issueDate   DateTime                @default(now())
+  orderId     String?
+  externalRef String?
+  amountDelta Decimal
+  currency    String                  @default("USD")
+  status      IssueStatus             @default(OPEN)
+  details     Json?
+  resolvedAt  DateTime?
+
+  @@index([storeId, issueType, status])
+}
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  base      String
+  quote     String
+  rate      Decimal
+  asOf      DateTime
+  source    String   @default("ECB")
+  createdAt DateTime @default(now())
+
+  @@unique([base, quote, asOf])
+}
+
+model ReportSchedule {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  frequency  ReportFrequency @default(DAILY)
+  channel    String          @default("EMAIL")
+  recipients String
+  lastRunAt  DateTime?
+  nextRunAt  DateTime?
+  settings   Json?
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+}
+
+model AdSpendRecord {
+  id           String             @id @default(cuid())
+  store        Store              @relation(fields: [storeId], references: [id])
+  storeId      String
+  provider     CredentialProvider
+  accountId    String?
+  campaignId   String?
+  campaignName String?
+  adSetId      String?
+  adSetName    String?
+  adId         String?
+  adName       String?
+  date         DateTime
+  currency     String             @default("USD")
+  spend        Decimal            @default(0)
+  impressions  Int                @default(0)
+  clicks       Int                @default(0)
+  conversions  Int                @default(0)
+  compositeKey String             @unique
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([storeId, provider, date])
+}
+
+model PaymentPayout {
+  id           String             @id @default(cuid())
+  store        Store              @relation(fields: [storeId], references: [id])
+  storeId      String
+  provider     CredentialProvider
+  payoutId     String
+  status       String             @default("PAID")
+  payoutDate   DateTime
+  currency     String             @default("USD")
+  grossAmount  Decimal            @default(0)
+  feeTotal     Decimal            @default(0)
+  netAmount    Decimal            @default(0)
+  transactions Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@unique([storeId, payoutId])
+  @@index([storeId, provider, payoutDate])
+}
+
+model RefundRecord {
+  id               String   @id @default(cuid())
+  store            Store    @relation(fields: [storeId], references: [id])
+  storeId          String
+  order            Order?   @relation(fields: [orderId], references: [id])
+  orderId          String?
+  orderShopifyId   String
+  shopifyRefundId  String   @unique
+  processedAt      DateTime
+  currency         String   @default("USD")
+  amount           Decimal  @default(0)
+  reason           String?
+  restock          Boolean  @default(false)
+  lineItems        Json?
+  transactions     Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([storeId, processedAt])
+  @@index([storeId, orderShopifyId])
+}
+
+model FixedCost {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  label      String
+  amount     Decimal
+  currency   String          @default("USD")
+  cadence    String          @default("MONTHLY")
+  appliesTo  String          @default("ALL")
+  allocation String          @default("REVENUE")
+  startedAt  DateTime        @default(now())
+  endedAt    DateTime?
+  notes      String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([merchantId])
+}
+
+model SyncJob {
+  id             String              @id @default(cuid())
+  store          Store               @relation(fields: [storeId], references: [id])
+  storeId        String
+  provider       CredentialProvider?
+  jobType        SyncJobType
+  status         SyncJobStatus       @default(PENDING)
+  startedAt      DateTime            @default(now())
+  completedAt    DateTime?
+  processedCount Int                 @default(0)
+  message        String?
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([storeId, jobType])
+}

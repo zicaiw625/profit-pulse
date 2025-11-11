@@ -1,0 +1,61 @@
+# Feature coverage matrix
+
+本文将当前仓库的功能实现与最初的“Shopify 利润分析与对账”功能清单（核心 / 进阶 / 高级）进行对照，按模块列出已建成的能力、参考位置，以及还需补充的重点项。
+
+## 1. 账户与店铺管理
+- 🚩 Shopify OAuth 安装、计费：通过 `@shopify/shopify-app-react-router` 的认证+计费配置完成，主配置在 `app/shopify.server.js:1` 和 `app/config/billing.js:1`。
+- 🚩 多商店关联、默认计划：`ensureMerchantAndStore` 在首次安装时创建 `MerchantAccount` 与 `Store`（`app/models/store.server.js:8`），自带 Basic plan 限额。
+- ⭐ 团队成员邀请与权限：`app/routes/app.settings.jsx:45` 定义角色/意图权限，`team.server.js:1` 提供邀请、更新、删除接口，Settings 页面在 `app/routes/app.settings.jsx:1451` 展示成员表与操作按钮。
+- ⭐ 角色访问控制：`app/routes/app.settings.jsx:73` 在后端处理 `ensureRoleForIntent` 并在 UI 层通过 `canPerformIntent`/`permissionDescription` 控制按钮信息。
+
+## 2. 订阅与计费
+- 🚩 Basic/Pro plan、订单与店铺额度：`app/config/billing.js:1` 定义两档计划与 `plan-limits.server.js:1` 计算用量、限制告警，`app/services/billing.server.js:1` 同步 Shopify 的订阅信息并允许计划变更。
+- ⭐ 增值体验（trial、超额提示）已基础支持：`billing.server.js:1` 处理 trialDays、`app/routes/app.settings.jsx:642` 显示限额警告，并在 `plan-limits.server.js:1` 抛出 `PlanLimitError`（用于 `app/services/profit-engine.server.js:1`）以阻止订单超额。
+
+## 3. 数据源集成
+- 🚩 Shopify 订单/退款：`app/routes/webhooks.orders.create.jsx:1` 和 `app/routes/webhooks.orders.updated.jsx:1` 接受 webhook，将 payload 交给 `processShopifyOrder`；退款 webhook 触发 `syncOrderById`（`app/routes/webhooks.refunds.create.jsx:1`）。
+- 🚩 增量同步 & 手动拉取：`app/services/sync/shopify-orders.server.js:1` 提供手动同步 API，`app/routes/app.settings.jsx:700` 按钮触发 `sync-orders` 意图。
+- 🚩 广告平台 Meta/Google：`app/services/connectors/meta-ads.server.js:1` 和 `google-ads.server.js:1` 拉取 spend/conversion，`syncAdProvider` 在 `app/services/sync/ad-spend.server.js:1` 写入 `AdSpendRecord` 并累计到 `dailyMetric`。
+- 🚩 支付与手续费：`app/services/sync/payment-payouts.server.js:1` 同步 Shopify Payments，`app/services/imports/paypal-fees.server.js:1` 支持 PayPal CSV；`app/services/notifications.server.js:1` 支持 Slack 通知提醒。
+- ⭐ 集成状态与凭证管理：`app/services/credentials.server.js:1` 和 `app/services/integrations.server.js:1` 汇总已连接的广告/支付来源与上次同步时间。
+
+## 4. 成本配置
+- 🚩 SKU 级成本 + 模板：`app/services/costs.server.js:6` 查看/更新 SKU 成本，`seedDemoCostConfiguration` 生成示例模板，`importSkuCostsFromCsv` 支持批量导入（`app/routes/app.settings.jsx:300` 提供上传入口）。
+- 🚩 可变成本模板：`processShopifyOrder` 在 `app/services/profit-engine.server.js:1` 调用 `getVariableCostTemplates`，按渠道/支付方式加成，并用 `orderCost` 记录（`app/services/profit-engine.server.js:130`）。
+- ⭐ 固定成本：`app/services/fixed-costs.server.js:1` 提供 CRUD 和区间分摊，`app/services/dashboard.server.js:1`、`reports.server.js:1` 在汇总卡中使用 `getFixedCostTotal`。
+
+## 5. 利润计算引擎
+- 🚩 实时订单分析：`processShopifyOrder` 聚合 revenue/COGS/fees/ad spend/退款，生成 `dailyMetric` 聚合（`app/services/profit-engine.server.js:1`）。
+- 🚩 退款分配与 SKU 处理：`syncRefundRecords` 保存退款明细并在 `dailyMetric` 中按 SKU 分摊（`app/services/profit-engine.server.js:200`）。
+- ⭐ 货币转换：`exchange-rates.server.js:1` 提供汇率刷新与查询，Dashboard/Reports 按主币种转换。
+
+## 6. 报表与仪表盘
+- 🚩 仪表盘概览：`app/routes/app._index.jsx:1` 调用 `getDashboardOverview`（`app/services/dashboard.server.js:1`）渲染 KPI 卡片、趋势线与成本构成。
+- 🚩 多维报表及导出：`app/routes/app.reports.jsx:1` 展示渠道/产品/广告，`app/routes/app.reports.export.$type.jsx:1` 支持 Channels/Products/Net profit/Ads CSV 输出，`app/services/reports.server.js:1` 计算 MER/NPAS/产品排行。
+- 🚩 退款分析：`app/routes/app.refunds.jsx:1` + `app/services/refunds.server.js:1` 提供退款趋势、产品/理由细分、详细导出。
+- ⭐ Dashboard alerts：`app/services/alerts.server.js:1` 每日检测净利/退款异常，并通过 Slack 告警（`app/services/notifications.server.js:1`）。
+
+## 7. 对账与异常检测
+- 🚩 Shopify vs 支付/广告对账：`app/services/reconciliation.server.js:1` 每次访问时执行差异检测并写入 `ReconciliationIssue`，`app/routes/app.reconciliation.jsx:1` 展示问题摘要与细节。
+- ⭐ 自动通知：`reconciliation.server.js:1` 在创建 issue 后调用 `sendSlackNotification`，并在 Dashboard 侧栏提醒。
+
+## 8. 自动化与通知
+- 🚩 定时报表：`app/services/report-schedules.server.js:1` 管理计划，`app/services/report-schedules-runner.server.js:1` 拉取概览并通过 `email.server.js:1` 发送摘要。
+- ⭐ 阈值告警（Slack）：`app/services/alerts.server.js:1` 检测净利/退款，`app/routes/app.settings.jsx:870` 提供 Slack 链接与测试按钮。
+- ⭐ 团队通知：`notifications.server.js:1` 可添加或删除 Slack Webhook，Settings 中提供 UI。
+- ⭐ 多通道通知：`app/services/notifications.server.js:1` 现在支持 Slack + Teams/Webhook 类型，`app/routes/app.settings.jsx:920` 可选择通道类型并管理通知渠道。
+
+## 9. 体验与帮助
+- 🚩 设置页引导与 sandbox：`app/routes/app.settings.jsx:1670` 提供“处理 demo 订单”按钮，`INTENT_LABELS`/`ROLE_PERMISSIONS` 在页面顶部就绪。
+- ⭐ 新增 Help center：`app/routes/app.help.jsx:1` 使用 `constants/helpContent.js:1`，在导航中通过 `/app/help` 暴露，解释指标与 sync 习惯。
+- ⭐ 术语解释：Dashboard/Reports 中卡片下方的说明（`app/routes/app._index.jsx:62`等）提供简要描述。
+
+## 10. 系统与合规
+- 🚩 数据建模与会话：Prisma schema 包含 `Session`、`MerchantAccount`、`Subscription`，凭证在 `credentials.server.js:1` 使用加密 JSON 存储。
+- ⭐ 安全/日志：暂未实现明确的访问日志或导出审计，需要后续补齐流水线。
+- 🚩 隐私 / 使用条款页面：`app/routes/app.privacy.jsx:1` 与 `app/routes/app.terms.jsx:1` 在 Help 页面新增 `法律与合规` 区块可访问。
+
+## 待补充/下一步
+1. ⭐ 试用/免费层、超额计费：当前只能通过 `plan-limits` 抛错提醒，尚未实现试用限制 UI 或超额计费逻辑。
+2. ⭐ 广告与支付外延（TikTok/Bing/Klarna/Stripe 等）尚未接入；也缺少自定义权重的归因规则与多广告触达分配。
+3. ⭐ 高级报表构建器、会计导出（科目化）、多语言、税率模板、合规页（隐私政策）等仍在规划中。
