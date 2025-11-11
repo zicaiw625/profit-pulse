@@ -2,7 +2,7 @@
 
 client_id = "726474034671387fca78e4c9a801d0a1"
 name = "ProfitPulse"
-application_url = "https://example.com"
+application_url = "https://profit-pulse-ccmn.onrender.com"
 embedded = true
 
 [build]
