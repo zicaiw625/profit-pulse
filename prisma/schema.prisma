@@ -116,6 +116,8 @@ model MerchantAccount {
   reportSchedules ReportSchedule[]
   fixedCosts      FixedCost[]
   notificationChannels NotificationChannel[]
+  attributionRules AttributionRule[]
+  auditLogs       AuditLog[]
 }
 
 model Store {
@@ -293,7 +295,7 @@ model Order {
   processedAt         DateTime
   sourceName          String?
   customerCountry     String?
-  attribution         OrderAttribution?
+  attributions        OrderAttribution[]
   lineItems           OrderLineItem[]
   costs               OrderCost[]
   createdAt           DateTime          @default(now())
