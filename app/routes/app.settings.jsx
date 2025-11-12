@@ -823,10 +823,6 @@ export default function SettingsPage() {
     orders: settings.plan?.allowances?.orders ?? 0,
     adAccounts: settings.plan?.allowances?.adAccounts ?? 1,
   };
-  intentAccess.updateAttributionRules = canPerformIntent(
-    "update-attribution-rules",
-    currentRole,
-  );
   const primaryStore = settings.stores?.[0];
   const masterCurrency =
     settings.primaryCurrency || primaryStore?.merchantCurrency || primaryStore?.currency || "USD";
