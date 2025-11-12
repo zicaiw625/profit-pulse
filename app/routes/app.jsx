@@ -77,6 +77,27 @@ function ShopifyRequestEnhancer() {
         if (sessionToken && !url.searchParams.has("session")) {
           url.searchParams.set("session", sessionToken);
         }
+        const headers = new Headers(request.headers);
+        if (idToken && !headers.has("authorization")) {
+          headers.set("authorization", `Bearer ${idToken}`);
+        }
+
+        const patchedRequest = new Request(url.toString(), {
+          method: request.method,
+          headers,
+          body: request.body,
+          mode: request.mode,
+          credentials: request.credentials,
+          cache: request.cache,
+          redirect: request.redirect,
+          referrer: request.referrer,
+          referrerPolicy: request.referrerPolicy,
+          integrity: request.integrity,
+          keepalive: request.keepalive,
+          signal: request.signal,
+        });
+
+        return originalFetch(patchedRequest);
       }
 
       const patchedRequest = new Request(url.toString(), {
