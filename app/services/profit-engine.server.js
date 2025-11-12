@@ -147,6 +147,23 @@ export async function processShopifyOrder({ store, payload }) {
   };
 
   await prisma.$transaction(async (tx) => {
+    const existingOrder = await tx.order.findUnique({
+      where: { shopifyOrderId: orderPayload.shopifyOrderId },
+      include: {
+        lineItems: true,
+        costs: true,
+        refunds: true,
+      },
+    });
+
+    const previousSnapshot = buildSnapshotFromOrder(existingOrder);
+    if (previousSnapshot) {
+      await updateDailyMetrics(tx, previousSnapshot, {
+        direction: -1,
+        allowCreate: false,
+      });
+    }
+
     const order = await tx.order.upsert({
       where: { shopifyOrderId: orderPayload.shopifyOrderId },
       create: {
@@ -376,74 +393,52 @@ function buildOrderCostRows({
   return rows;
 }
 
-async function updateDailyMetrics(tx, payload) {
+async function updateDailyMetrics(tx, payload, options = {}) {
   const metricDate = startOfDay(payload.date);
-  const delta = {
+  const direction = options.direction ?? 1;
+  const allowCreate = options.allowCreate ?? direction > 0;
+  const totals = {
+    currency: payload.currency,
     orders: payload.orderCount,
     units: payload.units,
     revenue: payload.revenue,
+    adSpend: payload.adSpend ?? 0,
     cogs: payload.cogs,
     shippingCost: payload.shippingCost,
     paymentFees: payload.paymentFees,
-    grossProfit: payload.grossProfit,
-    netProfit: payload.netProfit,
     refundAmount: payload.refundAmount ?? 0,
     refunds: payload.refundCount ?? 0,
+    grossProfit: payload.grossProfit,
+    netProfit: payload.netProfit,
   };
 
-  // 1️⃣ 先处理 TOTAL 行：不能用 upsert，因为 productSku 为 null
-  const existingTotal = await tx.dailyMetric.findFirst({
-    where: {
+  await adjustMetricRow(
+    tx,
+    {
       storeId: payload.storeId,
       channel: "TOTAL",
       productSku: null,
       date: metricDate,
     },
-  });
+    totals,
+    { direction, allowCreate },
+  );
 
-  if (!existingTotal) {
-    await tx.dailyMetric.create({
-      data: {
+  if (payload.channel && payload.channel !== "TOTAL" && payload.channel !== "PRODUCT") {
+    await adjustMetricRow(
+      tx,
+      {
         storeId: payload.storeId,
-        channel: "TOTAL",
+        channel: payload.channel,
         productSku: null,
         date: metricDate,
-        currency: payload.currency,
-        orders: delta.orders,
-        units: delta.units,
-        revenue: delta.revenue,
-        adSpend: 0,
-        cogs: delta.cogs,
-        shippingCost: delta.shippingCost,
-        paymentFees: delta.paymentFees,
-        refundAmount: delta.refundAmount,
-        refunds: delta.refunds,
-        grossProfit: delta.grossProfit,
-        netProfit: delta.netProfit,
       },
-    });
-  } else {
-    await tx.dailyMetric.update({
-      where: { id: existingTotal.id },
-      data: {
-        orders: { increment: delta.orders },
-        units: { increment: delta.units },
-        revenue: { increment: delta.revenue },
-        cogs: { increment: delta.cogs },
-        shippingCost: { increment: delta.shippingCost },
-        paymentFees: { increment: delta.paymentFees },
-        refundAmount: { increment: delta.refundAmount },
-        refunds: { increment: delta.refunds },
-        grossProfit: { increment: delta.grossProfit },
-        netProfit: { increment: delta.netProfit },
-      },
-    });
+      totals,
+      { direction, allowCreate },
+    );
   }
 
-  await upsertChannelMetric(tx, payload, payload.channel, delta);
-
-  // 2️⃣ 再按 SKU 维度做 PRODUCT 行：这里 productSku 不为 null，可以继续用 upsert
-  for (const line of payload.lineRecords) {
+  for (const line of payload.lineRecords ?? []) {
     if (!line.sku) continue;
 
     const revenueShare =
@@ -456,67 +451,157 @@ async function updateDailyMetrics(tx, payload) {
       revenueShare,
     );
 
-    await tx.dailyMetric.upsert({
-      where: {
-        storeId_channel_productSku_date: {
-          storeId: payload.storeId,
-          channel: "PRODUCT",
-          productSku: line.sku,
-          date: metricDate,
-        },
-      },
-      create: {
-        storeId: payload.storeId,
-        channel: "PRODUCT",
-        productSku: line.sku,
-        date: metricDate,
-        currency: payload.currency,
-        orders: 1,
-        units: line.quantity,
-        revenue: line.revenue,
-        adSpend: 0,
-        cogs: line.cogs,
-        shippingCost: payload.shippingCost * revenueShare,
-        paymentFees: payload.paymentFees * revenueShare,
-        refundAmount: refundAllocation,
-        refunds: refundAllocation > 0 ? 1 : 0,
-        grossProfit: line.revenue - line.cogs,
-        netProfit:
-          line.revenue -
-          line.cogs -
-          payload.shippingCost * revenueShare -
-          payload.paymentFees * revenueShare,
-      },
-      update: {
-        orders: { increment: 1 },
-        units: { increment: line.quantity },
-        revenue: { increment: line.revenue },
-        cogs: { increment: line.cogs },
-        shippingCost: {
-          increment: payload.shippingCost * revenueShare,
-        },
-        paymentFees: {
-          increment: payload.paymentFees * revenueShare,
-        },
-        refundAmount: {
-          increment: refundAllocation,
-        },
-        refunds: {
-          increment: refundAllocation > 0 ? 1 : 0,
-        },
-        grossProfit: {
-          increment: line.revenue - line.cogs,
-        },
-        netProfit: {
-          increment:
-            line.revenue -
-            line.cogs -
-            payload.shippingCost * revenueShare -
-            payload.paymentFees * revenueShare,
-        },
+    const productValues = {
+      currency: payload.currency,
+      orders: 1,
+      units: line.quantity,
+      revenue: line.revenue,
+      adSpend: 0,
+      cogs: line.cogs,
+      shippingCost: payload.shippingCost * revenueShare,
+      paymentFees: payload.paymentFees * revenueShare,
+      refundAmount: refundAllocation,
+      refunds: refundAllocation > 0 ? 1 : 0,
+      grossProfit: line.revenue - line.cogs,
+      netProfit:
+        line.revenue -
+        line.cogs -
+        payload.shippingCost * revenueShare -
+        payload.paymentFees * revenueShare,
+    };
+
+  await adjustMetricRow(
+    tx,
+    {
+      storeId: payload.storeId,
+      channel: "PRODUCT",
+      productSku: line.sku,
+      date: metricDate,
+    },
+    productValues,
+    { direction, allowCreate },
+  );
+}
+}
+
+async function adjustMetricRow(tx, where, values, options = {}) {
+  const direction = options.direction ?? 1;
+  const allowCreate = options.allowCreate ?? direction > 0;
+  const existing = await tx.dailyMetric.findUnique({ where });
+  if (!existing) {
+    if (!allowCreate) return;
+    await tx.dailyMetric.create({
+      data: {
+        ...where,
+        ...values,
       },
     });
+    return;
   }
+
+  const applyValue = (value) => (value ?? 0) * direction;
+  const data = {};
+  const numericFields = [
+    "orders",
+    "units",
+    "revenue",
+    "adSpend",
+    "cogs",
+    "shippingCost",
+    "paymentFees",
+    "refundAmount",
+    "refunds",
+    "grossProfit",
+    "netProfit",
+  ];
+  for (const field of numericFields) {
+    if (values[field] !== undefined) {
+      data[field] = { increment: applyValue(values[field]) };
+    }
+  }
+
+  if (Object.keys(data).length === 0) {
+    return;
+  }
+
+  await tx.dailyMetric.update({
+    where: { id: existing.id },
+    data,
+  });
+}
+
+function buildSnapshotFromOrder(order) {
+  if (!order) {
+    return null;
+  }
+
+  const revenue = Number(order.total ?? 0);
+  const cogs = sumOrderCost(order.costs, CostType.COGS);
+  const shippingCost = sumOrderCost(order.costs, CostType.SHIPPING);
+  const paymentFees = sumOrderCost(order.costs, CostType.PAYMENT_FEE);
+  const platformFees = sumOrderCost(order.costs, CostType.PLATFORM_FEE);
+  const customCosts = sumOrderCost(order.costs, CostType.CUSTOM);
+  const grossProfit = revenue - cogs - shippingCost - paymentFees;
+  const netProfit = grossProfit - platformFees - customCosts;
+
+  const lineRecords = (order.lineItems ?? []).map((line) => ({
+    productId: line.productId,
+    variantId: line.variantId,
+    sku: line.sku ?? undefined,
+    title: line.title ?? "",
+    quantity: Number(line.quantity ?? 0),
+    price: Number(line.price ?? 0),
+    discount: Number(line.discount ?? 0),
+    revenue: Number(line.revenue ?? 0),
+    cogs: Number(line.cogs ?? 0),
+  }));
+
+  const refundSummary = summarizeRefundRecords(order.refunds ?? []);
+  const units = lineRecords.reduce((sum, record) => sum + (record.quantity ?? 0), 0);
+
+  return {
+    storeId: order.storeId,
+    date: order.processedAt ?? new Date(),
+    currency: order.currency ?? "USD",
+    channel: resolveOrderChannel(order.sourceName),
+    orderCount: 1,
+    units,
+    revenue,
+    cogs,
+    shippingCost,
+    paymentFees,
+    grossProfit,
+    netProfit,
+    lineRecords,
+    refundAmount: refundSummary.amount,
+    refundCount: refundSummary.count,
+    refundBySku: refundSummary.bySku,
+  };
+}
+
+function sumOrderCost(costs = [], type) {
+  if (!Array.isArray(costs)) {
+    return 0;
+  }
+  return costs.reduce((sum, cost) => {
+    if (cost.type !== type) {
+      return sum;
+    }
+    return sum + Number(cost.amount ?? 0);
+  }, 0);
+}
+
+function summarizeRefundRecords(refunds = []) {
+  const amount = refunds.reduce(
+    (sum, refund) => sum + Number(refund.amount ?? 0),
+    0,
+  );
+  const lineItems = refunds.flatMap((refund) => refund.lineItems ?? []);
+  return {
+    amount,
+    count: refunds.length,
+    bySku: summarizeRefundLineItems(lineItems),
+  };
 }
 
 function resolveBaseAmount(appliesTo, template, context) {

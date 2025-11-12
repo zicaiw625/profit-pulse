@@ -4,9 +4,9 @@ import prisma from "../db.server";
 const { ReportFrequency } = pkg;
 
 export async function listReportSchedules(merchantId) {
-  if (!merchantId) return [];
+  const where = merchantId ? { merchantId } : undefined;
   return prisma.reportSchedule.findMany({
-    where: { merchantId },
+    where,
     orderBy: [
       { frequency: "asc" },
       { createdAt: "asc" },
