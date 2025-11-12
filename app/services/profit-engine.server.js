@@ -35,26 +35,6 @@ export async function processShopifyOrder({ store, payload }) {
     throw new Error("Store record not found");
   }
 
-  try {
-    await ensureOrderCapacity({
-      merchantId: storeRecord.merchantId,
-      incomingOrders: 1,
-    });
-  } catch (error) {
-    if (
-      isPlanLimitError(error) &&
-      storeRecord?.merchantId &&
-      error.detail?.limit !== undefined
-    ) {
-      await notifyPlanOverage({
-        merchantId: storeRecord.merchantId,
-        limit: error.detail.limit,
-        usage: error.detail.usage ?? 0,
-      });
-    }
-    throw error;
-  }
-
   const orderDate = new Date(
     payload.processed_at ||
       payload.closed_at ||
@@ -146,101 +126,125 @@ export async function processShopifyOrder({ store, payload }) {
     customerCountry,
   };
 
-  await prisma.$transaction(async (tx) => {
-    const existingOrder = await tx.order.findUnique({
-      where: { shopifyOrderId: orderPayload.shopifyOrderId },
-      include: {
-        lineItems: true,
-        costs: true,
-        refunds: true,
-      },
-    });
-
-    const previousSnapshot = buildSnapshotFromOrder(existingOrder);
-    if (previousSnapshot) {
-      await updateDailyMetrics(tx, previousSnapshot, {
-        direction: -1,
-        allowCreate: false,
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const existingOrder = await tx.order.findUnique({
+        where: { shopifyOrderId: orderPayload.shopifyOrderId },
+        include: {
+          lineItems: true,
+          costs: true,
+          refunds: true,
+        },
       });
-    }
 
-    const order = await tx.order.upsert({
-      where: { shopifyOrderId: orderPayload.shopifyOrderId },
-      create: {
-        ...orderPayload,
-        lineItems: {
-          create: lineRecords,
-        },
-      },
-      update: {
-        ...orderPayload,
-        lineItems: {
-          deleteMany: {},
-          create: lineRecords,
-        },
-      },
-    });
+      const previousSnapshot = buildSnapshotFromOrder(existingOrder);
+      if (previousSnapshot) {
+        await updateDailyMetrics(tx, previousSnapshot, {
+          direction: -1,
+          allowCreate: false,
+        });
+      }
 
-    await tx.orderCost.deleteMany({ where: { orderId: order.id } });
-    await tx.orderCost.createMany({
-      data: buildOrderCostRows({
+      const isNewOrder = !existingOrder;
+      if (isNewOrder && storeRecord?.merchantId) {
+        await ensureOrderCapacity({
+          merchantId: storeRecord.merchantId,
+          incomingOrders: 1,
+          tx,
+        });
+      }
+
+      const order = await tx.order.upsert({
+        where: { shopifyOrderId: orderPayload.shopifyOrderId },
+        create: {
+          ...orderPayload,
+          lineItems: {
+            create: lineRecords,
+          },
+        },
+        update: {
+          ...orderPayload,
+          lineItems: {
+            deleteMany: {},
+            create: lineRecords,
+          },
+        },
+      });
+
+      await tx.orderCost.deleteMany({ where: { orderId: order.id } });
+      await tx.orderCost.createMany({
+        data: buildOrderCostRows({
+          orderId: order.id,
+          currency,
+          cogsTotal,
+          shippingCost,
+          paymentFees,
+          platformFees,
+          customCosts,
+        }),
+      });
+
+      const refundSummary = await syncRefundRecords(tx, {
+        storeId: store.id,
         orderId: order.id,
+        shopifyOrderId: orderPayload.shopifyOrderId,
+        refunds,
         currency,
-        cogsTotal,
+      });
+
+      await updateDailyMetrics(tx, {
+        storeId: store.id,
+        date: orderDate,
+        currency,
+        orderCount: 1,
+        units: totalUnits,
+        revenue,
+        cogs: cogsTotal,
         shippingCost,
         paymentFees,
         platformFees,
         customCosts,
-      }),
-    });
+        netProfit,
+        grossProfit,
+        lineRecords,
+        refundAmount: refundSummary.amount,
+        refundCount: refundSummary.count,
+        refundBySku: refundSummary.bySku,
+        channel: channelKey,
+      });
 
-    const refundSummary = await syncRefundRecords(tx, {
-      storeId: store.id,
-      orderId: order.id,
-      shopifyOrderId: orderPayload.shopifyOrderId,
-      refunds,
-      currency,
-    });
+      await allocateAdSpendAttributions(tx, {
+        storeId: store.id,
+        merchantId: storeRecord.merchantId,
+        orderId: order.id,
+        date: orderDate,
+        revenue,
+        currency,
+      });
 
-    await updateDailyMetrics(tx, {
-      storeId: store.id,
-      date: orderDate,
-      currency,
-      orderCount: 1,
-      units: totalUnits,
-      revenue,
-      cogs: cogsTotal,
-      shippingCost,
-      paymentFees,
-      platformFees,
-      customCosts,
-      netProfit,
-      grossProfit,
-      lineRecords,
-      refundAmount: refundSummary.amount,
-      refundCount: refundSummary.count,
-      refundBySku: refundSummary.bySku,
-      channel: channelKey,
+      return {
+        revenue,
+        grossProfit,
+        netProfit,
+        cogsTotal,
+        variableCosts,
+        refunds,
+      };
     });
-
-    await allocateAdSpendAttributions(tx, {
-      storeId: store.id,
-      merchantId: storeRecord.merchantId,
-      orderId: order.id,
-      date: orderDate,
-      revenue,
-      currency,
-    });
-  });
-
-  return {
-    revenue,
-    grossProfit,
-    netProfit,
-    cogsTotal,
-    variableCosts,
-    refunds,
-  };
+  } catch (error) {
+    if (
+      isPlanLimitError(error) &&
+      storeRecord?.merchantId &&
+      error.detail?.limit !== undefined
+    ) {
+      await notifyPlanOverage({
+        merchantId: storeRecord.merchantId,
+        limit: error.detail.limit,
+        usage: error.detail.usage ?? 0,
+      });
+    }
+    throw error;
+  }
 }
 
 export function buildDemoOrder() {
@@ -470,18 +474,18 @@ async function updateDailyMetrics(tx, payload, options = {}) {
         payload.paymentFees * revenueShare,
     };
 
-  await adjustMetricRow(
-    tx,
-    {
-      storeId: payload.storeId,
-      channel: "PRODUCT",
-      productSku: line.sku,
-      date: metricDate,
-    },
-    productValues,
-    { direction, allowCreate },
-  );
-}
+    await adjustMetricRow(
+      tx,
+      {
+        storeId: payload.storeId,
+        channel: "PRODUCT",
+        productSku: line.sku,
+        date: metricDate,
+      },
+      productValues,
+      { direction, allowCreate },
+    );
+  }
 }
 
 async function adjustMetricRow(tx, where, values, options = {}) {

@@ -193,6 +193,21 @@ model Subscription {
   updatedAt        DateTime        @updatedAt
 }
 
+model MonthlyOrderUsage {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  year       Int
+  month      Int
+  orders     Int             @default(0)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@unique([merchantId, year, month])
+  @@index([merchantId])
+  @@map("monthly_order_usage")
+}
+
 model AuditLog {
   id         String          @id @default(cuid())
   merchant   MerchantAccount @relation(fields: [merchantId], references: [id])

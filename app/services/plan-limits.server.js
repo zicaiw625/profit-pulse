@@ -13,16 +13,16 @@ export async function getPlanUsage({ merchantId }) {
     throw new Error("merchantId is required to calculate plan usage");
   }
 
-  const subscription = await prisma.subscription.findUnique({
-    where: { merchantId },
-  });
-  const planDef = getPlanDefinitionByTier(subscription?.plan);
-  const allowances = planDef?.allowances ?? DEFAULT_ALLOWANCES;
+  const { subscription, planDefinition, limit } = await getPlanLimitInfo(merchantId);
+  const allowances = planDefinition?.allowances ?? DEFAULT_ALLOWANCES;
+  const { year, month } = getCurrentMonthKey();
+  const monthlyOrderCount =
+    (await getMonthlyOrderUsage(merchantId, year, month)) ??
+    (await countOrdersForCurrentMonth(merchantId));
 
-  const [storeCount, adAccountCount, monthlyOrderCount] = await Promise.all([
+  const [storeCount, adAccountCount] = await Promise.all([
     prisma.store.count({ where: { merchantId } }),
     prisma.adAccountCredential.count({ where: { merchantId } }),
-    countOrdersForCurrentMonth(merchantId),
   ]);
 
   const usage = {
@@ -31,30 +31,67 @@ export async function getPlanUsage({ merchantId }) {
       adAccountCount,
       allowances.adAccounts ?? DEFAULT_ALLOWANCES.adAccounts,
     ),
-    orders: buildUsage(
-      monthlyOrderCount,
-      subscription?.orderLimit ?? allowances.orders,
-    ),
+    orders: buildUsage(monthlyOrderCount, limit ?? allowances.orders),
   };
 
-  return { usage, subscription, planDefinition: planDef };
+  return { usage, subscription, planDefinition };
 }
 
-export async function ensureOrderCapacity({ merchantId, incomingOrders = 1 }) {
-  const { usage } = await getPlanUsage({ merchantId });
-  const limit = usage.orders.limit;
+export async function ensureOrderCapacity({ merchantId, incomingOrders = 1, tx } = {}) {
+  if (!merchantId) {
+    throw new Error("merchantId is required to ensure order capacity");
+  }
+  const db = tx ?? prisma;
+  const { limit } = await getPlanLimitInfo(merchantId, db);
   if (!limit) return;
-  if (usage.orders.count + incomingOrders > limit) {
+
+  if (!tx) {
+    const { year, month } = getCurrentMonthKey();
+    const currentOrders =
+      (await getMonthlyOrderUsage(merchantId, year, month)) ??
+      (await countOrdersForCurrentMonth(merchantId));
+    if (currentOrders + incomingOrders > limit) {
+      throw new PlanLimitError({
+        code: "ORDER_LIMIT_REACHED",
+        message: "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
+        detail: {
+          limit,
+          usage: currentOrders,
+          incomingOrders,
+        },
+      });
+    }
+    return;
+  }
+
+  const { year, month } = getCurrentMonthKey();
+  await tx.$executeRaw`
+    INSERT INTO "monthly_order_usage"("merchantId", "year", "month", "orders")
+    VALUES (${merchantId}, ${year}, ${month}, 0)
+    ON CONFLICT ("merchantId", "year", "month") DO NOTHING
+  `;
+  const [row] = await tx.$queryRaw`
+    SELECT "orders"
+    FROM "monthly_order_usage"
+    WHERE "merchantId" = ${merchantId} AND "year" = ${year} AND "month" = ${month}
+    FOR UPDATE
+  `;
+  const currentOrders = Number(row?.orders ?? 0);
+  if (currentOrders + incomingOrders > limit) {
     throw new PlanLimitError({
       code: "ORDER_LIMIT_REACHED",
       message: "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
       detail: {
         limit,
-        usage: usage.orders.count,
+        usage: currentOrders,
         incomingOrders,
       },
     });
   }
+  await tx.monthlyOrderUsage.update({
+    where: { merchantId_year_month: { merchantId, year, month } },
+    data: { orders: { increment: incomingOrders } },
+  });
 }
 
 function buildUsage(count, limit) {
@@ -89,4 +126,30 @@ async function countOrdersForCurrentMonth(merchantId) {
       },
     },
   });
+}
+
+async function getMonthlyOrderUsage(merchantId, year, month, db = prisma) {
+  const row = await db.monthlyOrderUsage.findUnique({
+    where: { merchantId_year_month: { merchantId, year, month } },
+    select: { orders: true },
+  });
+  return row?.orders ?? null;
+}
+
+async function getPlanLimitInfo(merchantId, db = prisma) {
+  const subscription = await db.subscription.findUnique({
+    where: { merchantId },
+  });
+  const planDefinition = getPlanDefinitionByTier(subscription?.plan);
+  const allowances = planDefinition?.allowances ?? DEFAULT_ALLOWANCES;
+  const limit = subscription?.orderLimit ?? allowances.orders;
+  return { subscription, planDefinition, limit };
+}
+
+function getCurrentMonthKey() {
+  const now = new Date();
+  return {
+    year: now.getUTCFullYear(),
+    month: now.getUTCMonth() + 1,
+  };
 }
