@@ -81,7 +81,7 @@ export async function sendSlackNotification({ merchantId, text, payload }) {
 }
 
 export function listNotificationTypeOptions() {
-  return Object.entries(NOTIFICATION_CHANNEL_TYPES).map(([key, value]) => ({
+  return Object.entries(NOTIFICATION_CHANNEL_TYPES).map(([, value]) => ({
     value,
     label:
       value === NOTIFICATION_CHANNEL_TYPES.TEAMS

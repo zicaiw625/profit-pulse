@@ -1,7 +1,7 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
 import { sendSlackNotification } from "./notifications.server";
-import { startOfDay, shiftDays, formatDateKey } from "../utils/dates.server.js";
+import { shiftDays, formatDateKey } from "../utils/dates.server.js";
 import { formatCurrency } from "../utils/formatting";
 
 const { ReconciliationIssueType, IssueStatus } = pkg;

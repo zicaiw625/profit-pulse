@@ -1,9 +1,7 @@
-import pkg from "@prisma/client";
 import prisma from "../db.server";
 import { sendSlackNotification } from "./notifications.server";
 import { startOfDay, shiftDays } from "../utils/dates.server.js";
 
-const { ReportFrequency } = pkg;
 
 const DEFAULT_ROAS_THRESHOLD = 1.0;
 const NET_PROFIT_DROP_PERCENT = 0.3;
