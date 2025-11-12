@@ -145,7 +145,6 @@ const REPORT_CHANNEL_OPTIONS = [
 ];
 
 const FREE_PLAN_TIER = "FREE";
-const DAY_MS = 1000 * 60 * 60 * 24;
 const { CredentialProvider } = pkg;
 
 const NOTIFICATION_TYPE_OPTIONS = [
