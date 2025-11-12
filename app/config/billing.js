@@ -77,7 +77,7 @@ export const PLAN_DEFINITIONS = {
   },
 };
 
-const BILLABLE_PLANS = Object.values(PLAN_DEFINITIONS).filter(
+export const BILLABLE_PLANS = Object.values(PLAN_DEFINITIONS).filter(
   (plan) => plan.billingKey && plan.price > 0,
 );
 
