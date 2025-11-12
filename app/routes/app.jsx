@@ -48,6 +48,9 @@ function ShopifyRequestEnhancer() {
     const searchParams = new URLSearchParams(window.location.search);
     const host = searchParams.get("host");
     const shop = searchParams.get("shop");
+    const idToken = searchParams.get("id_token");
+    const embedded = searchParams.get("embedded");
+    const sessionToken = searchParams.get("session");
     if (!host || !shop) {
       return undefined;
     }
@@ -64,6 +67,15 @@ function ShopifyRequestEnhancer() {
         }
         if (!url.searchParams.has("host")) {
           url.searchParams.set("host", host);
+        }
+        if (idToken && !url.searchParams.has("id_token")) {
+          url.searchParams.set("id_token", idToken);
+        }
+        if (embedded && !url.searchParams.has("embedded")) {
+          url.searchParams.set("embedded", embedded);
+        }
+        if (sessionToken && !url.searchParams.has("session")) {
+          url.searchParams.set("session", sessionToken);
         }
       }
 
