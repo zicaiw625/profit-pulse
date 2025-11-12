@@ -14,6 +14,16 @@ const AD_PROVIDERS = [
     label: "Google Ads",
     requiresCredential: true,
   },
+  {
+    id: CredentialProvider.BING_ADS,
+    label: "Bing Ads",
+    requiresCredential: true,
+  },
+  {
+    id: CredentialProvider.TIKTOK_ADS,
+    label: "TikTok Ads",
+    requiresCredential: true,
+  },
 ];
 
 const PAYMENT_PROVIDERS = [
@@ -25,6 +35,16 @@ const PAYMENT_PROVIDERS = [
   {
     id: CredentialProvider.PAYPAL,
     label: "PayPal",
+    requiresCredential: false,
+  },
+  {
+    id: CredentialProvider.STRIPE,
+    label: "Stripe payouts",
+    requiresCredential: false,
+  },
+  {
+    id: CredentialProvider.KLARNA,
+    label: "Klarna payouts",
     requiresCredential: false,
   },
 ];

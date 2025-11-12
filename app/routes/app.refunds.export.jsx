@@ -4,7 +4,7 @@ import { listRefundRecords } from "../services/refunds.server";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const refunds = await listRefundRecords({ storeId: store.id, rangeDays: 60 });
 
   const headers = [

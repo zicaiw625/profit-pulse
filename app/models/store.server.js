@@ -3,9 +3,9 @@ import prisma from "../db.server";
 import { PLAN_DEFINITIONS } from "../config/billing";
 
 const { PlanTier } = pkg;
-const defaultPlan = PLAN_DEFINITIONS.BASIC;
+const defaultPlan = PLAN_DEFINITIONS.FREE;
 
-export async function ensureMerchantAndStore(shopDomain) {
+export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
   if (!shopDomain) {
     throw new Error("Shop domain missing from session");
   }
@@ -19,22 +19,37 @@ export async function ensureMerchantAndStore(shopDomain) {
     return existingStore;
   }
 
-  const merchant = await prisma.merchantAccount.create({
-    data: {
-      name: humanizeShopDomain(shopDomain),
-      ownerEmail: null,
-      primaryCurrency: "USD",
-      primaryTimezone: "UTC",
-      subscription: {
-        create: {
-          plan: defaultPlan?.tier ?? PlanTier.BASIC,
-          status: "ACTIVE",
-          orderLimit: defaultPlan?.allowances?.orders ?? 500,
-          storeLimit: defaultPlan?.allowances?.stores ?? 1,
+  let merchant = null;
+  if (ownerEmail) {
+    merchant = await prisma.merchantAccount.findFirst({
+      where: { ownerEmail },
+      include: { subscription: true },
+    });
+  }
+
+  if (!merchant) {
+    merchant = await prisma.merchantAccount.create({
+      data: {
+        name: humanizeShopDomain(shopDomain),
+        ownerEmail: ownerEmail ?? null,
+        primaryCurrency: "USD",
+        primaryTimezone: "UTC",
+        subscription: {
+          create: {
+            plan: defaultPlan?.tier ?? PlanTier.BASIC,
+            status: "ACTIVE",
+            orderLimit: defaultPlan?.allowances?.orders ?? 500,
+            storeLimit: defaultPlan?.allowances?.stores ?? 1,
+          },
         },
       },
-    },
-  });
+    });
+  } else if (!merchant.ownerEmail && ownerEmail) {
+    merchant = await prisma.merchantAccount.update({
+      where: { id: merchant.id },
+      data: { ownerEmail },
+    });
+  }
 
   return prisma.store.create({
     data: {

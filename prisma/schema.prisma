@@ -15,6 +15,7 @@ datasource db {
 
 enum PlanTier {
   BASIC
+  FREE
   PRO
 }
 
@@ -35,6 +36,9 @@ enum CredentialProvider {
   PAYPAL
   STRIPE
   SHOPIFY_PAYMENTS
+  BING_ADS
+  TIKTOK_ADS
+  KLARNA
 }
 
 enum CostType {
@@ -71,6 +75,12 @@ enum SyncJobStatus {
   RUNNING
   SUCCESS
   FAILED
+}
+
+enum AttributionRuleType {
+  FIRST_TOUCH
+  LAST_TOUCH
+  WEIGHTED
 }
 
 model Session {
@@ -153,6 +163,19 @@ model NotificationChannel {
   @@index([merchantId, type])
 }
 
+model AttributionRule {
+  id          String               @id @default(cuid())
+  merchant    MerchantAccount      @relation(fields: [merchantId], references: [id])
+  merchantId  String
+  provider    CredentialProvider
+  ruleType    AttributionRuleType  @default(LAST_TOUCH)
+  weight      Decimal              @default(1)
+  windowHours Int                  @default(24)
+  updatedAt   DateTime             @updatedAt
+
+  @@unique([merchantId, provider])
+}
+
 model Subscription {
   id               String          @id @default(cuid())
   merchant         MerchantAccount @relation(fields: [merchantId], references: [id])
@@ -166,6 +189,18 @@ model Subscription {
   storeLimit       Int             @default(1)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+model AuditLog {
+  id         String          @id @default(cuid())
+  merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
+  merchantId String
+  userEmail  String?
+  action     String
+  details    String?
+  createdAt  DateTime        @default(now())
+
+  @@index([merchantId, createdAt])
 }
 
 model TeamMember {
@@ -297,19 +332,12 @@ model OrderCost {
 model OrderAttribution {
   id               String              @id @default(cuid())
   order            Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId          String              @unique
-  provider         CredentialProvider?
-  campaignId       String?
-  campaignName     String?
-  adSetId          String?
-  adSetName        String?
-  adId             String?
-  adName           String?
-  attributionModel String?             @default("LAST_TOUCH")
-  clickTimestamp   DateTime?
-  viewTimestamp    DateTime?
-  spendAllocated   Decimal             @default(0)
+  orderId          String
+  provider         CredentialProvider
+  attributionModel AttributionRuleType  @default(LAST_TOUCH)
+  amount           Decimal             @default(0)
   currency         String              @default("USD")
+  createdAt        DateTime            @default(now())
 }
 
 model DailyMetric {

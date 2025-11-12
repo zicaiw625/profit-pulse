@@ -3,7 +3,9 @@ import prisma from "../db.server";
 import { getReportingOverview } from "./reports.server";
 import { listReportSchedules } from "./report-schedules.server";
 import { sendDigestEmail } from "./email.server";
+import { notifyWebhook, sendSlackNotification } from "./notifications.server";
 import { formatCurrency, formatPercent } from "../utils/formatting";
+import { evaluatePerformanceAlerts } from "./alert-triggers.server";
 
 const { ReportFrequency } = pkg;
 
@@ -48,10 +50,16 @@ async function executeSchedule(schedule, now) {
     rangeDays: 30,
   });
 
+  await evaluatePerformanceAlerts({
+    store,
+  });
+
   const subject = buildSubjectLine(store.shopDomain, overview, schedule);
   const body = buildDigestBody(store, overview);
-  const success = await sendDigestEmail({
-    recipients: schedule.recipients,
+  const dispatched = await deliverDigest({
+    schedule,
+    store,
+    overview,
     subject,
     body,
   });
@@ -65,9 +73,37 @@ async function executeSchedule(schedule, now) {
     },
   });
 
-  if (!success) {
+  if (!dispatched) {
     console.warn("Scheduled digest email failed for", schedule.id);
   }
+}
+
+async function deliverDigest({ schedule, store, overview, subject, body }) {
+  if (schedule.channel === "SLACK") {
+    return sendSlackNotification({
+      merchantId: schedule.merchantId,
+      text: `${subject}\n\n${body}`,
+      payload: buildSlackDigestPayload(subject, overview),
+    });
+  }
+
+  if (schedule.channel === "WEBHOOK") {
+    const webhookUrl = schedule.settings?.webhookUrl;
+    if (!webhookUrl) {
+      console.warn("Webhook schedule missing URL", schedule.id);
+      return false;
+    }
+    return notifyWebhook({
+      url: webhookUrl,
+      payload: buildWebhookPayload(store, overview, schedule, subject, body),
+    });
+  }
+
+  return sendDigestEmail({
+    recipients: schedule.recipients,
+    subject,
+    body,
+  });
 }
 
 function buildSubjectLine(shopDomain, overview, schedule) {
@@ -103,4 +139,57 @@ function buildDigestBody(store, overview) {
 function computeNextRun(basis, frequency) {
   const interval = FREQUENCY_INTERVAL_MS[frequency] ?? FREQUENCY_INTERVAL_MS[ReportFrequency.DAILY];
   return new Date(basis.getTime() + interval);
+}
+
+function buildWebhookPayload(store, overview, schedule, subject, body) {
+  return {
+    store: store.shopDomain,
+    channel: schedule.channel,
+    subject,
+    body,
+    period: overview.rangeLabel,
+    summary: overview.summaryCards.map((card) => ({
+      key: card.key,
+      label: card.label,
+      value: card.value,
+    })),
+  };
+}
+
+function buildSlackDigestPayload(subject, overview) {
+  const header = {
+    type: "header",
+    text: {
+      type: "plain_text",
+      text: subject,
+      emoji: true,
+    },
+  };
+
+  const cardBlocks = (overview.summaryCards ?? []).slice(0, 4).map((card) => ({
+    type: "section",
+    text: {
+      type: "mrkdwn",
+      text: `*${card.label}* · ${card.value?.toLocaleString?.() ?? card.value ?? "—"}`,
+    },
+  }));
+
+  const timeseriesSummary = overview.timeseries?.revenue?.length
+    ? [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Revenue trend: ${overview.timeseries.revenue
+              .slice(-3)
+              .map((point) => `${point.date}:${point.value}`)
+              .join(" | ")}`,
+          },
+        },
+      ]
+    : [];
+
+  return {
+    blocks: [header, ...cardBlocks, ...timeseriesSummary],
+  };
 }

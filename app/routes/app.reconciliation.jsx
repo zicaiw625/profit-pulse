@@ -9,7 +9,7 @@ import { formatCurrency } from "../utils/formatting";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   await runReconciliationChecks({ storeId: store.id });
   const snapshot = await getReconciliationSnapshot({
     storeId: store.id,

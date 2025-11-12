@@ -4,19 +4,22 @@
 
 ## 1. 账户与店铺管理
 - 🚩 Shopify OAuth 安装、计费：通过 `@shopify/shopify-app-react-router` 的认证+计费配置完成，主配置在 `app/shopify.server.js:1` 和 `app/config/billing.js:1`。
-- 🚩 多商店关联、默认计划：`ensureMerchantAndStore` 在首次安装时创建 `MerchantAccount` 与 `Store`（`app/models/store.server.js:8`），自带 Basic plan 限额。
+- 🚩 多商店关联、默认计划：`ensureMerchantAndStore` 在首次安装时创建 `MerchantAccount` 与 `Store`（`app/models/store.server.js:8`），自带默认计划限额；最新逻辑会复用同一 ownerEmail 的 merchant，免去了重复创建。
+- ⭐ 多店共享提示：Settings 页面增设“多店铺聚合”说明与 free tier 文案，提醒商家通过同一邮箱安装即可共享工作区（`app/routes/app.settings.jsx:1013`）。
 - ⭐ 团队成员邀请与权限：`app/routes/app.settings.jsx:45` 定义角色/意图权限，`team.server.js:1` 提供邀请、更新、删除接口，Settings 页面在 `app/routes/app.settings.jsx:1451` 展示成员表与操作按钮。
 - ⭐ 角色访问控制：`app/routes/app.settings.jsx:73` 在后端处理 `ensureRoleForIntent` 并在 UI 层通过 `canPerformIntent`/`permissionDescription` 控制按钮信息。
 
 ## 2. 订阅与计费
-- 🚩 Basic/Pro plan、订单与店铺额度：`app/config/billing.js:1` 定义两档计划与 `plan-limits.server.js:1` 计算用量、限制告警，`app/services/billing.server.js:1` 同步 Shopify 的订阅信息并允许计划变更。
-- ⭐ 增值体验（trial、超额提示）已基础支持：`billing.server.js:1` 处理 trialDays、`app/routes/app.settings.jsx:642` 显示限额警告，并在 `plan-limits.server.js:1` 抛出 `PlanLimitError`（用于 `app/services/profit-engine.server.js:1`）以阻止订单超额。
+- 🚩 免费层/Basic/Pro plan：`app/config/billing.js:1` 现在新增 FREE plan，并在 `store.server.js:8` 默认赋予免费计划；只有 Basic/Pro 在 `BILLING_CONFIG` 中有 billingKey 供 Shopify 计费（`plan-limits.server.js:1` 仍负责用量限制）。
+- ⭐ Overage 通知：当 `PlanLimitError` 触发时，`app/services/profit-engine.server.js:12` 会调用 `overages.server.js:1` 通过 Slack 提醒团队，Settings 亦会在 free tier 下展示限额提示（`app/routes/app.settings.jsx:1013`）。
 
 ## 3. 数据源集成
 - 🚩 Shopify 订单/退款：`app/routes/webhooks.orders.create.jsx:1` 和 `app/routes/webhooks.orders.updated.jsx:1` 接受 webhook，将 payload 交给 `processShopifyOrder`；退款 webhook 触发 `syncOrderById`（`app/routes/webhooks.refunds.create.jsx:1`）。
 - 🚩 增量同步 & 手动拉取：`app/services/sync/shopify-orders.server.js:1` 提供手动同步 API，`app/routes/app.settings.jsx:700` 按钮触发 `sync-orders` 意图。
 - 🚩 广告平台 Meta/Google：`app/services/connectors/meta-ads.server.js:1` 和 `google-ads.server.js:1` 拉取 spend/conversion，`syncAdProvider` 在 `app/services/sync/ad-spend.server.js:1` 写入 `AdSpendRecord` 并累计到 `dailyMetric`。
-- 🚩 支付与手续费：`app/services/sync/payment-payouts.server.js:1` 同步 Shopify Payments，`app/services/imports/paypal-fees.server.js:1` 支持 PayPal CSV；`app/services/notifications.server.js:1` 支持 Slack 通知提醒。
+- ⭐ 广告扩展准备：TikTok/Bing provider 已有真实 connector（`app/services/connectors/tiktok-ads.server.js:1`, `bing-ads.server.js:1`），只要提供访问令牌/开发者令牌，即可向对应 API 获取 Campaign/Ad Set/Ad 级 spend 与转化数据，Settings 页也继续支持凭证输入。
+- 🚩 支付与手续费：`app/services/sync/payment-payouts.server.js:1` 同步 Shopify Payments，`app/services/imports/payment-payouts.server.js:1` 支持 PayPal/Stripe CSV；`app/services/notifications.server.js:1` 支持 Slack 通知提醒。
+- ⭐ 支付扩展：`importPaymentPayoutCsv` 接收 provider 参数，可导入 Stripe 及 Klarna 结算数据，Settings 中的上传表单也包含对应选项。
 - ⭐ 集成状态与凭证管理：`app/services/credentials.server.js:1` 和 `app/services/integrations.server.js:1` 汇总已连接的广告/支付来源与上次同步时间。
 
 ## 4. 成本配置
@@ -28,6 +31,8 @@
 - 🚩 实时订单分析：`processShopifyOrder` 聚合 revenue/COGS/fees/ad spend/退款，生成 `dailyMetric` 聚合（`app/services/profit-engine.server.js:1`）。
 - 🚩 退款分配与 SKU 处理：`syncRefundRecords` 保存退款明细并在 `dailyMetric` 中按 SKU 分摊（`app/services/profit-engine.server.js:200`）。
 - ⭐ 货币转换：`exchange-rates.server.js:1` 提供汇率刷新与查询，Dashboard/Reports 按主币种转换。
+- ⭐ 归因分配：新的设置页表单允许调整各广告平台的权重与归因窗口，`profit-engine.server.js` 会根据规则把每日渠道 ad spend 分配到订单并写入 `OrderAttribution`（`app/services/attribution.server.js:1`）。
+- ⭐ 自动化告警：调度任务在发送报表前还会运行 `alert-triggers.server.js:1`，检测日净利、ROAS 变化并通过 Slack/Teams (payload 块) 通知团队（`app/services/report-schedules-runner.server.js:17`、`app/services/notifications.server.js:1`）。
 
 ## 6. 报表与仪表盘
 - 🚩 仪表盘概览：`app/routes/app._index.jsx:1` 调用 `getDashboardOverview`（`app/services/dashboard.server.js:1`）渲染 KPI 卡片、趋势线与成本构成。
@@ -49,6 +54,7 @@
 - 🚩 设置页引导与 sandbox：`app/routes/app.settings.jsx:1670` 提供“处理 demo 订单”按钮，`INTENT_LABELS`/`ROLE_PERMISSIONS` 在页面顶部就绪。
 - ⭐ 新增 Help center：`app/routes/app.help.jsx:1` 使用 `constants/helpContent.js:1`，在导航中通过 `/app/help` 暴露，解释指标与 sync 习惯。
 - ⭐ 术语解释：Dashboard/Reports 中卡片下方的说明（`app/routes/app._index.jsx:62`等）提供简要描述。
+- ⭐ 新手引导：`/app/onboarding` 页面利用轻量翻译（中英文）提供 4 步指南，并在帮助页中链接，让团队快速完成数据连接。
 
 ## 10. 系统与合规
 - 🚩 数据建模与会话：Prisma schema 包含 `Session`、`MerchantAccount`、`Subscription`，凭证在 `credentials.server.js:1` 使用加密 JSON 存储。

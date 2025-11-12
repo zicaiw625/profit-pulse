@@ -52,35 +52,31 @@ function getWebhookUrlFromChannel(channel) {
   return channel.config?.webhookUrl;
 }
 
-function buildPayload(channel, text) {
-  // 以后如果 Slack / Teams 需要不同 payload，在这里分支
-  if (channel.type === NOTIFICATION_CHANNEL_TYPES.TEAMS) {
-    return { text };
-  }
-  return { text };
-}
-
-async function sendToChannel(channel, text) {
+async function sendToChannel(channel, text, customPayload) {
   const webhookUrl = getWebhookUrlFromChannel(channel);
   if (!webhookUrl) return;
   try {
-    const payload = buildPayload(channel, text);
+    const payloadToSend = buildPayload(channel, text, customPayload);
     await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payloadToSend),
     });
   } catch (error) {
     console.error(`Failed to send ${channel.type} notification`, error);
   }
 }
 
-export async function sendSlackNotification({ merchantId, text }) {
-  if (!merchantId || !text) return false;
+export async function sendSlackNotification({ merchantId, text, payload }) {
+  if (!merchantId || (!text && !payload)) return false;
   const channels = await listNotificationChannels(merchantId);
   if (!channels.length) return false;
 
-  await Promise.all(channels.map((channel) => sendToChannel(channel, text)));
+  await Promise.all(
+    channels.map((channel) =>
+      sendToChannel(channel, text, payload),
+    ),
+  );
   return true;
 }
 
@@ -95,3 +91,28 @@ export function listNotificationTypeOptions() {
 }
 
 export { NOTIFICATION_CHANNEL_TYPES };
+
+function buildPayload(channel, text, customPayload) {
+  if (customPayload) {
+    return customPayload;
+  }
+  if (channel.type === NOTIFICATION_CHANNEL_TYPES.TEAMS) {
+    return { text };
+  }
+  return { text };
+}
+
+export async function notifyWebhook({ url, payload }) {
+  if (!url) return false;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {}),
+    });
+    return true;
+  } catch (error) {
+    console.error("Failed to notify webhook", error);
+    return false;
+  }
+}

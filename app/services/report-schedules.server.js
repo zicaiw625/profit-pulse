@@ -24,25 +24,32 @@ export async function createReportSchedule({
   if (!merchantId) {
     throw new Error("merchantId is required to create a report schedule");
   }
-  if (!recipients || !recipients.trim()) {
-    throw new Error("At least one recipient is required");
-  }
 
-  const normalizedRecipients = recipients
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .join(",");
+  const normalizedChannel = (channel ?? "EMAIL").toUpperCase();
+  let normalizedRecipients = "";
 
-  if (!normalizedRecipients) {
-    throw new Error("Invalid recipient list");
+  if (normalizedChannel === "EMAIL") {
+    if (!recipients || !recipients.trim()) {
+      throw new Error("At least one recipient is required");
+    }
+    normalizedRecipients = recipients
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join(",");
+
+    if (!normalizedRecipients) {
+      throw new Error("Invalid recipient list");
+    }
+  } else {
+    normalizedRecipients = recipients?.toString().trim() ?? "";
   }
 
   return prisma.reportSchedule.create({
     data: {
       merchantId,
       frequency,
-      channel,
+      channel: normalizedChannel,
       recipients: normalizedRecipients,
       settings: settings ?? {},
     },

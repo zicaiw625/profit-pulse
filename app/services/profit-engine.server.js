@@ -5,9 +5,18 @@ import {
   getVariableCostTemplates,
 } from "./costs.server";
 import { ensureOrderCapacity } from "./plan-limits.server";
+import { notifyPlanOverage } from "./overages.server";
+import { isPlanLimitError } from "../errors/plan-limit-error";
+import { getAttributionRules } from "./attribution.server";
 import { startOfDay } from "../utils/dates.server.js";
 
-const { CostType } = pkg;
+const { CostType, CredentialProvider } = pkg;
+const ATTRIBUTION_CHANNELS = [
+  CredentialProvider.META_ADS,
+  CredentialProvider.GOOGLE_ADS,
+  CredentialProvider.BING_ADS,
+  CredentialProvider.TIKTOK_ADS,
+];
 
 export async function processShopifyOrder({ store, payload }) {
   if (!store?.id) {
@@ -26,10 +35,25 @@ export async function processShopifyOrder({ store, payload }) {
     throw new Error("Store record not found");
   }
 
-  await ensureOrderCapacity({
-    merchantId: storeRecord.merchantId,
-    incomingOrders: 1,
-  });
+  try {
+    await ensureOrderCapacity({
+      merchantId: storeRecord.merchantId,
+      incomingOrders: 1,
+    });
+  } catch (error) {
+    if (
+      isPlanLimitError(error) &&
+      storeRecord?.merchantId &&
+      error.detail?.limit !== undefined
+    ) {
+      await notifyPlanOverage({
+        merchantId: storeRecord.merchantId,
+        limit: error.detail.limit,
+        usage: error.detail.usage ?? 0,
+      });
+    }
+    throw error;
+  }
 
   const orderDate = new Date(
     payload.processed_at ||
@@ -51,6 +75,7 @@ export async function processShopifyOrder({ store, payload }) {
   );
   const total = toNumber(payload.current_total_price ?? payload.total_price ?? 0);
   const sourceName = payload.source_name ?? "online";
+  const channelKey = resolveOrderChannel(sourceName);
   const customerCountry =
     payload.customer?.default_address?.country_code ?? undefined;
   const paymentGateway = payload.gateway ?? payload.payment_gateway_names?.[0];
@@ -90,7 +115,7 @@ export async function processShopifyOrder({ store, payload }) {
     subtotal,
     shippingRevenue,
     paymentGateway,
-    channel: sourceName,
+    channel: channelKey,
   });
 
   const refunds = extractRefunds(payload, currency);
@@ -178,6 +203,16 @@ export async function processShopifyOrder({ store, payload }) {
       refundAmount: refundSummary.amount,
       refundCount: refundSummary.count,
       refundBySku: refundSummary.bySku,
+      channel: channelKey,
+    });
+
+    await allocateAdSpendAttributions(tx, {
+      storeId: store.id,
+      merchantId: storeRecord.merchantId,
+      orderId: order.id,
+      date: orderDate,
+      revenue,
+      currency,
     });
   });
 
@@ -404,6 +439,8 @@ async function updateDailyMetrics(tx, payload) {
       },
     });
   }
+
+  await upsertChannelMetric(tx, payload, payload.channel, delta);
 
   // 2️⃣ 再按 SKU 维度做 PRODUCT 行：这里 productSku 不为 null，可以继续用 upsert
   for (const line of payload.lineRecords) {
@@ -634,4 +671,142 @@ function resolveRefundForLine(sku, refundBySku, totalRefundAmount, revenueShare)
     return 0;
   }
   return totalRefundAmount * revenueShare;
+}
+
+const ORDER_CHANNEL_OVERRIDES = [
+  { pattern: /(facebook|meta|instagram)/i, channel: "META_ADS" },
+  { pattern: /(google|adwords|youtube)/i, channel: "GOOGLE_ADS" },
+  { pattern: /pos/i, channel: "POS" },
+];
+
+async function upsertChannelMetric(tx, payload, channel, delta) {
+  if (!channel || channel === "TOTAL" || channel === "PRODUCT") return;
+  const metricDate = startOfDay(payload.date);
+  await tx.dailyMetric.upsert({
+    where: {
+      storeId_channel_productSku_date: {
+        storeId: payload.storeId,
+        channel,
+        productSku: null,
+        date: metricDate,
+      },
+    },
+    create: {
+      storeId: payload.storeId,
+      channel,
+      productSku: null,
+      date: metricDate,
+      currency: payload.currency,
+      orders: delta.orders,
+      units: delta.units,
+      revenue: delta.revenue,
+      adSpend: 0,
+      cogs: delta.cogs,
+      shippingCost: delta.shippingCost,
+      paymentFees: delta.paymentFees,
+      refundAmount: delta.refundAmount,
+      refunds: delta.refunds,
+      grossProfit: delta.grossProfit,
+      netProfit: delta.netProfit,
+    },
+    update: {
+      orders: { increment: delta.orders },
+      units: { increment: delta.units },
+      revenue: { increment: delta.revenue },
+      cogs: { increment: delta.cogs },
+      shippingCost: { increment: delta.shippingCost },
+      paymentFees: { increment: delta.paymentFees },
+      refundAmount: { increment: delta.refundAmount },
+      refunds: { increment: delta.refunds },
+      grossProfit: { increment: delta.grossProfit },
+      netProfit: { increment: delta.netProfit },
+    },
+  });
+}
+
+function resolveOrderChannel(sourceName) {
+  const normalized = (sourceName ?? "online store").toString().trim();
+  if (!normalized) return "ONLINE_STORE";
+  const normalizedLower = normalized.toLowerCase();
+  for (const entry of ORDER_CHANNEL_OVERRIDES) {
+    if (entry.pattern.test(normalizedLower)) {
+      return entry.channel;
+    }
+  }
+  return normalized
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_|_$/g, "")
+    .toUpperCase() || "ONLINE_STORE";
+}
+
+async function allocateAdSpendAttributions(tx, payload) {
+  const { storeId, merchantId, orderId, date, revenue, currency } = payload;
+  if (!merchantId || !orderId || !date || !revenue) {
+    return;
+  }
+  const metricDate = startOfDay(date);
+  const totalRow = await tx.dailyMetric.findUnique({
+    where: {
+      storeId_channel_productSku_date: {
+        storeId,
+        channel: "TOTAL",
+        productSku: null,
+        date: metricDate,
+      },
+    },
+  });
+  const totalAdSpend = Number(totalRow?.adSpend || 0);
+  if (!totalRow || totalAdSpend <= 0) {
+    return;
+  }
+
+  const totalRevenue = Number(totalRow.revenue || 0);
+  if (!totalRevenue) return;
+  const orderShare = Number(revenue) / totalRevenue;
+  if (orderShare <= 0) return;
+
+  const providerRows = await tx.dailyMetric.findMany({
+    where: {
+      storeId,
+      date: metricDate,
+      productSku: null,
+      channel: { in: ATTRIBUTION_CHANNELS },
+    },
+  });
+
+  if (!providerRows.length) return;
+
+  const rules = await getAttributionRules(merchantId);
+  const ruleMap = new Map(rules.map((rule) => [rule.provider, rule]));
+
+  const attributions = providerRows
+    .map((row) => {
+      const provider = row.channel;
+      const providerSpend = Number(row.adSpend || 0);
+      if (!providerSpend) return null;
+      const baseProportion = totalAdSpend ? providerSpend / totalAdSpend : 0;
+      const rule = ruleMap.get(provider);
+      const weight = rule?.weight ?? 1;
+      const amount = totalAdSpend * baseProportion * orderShare * weight;
+      if (!amount) return null;
+      return {
+        provider,
+        amount,
+        ruleType: rule?.ruleType ?? "LAST_TOUCH",
+      };
+    })
+    .filter(Boolean);
+
+  if (!attributions.length) return;
+
+  await tx.orderAttribution.deleteMany({ where: { orderId } });
+  await tx.orderAttribution.createMany({
+    data: attributions.map((entry) => ({
+      orderId,
+      provider: entry.provider,
+      attributionModel: entry.ruleType,
+      amount: entry.amount,
+      currency,
+    })),
+  });
 }

@@ -7,7 +7,7 @@ import { formatCurrency, formatPercent } from "../utils/formatting";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const analytics = await getRefundAnalytics({ storeId: store.id, rangeDays: 30 });
   return { analytics };
 };

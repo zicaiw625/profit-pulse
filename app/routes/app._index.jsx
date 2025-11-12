@@ -8,7 +8,7 @@ import { formatCurrency, formatPercent, formatDateShort } from "../utils/formatt
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const overview = await getDashboardOverview({ store });
   return { overview };
 };

@@ -12,17 +12,19 @@ import {
   formatPercent,
   formatRatio,
 } from "../utils/formatting";
+import { getAccountingMonthlySummary } from "../services/accounting.server";
 
 const EXPORT_BUILDERS = {
   channels: buildChannelCsv,
   products: buildProductCsv,
   "net-profit": buildNetProfitCsv,
   ads: buildAdsCsv,
+  accounting: buildAccountingCsv,
 };
 
 export const loader = async ({ request, params }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const type = (params.type || "").toLowerCase();
 
   const builder = EXPORT_BUILDERS[type];
@@ -157,6 +159,40 @@ async function buildAdsCsv({ storeId }) {
   return {
     filename: `ad-performance-${dateStamp(report.range)}.csv`,
     content: buildCsv(headers, rows),
+  };
+}
+
+async function buildAccountingCsv({ storeId }) {
+  const { rows, currency, range } = await getAccountingMonthlySummary({
+    storeId,
+    months: 6,
+  });
+  const headers = [
+    "Month",
+    "Revenue",
+    "COGS",
+    "Shipping",
+    "Payment fees",
+    "Refund amount",
+    "Ad spend",
+    "Net profit",
+    "Orders",
+  ];
+  const dataRows = rows.map((row) => [
+    row.month,
+    formatDecimal(row.revenue),
+    formatDecimal(row.cogs),
+    formatDecimal(row.shippingCost),
+    formatDecimal(row.paymentFees),
+    formatDecimal(row.refundAmount),
+    formatDecimal(row.adSpend),
+    formatDecimal(row.netProfit),
+    Number(row.orders ?? 0),
+  ]);
+
+  return {
+    filename: `accounting-${dateStamp(range)}.csv`,
+    content: buildCsv(headers, dataRows),
   };
 }
 

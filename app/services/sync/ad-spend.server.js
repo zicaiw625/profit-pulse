@@ -2,6 +2,8 @@ import pkg from "@prisma/client";
 import prisma from "../../db.server";
 import { fetchMetaAdMetrics } from "../connectors/meta-ads.server";
 import { fetchGoogleAdMetrics } from "../connectors/google-ads.server";
+import { fetchTikTokAdMetrics } from "../connectors/tiktok-ads.server";
+import { fetchBingAdMetrics } from "../connectors/bing-ads.server";
 import { parseCredentialSecret } from "../credentials.server";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
 import { formatDateKey, startOfDay } from "../../utils/dates.server.js";
@@ -17,6 +19,18 @@ const CONNECTORS = {
     }),
   GOOGLE_ADS: ({ credential, secret, days }) =>
     fetchGoogleAdMetrics({
+      accountId: credential.accountId,
+      secret,
+      days,
+    }),
+  TIKTOK_ADS: ({ credential, secret, days }) =>
+    fetchTikTokAdMetrics({
+      accountId: credential.accountId,
+      secret,
+      days,
+    }),
+  BING_ADS: ({ credential, secret, days }) =>
+    fetchBingAdMetrics({
       accountId: credential.accountId,
       secret,
       days,

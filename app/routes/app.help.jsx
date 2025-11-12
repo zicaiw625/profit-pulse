@@ -25,6 +25,14 @@ export default function HelpPage() {
           ))}
         </s-unordered-list>
       </s-section>
+      <s-section heading="Start onboarding">
+        <s-text variation="subdued">
+          Use the guided walkthrough to finish connecting stores, ads, costs, and alerts.
+        </s-text>
+        <s-button variant="primary" href="/app/onboarding">
+          Open onboarding guide
+        </s-button>
+      </s-section>
 
       <s-section heading="Key metrics explained">
         <s-stack direction="block" gap="base">

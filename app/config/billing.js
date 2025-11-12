@@ -11,6 +11,26 @@ const baseFeatures = [
 ];
 
 export const PLAN_DEFINITIONS = {
+  FREE: {
+    tier: PlanTier.FREE,
+    billingKey: null,
+    name: "Free",
+    description: "Single store, limited history, perfect for evaluating the platform.",
+    price: 0,
+    currency: "USD",
+    interval: BillingInterval.Every30Days,
+    intervalLabel: "per month",
+    trialDays: 14,
+    allowances: {
+      stores: 1,
+      orders: 1000,
+      adAccounts: 1,
+    },
+    features: [
+      ...baseFeatures,
+      "Meta + Google ad connectors",
+    ],
+  },
   BASIC: {
     tier: PlanTier.BASIC,
     billingKey: "profit-pulse-basic",
@@ -57,7 +77,11 @@ export const PLAN_DEFINITIONS = {
   },
 };
 
-export const BILLING_CONFIG = Object.values(PLAN_DEFINITIONS).reduce(
+const BILLABLE_PLANS = Object.values(PLAN_DEFINITIONS).filter(
+  (plan) => plan.billingKey && plan.price > 0,
+);
+
+export const BILLING_CONFIG = BILLABLE_PLANS.reduce(
   (config, plan) => {
     config[plan.billingKey] = {
       trialDays: plan.trialDays,
@@ -99,4 +123,4 @@ export function findPlanByTier(tier) {
   return Object.values(PLAN_DEFINITIONS).find((plan) => plan.tier === tier);
 }
 
-export const DEFAULT_PLAN = PLAN_DEFINITIONS.BASIC;
+export const DEFAULT_PLAN = PLAN_DEFINITIONS.FREE;

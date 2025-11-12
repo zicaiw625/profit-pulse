@@ -13,7 +13,7 @@ import {
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const [report, adPerformance] = await Promise.all([
     getReportingOverview({ storeId: store.id, rangeDays: 30 }),
     getAdPerformanceBreakdown({ storeId: store.id, rangeDays: 30 }),
@@ -199,6 +199,11 @@ export default function ReportsPage() {
           <Form method="get" action="/app/reports/export/ads">
             <s-button type="submit" variant="secondary" fullWidth>
               Download ad performance CSV
+            </s-button>
+          </Form>
+          <Form method="get" action="/app/reports/export/accounting">
+            <s-button type="submit" variant="secondary" fullWidth>
+              Download accounting CSV
             </s-button>
           </Form>
         </s-stack>

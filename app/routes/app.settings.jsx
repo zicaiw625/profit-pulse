@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { Form, useActionData, useLoaderData, useNavigation } from "react-router";
+import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getAccountSettings } from "../services/settings.server";
@@ -36,7 +36,7 @@ import {
   sendSlackNotification,
 } from "../services/notifications.server";
 import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes";
-import { importPaypalPayoutCsv } from "../services/imports/paypal-fees.server";
+import { importPaymentPayoutCsv } from "../services/imports/payment-payouts.server";
 import { refreshExchangeRates } from "../services/exchange-rates.server";
 import {
   createReportSchedule,
@@ -47,6 +47,9 @@ import {
   formatPercent,
   formatDateShort,
 } from "../utils/formatting";
+import { upsertAttributionRule } from "../services/attribution.server";
+import { logAuditEvent } from "../services/audit.server";
+import pkg from "@prisma/client";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -60,6 +63,75 @@ const FIXED_COST_CADENCE_OPTIONS = [
   { value: "YEARLY", label: "Yearly" },
 ];
 
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+const LANGUAGE_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "zh", label: "简体中文" },
+];
+
+const LOCALIZED_TEXT = {
+  en: {
+    trialSection: "Trial & overage controls",
+    trialHeading: "Trial status",
+    trialActive: "Trial ends {date} ({days} day{plural} left).",
+    trialEligible: "Upgrade to start a {days}-day free trial.",
+    trialInactive: "No trial is currently active.",
+    planTrialEnds: "Trial ends {date}",
+    planTrialAvailable: "{days}-day trial available",
+    orderSection: "Order allowance",
+    orderUsageNote:
+      "Keep an eye on monthly allowances and upgrade if you need more capacity; trial perks apply at checkout.",
+    usageLabelOrders: "Orders",
+    daysRemainingLabel: "day{plural} remaining",
+    languageSection: "Language preference",
+    languageLabel: "Select the interface language",
+    orderWarningDangerTitle: "Order ingestion paused",
+    orderWarningWarningTitle: "Order allowance nearly reached",
+    orderWarningUsage: "{count} of {limit} monthly orders processed.",
+    overageDanger:
+      "Order ingestion has paused because the limit was reached. Upgrade to resume syncing.",
+    overageWarning: "Order usage is getting close to the configured limit.",
+    auditHeading: "Audit log",
+    auditEmpty: "No recent audit entries.",
+    auditTime: "Time",
+    auditAction: "Action",
+    auditDetails: "Details",
+    auditUser: "User",
+  },
+  zh: {
+    trialSection: "试用与额度监控",
+    trialHeading: "试用状态",
+    trialActive: "试用将于 {date} 结束，剩余 {days} 天。",
+    trialEligible: "升级后可开启 {days} 天试用。",
+    trialInactive: "当前尚未激活试用。",
+    planTrialEnds: "试用将于 {date} 结束",
+    planTrialAvailable: "可使用 {days} 天试用",
+    orderSection: "订单额度",
+    orderUsageNote:
+      "请关注每月订单使用量，超额可升级提高配额；试用权益将在结算时生效。",
+    usageLabelOrders: "订单",
+    daysRemainingLabel: "天剩余",
+    languageSection: "语言偏好",
+    languageLabel: "选择应用语言",
+    orderWarningDangerTitle: "订单同步暂停",
+    orderWarningWarningTitle: "订单额度即将耗尽",
+    orderWarningUsage: "已使用 {count} / {limit} 月订单额度。",
+    overageDanger: "订单同步因额度触顶已暂停，请升级恢复同步。",
+    overageWarning: "订单使用已接近配置的额度。",
+    auditHeading: "审计日志",
+    auditEmpty: "暂无审计记录。",
+    auditTime: "时间",
+    auditAction: "操作",
+    auditDetails: "详情",
+    auditUser: "用户",
+  },
+};
+
+function getLocalizedText(lang) {
+  return LOCALIZED_TEXT[lang] ?? LOCALIZED_TEXT.en;
+}
+
 const REPORT_FREQUENCY_OPTIONS = [
   { value: "DAILY", label: "Daily" },
   { value: "WEEKLY", label: "Weekly" },
@@ -68,7 +140,13 @@ const REPORT_FREQUENCY_OPTIONS = [
 
 const REPORT_CHANNEL_OPTIONS = [
   { value: "EMAIL", label: "Email" },
+  { value: "SLACK", label: "Slack / Teams" },
+  { value: "WEBHOOK", label: "Webhook (Zapier/Make)" },
 ];
+
+const FREE_PLAN_TIER = "FREE";
+const DAY_MS = 1000 * 60 * 60 * 24;
+const { CredentialProvider } = pkg;
 
 const NOTIFICATION_TYPE_OPTIONS = [
   { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
@@ -79,6 +157,14 @@ const NOTIFICATION_TYPE_LABELS = {
   [NOTIFICATION_CHANNEL_TYPES.SLACK]: "Slack",
   [NOTIFICATION_CHANNEL_TYPES.TEAMS]: "Microsoft Teams",
 };
+
+const ATTRIBUTION_PROVIDER_OPTIONS = [
+  { value: CredentialProvider.META_ADS, label: "Meta Ads" },
+  { value: CredentialProvider.GOOGLE_ADS, label: "Google Ads" },
+  { value: CredentialProvider.BING_ADS, label: "Bing Ads" },
+  { value: CredentialProvider.TIKTOK_ADS, label: "TikTok Ads" },
+];
+const DEFAULT_ATTRIBUTION_WINDOW = 24;
 
 const ROLE_LABELS = {
   OWNER: "Owner",
@@ -108,6 +194,7 @@ const ROLE_PERMISSIONS = {
   "delete-fixed-cost": ["OWNER", "FINANCE"],
   "create-report-schedule": ["OWNER", "FINANCE"],
   "delete-report-schedule": ["OWNER", "FINANCE"],
+  "update-attribution-rules": ["OWNER", "FINANCE"],
 };
 
 const INTENT_LABELS = {
@@ -132,6 +219,7 @@ const INTENT_LABELS = {
   "delete-fixed-cost": "Remove fixed cost",
   "create-report-schedule": "Add report schedule",
   "delete-report-schedule": "Remove report schedule",
+  "update-attribution-rules": "Update attribution rules",
 };
 
 function normalizeRole(role) {
@@ -182,7 +270,7 @@ export function permissionDescription(intent) {
 
 export const loader = async ({ request }) => {
   const { session, billing } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   await syncSubscriptionFromShopify({
     merchantId: store.merchantId,
     session,
@@ -193,12 +281,15 @@ export const loader = async ({ request }) => {
     merchantId: store.merchantId,
     email: session.email,
   });
-  return { settings, storeId: store.id, currentRole };
+  const requestedLang =
+    (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
+  const lang = ["en", "zh"].includes(requestedLang) ? requestedLang : "en";
+  return { settings, storeId: store.id, currentRole, lang };
 };
 
 export const action = async ({ request }) => {
   const { session, billing } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop);
+  const store = await ensureMerchantAndStore(session.shop, session.email);
   const formData = await request.formData();
   const intent = formData.get("intent");
   const currentRole = await resolveSessionRole({
@@ -214,6 +305,12 @@ export const action = async ({ request }) => {
     await seedDemoCostConfiguration({
       storeId: store.id,
       currency: store.currency,
+    });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "seed_demo_costs",
+      details: `Seeded demo costs for ${store.shopDomain}`,
     });
     return { message: "Demo COGS & cost templates updated." };
   }
@@ -238,6 +335,12 @@ export const action = async ({ request }) => {
     }
     try {
       await syncAdProvider({ store, provider });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_ads",
+        details: `Synced ad spend for ${provider}`,
+      });
       return { message: `Ad spend synced for ${provider}.` };
     } catch (error) {
       console.error(error);
@@ -282,6 +385,13 @@ export const action = async ({ request }) => {
       secret,
     });
 
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "connect_ad_credential",
+      details: `Connected ${provider} account ${accountId}`,
+    });
+
     return { message: "广告账号已连接。" };
   }
 
@@ -295,6 +405,13 @@ export const action = async ({ request }) => {
       merchantId: store.merchantId,
       storeId: store.id,
       provider,
+    });
+
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "disconnect_ad_credential",
+      details: `Disconnected ${provider}`,
     });
 
     return { message: "广告账号已断开连接。" };
@@ -316,6 +433,12 @@ export const action = async ({ request }) => {
       label,
       webhookUrl,
     });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "connect_notification",
+      details: `Added ${channelType} notification channel${label ? ` (${label})` : ""}`,
+    });
 
     return { message: "通知渠道已保存。" };
   }
@@ -326,6 +449,12 @@ export const action = async ({ request }) => {
       return { message: "缺少需要删除的通知渠道。" };
     }
     await deleteNotificationChannel({ merchantId: store.merchantId, channelId });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "delete_notification",
+      details: `Removed notification channel ${channelId}`,
+    });
     return { message: "通知渠道已删除。" };
   }
 
@@ -342,27 +471,51 @@ export const action = async ({ request }) => {
   if (intent === "refresh-exchange-rates") {
     const baseCurrency = store.merchant?.primaryCurrency ?? store.currency ?? "USD";
     await refreshExchangeRates(baseCurrency);
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "refresh_exchange_rates",
+      details: `Refreshed FX rates (${baseCurrency})`,
+    });
     return { message: "汇率已刷新。" };
   }
 
   if (intent === "import-paypal-csv") {
-    const file = formData.get("paypalCsv");
+    const provider =
+      (formData.get("paymentProvider")?.toString().trim().toUpperCase()) ?? "PAYPAL";
+    const file = formData.get("paymentCsv");
     if (!(file instanceof File)) {
-      return { message: "请上传 PayPal CSV 文件。" };
+      return { message: `请上传 ${provider} 结算 CSV 文件。` };
     }
     const content = Buffer.from(await file.arrayBuffer()).toString("utf-8");
     try {
-      const count = await importPaypalPayoutCsv({ storeId: store.id, csv: content });
-      return { message: `已导入 ${count} 条 PayPal 结算记录。` };
+      const count = await importPaymentPayoutCsv({
+        storeId: store.id,
+        provider,
+        csv: content,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "import_payment_payouts",
+        details: `Imported ${count} ${provider} payout rows`,
+      });
+      return { message: `已导入 ${count} 条 ${provider} 结算记录。` };
     } catch (error) {
       console.error(error);
-      return { message: error.message ?? "无法解析 PayPal CSV，请检查格式。" };
+      return { message: error.message ?? "无法解析结算 CSV，请检查格式。" };
     }
   }
 
   if (intent === "sync-orders") {
     try {
       const result = await syncShopifyOrders({ store, session, days: 7 });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_orders",
+        details: `Synced ${result.processed} Shopify orders`,
+      });
       return {
         message: `Synced ${result.processed} Shopify orders since ${result.processedAtMin.toISOString().slice(0, 10)}.`,
       };
@@ -378,6 +531,12 @@ export const action = async ({ request }) => {
   if (intent === "sync-payments") {
     try {
       await syncShopifyPayments({ store, session });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_payments",
+        details: "Refreshed Shopify Payments payouts",
+      });
       return { message: "Shopify Payments payouts refreshed." };
     } catch (error) {
       console.error(error);
@@ -398,6 +557,12 @@ export const action = async ({ request }) => {
         storeId: store.id,
         csv: content,
         defaultCurrency: store.currency,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "import_costs",
+        details: `Imported ${imported} SKU cost rows`,
       });
       return { message: `Imported ${imported} SKU cost rows.` };
     } catch (error) {
@@ -421,6 +586,12 @@ export const action = async ({ request }) => {
       role,
       name,
     });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "invite_team_member",
+      details: `Invited ${email} as ${role}`,
+    });
     return { message: `Invitation sent to ${email}.` };
   }
 
@@ -431,6 +602,12 @@ export const action = async ({ request }) => {
       return { message: "Member and role are required." };
     }
     await updateTeamMemberRole({ memberId, role });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "update_member_role",
+      details: `Updated member ${memberId} to ${role}`,
+    });
     return { message: "Team member updated." };
   }
 
@@ -440,6 +617,12 @@ export const action = async ({ request }) => {
       return { message: "Member id missing." };
     }
     await removeTeamMember(memberId);
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "remove_team_member",
+      details: `Removed member ${memberId}`,
+    });
     return { message: "Team member removed." };
   }
 
@@ -455,6 +638,12 @@ export const action = async ({ request }) => {
         billing,
         session,
         returnUrl,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "change_plan",
+        details: `Requested plan change to ${planTier}`,
       });
       return null;
     } catch (error) {
@@ -486,6 +675,12 @@ export const action = async ({ request }) => {
       appliesTo: "ALL",
       notes,
     });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "create_fixed_cost",
+      details: `Added fixed cost "${label}" (${amountValue} ${currency})`,
+    });
 
     return { message: "固定成本已保存。" };
   }
@@ -500,6 +695,12 @@ export const action = async ({ request }) => {
       merchantId: store.merchantId,
       fixedCostId: fixedCostId.toString(),
     });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "delete_fixed_cost",
+      details: `Removed fixed cost ${fixedCostId}`,
+    });
 
     return { message: "固定成本已移除。" };
   }
@@ -509,13 +710,25 @@ export const action = async ({ request }) => {
     const channel = formData.get("channel") ?? "EMAIL";
     const recipients = formData.get("recipients")?.toString() ?? "";
     const subjectPrefix = formData.get("subjectPrefix")?.toString().trim();
+    const webhookUrl = formData.get("webhookUrl")?.toString().trim();
     try {
       await createReportSchedule({
         merchantId: store.merchantId,
         frequency,
         channel,
         recipients,
-        settings: subjectPrefix ? { subjectPrefix } : {},
+        settings: {
+          ...(subjectPrefix ? { subjectPrefix } : {}),
+          ...(channel === "WEBHOOK" && webhookUrl
+            ? { webhookUrl }
+            : {}),
+        },
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "create_report_schedule",
+        details: `Created ${frequency} ${channel} report for ${recipients}`,
       });
       return { message: "Report schedule saved." };
     } catch (error) {
@@ -535,18 +748,86 @@ export const action = async ({ request }) => {
       merchantId: store.merchantId,
       scheduleId: scheduleId.toString(),
     });
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "delete_report_schedule",
+      details: `Deleted report schedule ${scheduleId}`,
+    });
     return { message: "Report schedule removed." };
+  }
+
+  if (intent === "update-attribution-rules") {
+    if (!store.merchantId) {
+      return { message: "无法识别商户。" };
+    }
+    try {
+      await Promise.all(
+        ATTRIBUTION_PROVIDER_OPTIONS.map((option) => {
+          const weightValue = Number(formData.get(`weight_${option.value}`));
+          const windowValue = Number(formData.get(`window_${option.value}`));
+          const weight =
+            Number.isFinite(weightValue) && weightValue > 0 ? weightValue : 1;
+          const windowHours =
+            Number.isFinite(windowValue) && windowValue > 0
+              ? windowValue
+              : DEFAULT_ATTRIBUTION_WINDOW;
+          return upsertAttributionRule({
+            merchantId: store.merchantId,
+            provider: option.value,
+            weight,
+            windowHours,
+          });
+        }),
+      );
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "update_attribution_rules",
+        details: "Updated attribution rules for connected ad providers",
+      });
+      return { message: "Attribution rules updated." };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "Unable to update attribution rules.",
+      };
+    }
   }
 
   return { message: "No action performed." };
 };
 
 export default function SettingsPage() {
-  const { settings, currentRole } = useLoaderData();
+  const { settings, currentRole, lang } = useLoaderData();
   const actionData = useActionData();
   const navigation = useNavigation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedLang = (searchParams.get("lang") ?? lang ?? "en").toLowerCase();
+  const localized = getLocalizedText(selectedLang);
+  const handleLanguageChange = (event) => {
+    const nextLang = event.target.value;
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextLang) {
+      nextParams.set("lang", nextLang);
+    } else {
+      nextParams.delete("lang");
+    }
+    setSearchParams(nextParams);
+  };
   const currentIntent = navigation.formData?.get("intent");
   const isSubmitting = navigation.state === "submitting";
+  const planTier = (settings.plan?.tier ?? "").toUpperCase();
+  const isFreeTier = planTier === FREE_PLAN_TIER;
+  const freeTierAllowances = {
+    stores: settings.plan?.allowances?.stores ?? 1,
+    orders: settings.plan?.allowances?.orders ?? 0,
+    adAccounts: settings.plan?.allowances?.adAccounts ?? 1,
+  };
+  intentAccess.updateAttributionRules = canPerformIntent(
+    "update-attribution-rules",
+    currentRole,
+  );
   const primaryStore = settings.stores?.[0];
   const masterCurrency =
     settings.primaryCurrency || primaryStore?.merchantCurrency || primaryStore?.currency || "USD";
@@ -560,9 +841,56 @@ export default function SettingsPage() {
   const targetProvider = navigation.formData?.get("provider");
   const pendingMemberId = navigation.formData?.get("memberId");
 
+  const auditLogs = settings.auditLogs ?? [];
+
   const usage = settings.planUsage;
+  const orderStatus = usage?.orders?.status;
   const orderWarning =
-    usage?.orders?.status === "warning" || usage?.orders?.status === "danger";
+    orderStatus === "warning" || orderStatus === "danger";
+  const orderWarningTitle =
+    orderStatus === "danger"
+      ? localized.orderWarningDangerTitle
+      : localized.orderWarningWarningTitle;
+  const orderWarningTone = orderStatus === "danger" ? "critical" : "warning";
+  const orderWarningMessage = usage?.orders
+    ? localized.orderWarningUsage
+        .replace("{count}", usage.orders.count.toLocaleString())
+        .replace("{limit}", usage.orders.limit.toLocaleString())
+    : "";
+  const planInfo = settings.plan ?? {};
+  const now = new Date();
+  const trialEndsAt = planInfo.trialEndsAt ? new Date(planInfo.trialEndsAt) : null;
+  const trialActive = trialEndsAt ? trialEndsAt >= now : false;
+  const trialDaysLeft = trialActive
+    ? Math.max(1, Math.ceil((trialEndsAt - now) / DAY_MS))
+    : 0;
+  const pluralSuffix = trialDaysLeft === 1 ? "" : "s";
+  const trialNote = trialActive
+    ? localized.trialActive
+        .replace("{date}", formatDateTime(trialEndsAt))
+        .replace("{days}", trialDaysLeft)
+        .replace("{plural}", pluralSuffix)
+    : planInfo.trialDays
+      ? localized.trialEligible.replace("{days}", planInfo.trialDays)
+      : localized.trialInactive;
+  const planTrialLabel = planInfo.trialEndsAt
+    ? localized.planTrialEnds.replace("{date}", formatDateTime(trialEndsAt))
+    : planInfo.trialDays
+      ? localized.planTrialAvailable.replace("{days}", planInfo.trialDays)
+      : null;
+  const trialBadgeText = trialActive
+    ? `${trialDaysLeft} ${localized.daysRemainingLabel.replace("{plural}", pluralSuffix)}`
+    : null;
+  const orderUsagePercent =
+    usage?.orders?.limit && usage.orders.limit > 0
+      ? Math.min(100, (usage.orders.count / usage.orders.limit) * 100)
+      : null;
+  const overageNote =
+    orderStatus === "danger"
+      ? localized.overageDanger
+      : orderStatus === "warning"
+        ? localized.overageWarning
+        : null;
   const shopifyData = settings.shopifyData ?? {};
   const teamMembers = settings.teamMembers ?? [];
   const integrations = settings.integrations ?? {};
@@ -604,6 +932,9 @@ export default function SettingsPage() {
   const connectingSlack = currentIntent === "connect-slack-webhook" && isSubmitting;
   const testingSlack = currentIntent === "test-slack-notification" && isSubmitting;
   const importingPaypal = currentIntent === "import-paypal-csv" && isSubmitting;
+  const attributionRules = settings.attributionRules ?? [];
+  const updatingAttributionRules =
+    currentIntent === "update-attribution-rules" && isSubmitting;
 
   const userRoleLabel = ROLE_LABELS[normalizeRole(currentRole)] ?? "Owner";
   const permissionHint = (intent) => {
@@ -632,6 +963,7 @@ export default function SettingsPage() {
     simulateOrder: canPerformIntent("simulate-order", currentRole),
     createReportSchedule: canPerformIntent("create-report-schedule", currentRole),
     deleteReportSchedule: canPerformIntent("delete-report-schedule", currentRole),
+    updateAttributionRules: canPerformIntent("update-attribution-rules", currentRole),
   };
 
   const allowedActions = Object.keys(ROLE_PERMISSIONS)
@@ -654,14 +986,9 @@ export default function SettingsPage() {
         <s-banner tone="success" title={actionData.message} />
       )}
       {orderWarning && (
-        <s-banner
-          tone={usage.orders.status === "danger" ? "critical" : "warning"}
-          title="Order allowance nearly reached"
-        >
+        <s-banner tone={orderWarningTone} title={orderWarningTitle}>
           <s-text>
-            {usage.orders.count.toLocaleString()} of{" "}
-            {usage.orders.limit.toLocaleString()} monthly orders processed. Upgrade
-            your plan to avoid paused ingestion.
+            {orderWarningMessage} Upgrade your plan to avoid paused ingestion.
           </s-text>
         </s-banner>
       )}
@@ -697,11 +1024,59 @@ export default function SettingsPage() {
                   ? formatDateTime(settings.plan.nextBillingAt)
                   : "—"}
               </s-text>
+              {planTrialLabel && (
+                <s-text variation="subdued">{planTrialLabel}</s-text>
+              )}
             </div>
             <s-stack direction="inline" gap="base">
               <s-badge tone="success">{settings.plan.limits.stores}</s-badge>
               <s-badge tone="info">{settings.plan.limits.orders}</s-badge>
             </s-stack>
+          </s-stack>
+        </s-card>
+      </s-section>
+
+      <s-section heading={localized.languageSection}>
+        <s-card padding="base">
+          <s-stack direction="inline" gap="base" align="center">
+            <s-text variation="subdued">{localized.languageLabel}</s-text>
+            <select value={selectedLang} onChange={handleLanguageChange}>
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </s-stack>
+        </s-card>
+      </s-section>
+
+      <s-section heading={localized.trialSection}>
+        <s-card padding="base">
+          <s-stack direction="block" gap="base">
+            <div>
+              <s-heading level="3">{localized.trialHeading}</s-heading>
+              <s-text variation="subdued">{trialNote}</s-text>
+              {trialActive && (
+                <s-badge tone="info">
+                  {trialBadgeText}
+                </s-badge>
+              )}
+            </div>
+            <div>
+              <s-heading level="3">{localized.orderSection}</s-heading>
+              <UsageMeter
+                label={localized.usageLabelOrders}
+                usage={usage.orders}
+                percent={orderUsagePercent}
+              />
+              {overageNote && (
+                <s-text variation="critical">{overageNote}</s-text>
+              )}
+            </div>
+            <s-text variation="subdued">
+              {localized.orderUsageNote}
+            </s-text>
           </s-stack>
         </s-card>
       </s-section>
@@ -885,8 +1260,16 @@ export default function SettingsPage() {
                         <input type="hidden" name="intent" value="import-paypal-csv" />
                         <s-stack direction="block" gap="base">
                           <label>
+                            Provider
+                            <select name="paymentProvider" defaultValue="PAYPAL">
+                              <option value="PAYPAL">PayPal</option>
+                              <option value="STRIPE">Stripe</option>
+                              <option value="KLARNA">Klarna</option>
+                            </select>
+                          </label>
+                          <label>
                             Upload CSV
-                            <input type="file" name="paypalCsv" accept=".csv" />
+                            <input type="file" name="paymentCsv" accept=".csv" />
                           </label>
                           <s-button
                             type="submit"
@@ -894,16 +1277,16 @@ export default function SettingsPage() {
                             disabled={!intentAccess.importPaypalCsv}
                             {...(importingPaypal ? { loading: true } : {})}
                           >
-                            Import PayPal CSV
+                            Import payouts CSV
                           </s-button>
-                      {!intentAccess.importPaypalCsv && (
-                        <s-text variation="subdued">
-                          {permissionHint("import-paypal-csv")}
-                        </s-text>
-                      )}
-                          </s-stack>
-                        </Form>
-                      ) : (
+                          {!intentAccess.importPaypalCsv && (
+                            <s-text variation="subdued">
+                              {permissionHint("import-paypal-csv")}
+                            </s-text>
+                          )}
+                        </s-stack>
+                      </Form>
+                    ) : (
                         <Form method="post">
                           <input type="hidden" name="intent" value="sync-payments" />
                           <input type="hidden" name="provider" value={integration.id} />
@@ -923,8 +1306,69 @@ export default function SettingsPage() {
                   </s-card>
                 );
               })}
-            </s-stack>
-          </div>
+          </s-stack>
+        </div>
+      </s-stack>
+    </s-section>
+
+      <s-section heading="Ad attribution rules">
+        <s-stack direction="block" gap="base">
+          <s-card padding="base">
+            <s-heading level="3">Custom attribution multipliers</s-heading>
+            <s-text variation="subdued">
+              微调各广告平台在利润引擎中分配广告开销的权重与归因窗口，帮助更好反映首/末触点。
+            </s-text>
+            <Form method="post">
+              <input type="hidden" name="intent" value="update-attribution-rules" />
+              <s-stack direction="block" gap="small">
+                {ATTRIBUTION_PROVIDER_OPTIONS.map((option) => {
+                  const rule =
+                    attributionRules.find((item) => item.provider === option.value) ?? {
+                      weight: 1,
+                      windowHours: DEFAULT_ATTRIBUTION_WINDOW,
+                    };
+                  return (
+                    <s-stack key={option.value} direction="inline" gap="base" align="baseline">
+                      <s-text variation="strong">{option.label}</s-text>
+                      <label>
+                        Weight
+                        <input
+                          type="number"
+                          name={`weight_${option.value}`}
+                          step="0.1"
+                          min="0"
+                          defaultValue={rule.weight ?? 1}
+                        />
+                      </label>
+                      <label>
+                        Attribution window (hrs)
+                        <input
+                          type="number"
+                          name={`window_${option.value}`}
+                          step="1"
+                          min="1"
+                          defaultValue={rule.windowHours ?? DEFAULT_ATTRIBUTION_WINDOW}
+                        />
+                      </label>
+                    </s-stack>
+                  );
+                })}
+                <s-button
+                  type="submit"
+                  variant="primary"
+                  disabled={!intentAccess.updateAttributionRules}
+                  {...(updatingAttributionRules ? { loading: true } : {})}
+                >
+                  Save attribution rules
+                </s-button>
+                {!intentAccess.updateAttributionRules && (
+                  <s-text variation="subdued">
+                    {permissionHint("update-attribution-rules")}
+                  </s-text>
+                )}
+              </s-stack>
+            </Form>
+          </s-card>
         </s-stack>
       </s-section>
       <s-section heading="Notifications">
@@ -1132,7 +1576,11 @@ export default function SettingsPage() {
                   name="recipients"
                   label="Recipients"
                   placeholder="you@example.com, finance@example.com"
-                  required
+                ></s-text-field>
+                <s-text-field
+                  name="webhookUrl"
+                  label="Webhook URL (for Webhook channel)"
+                  placeholder="https://hooks.make.com/..."
                 ></s-text-field>
                 <s-text-field
                   name="subjectPrefix"
@@ -1223,7 +1671,7 @@ export default function SettingsPage() {
                   </div>
                   {isCurrent ? (
                     <s-badge tone="success">Current plan</s-badge>
-                  ) : (
+                  ) : option.billingKey ? (
                     <Form method="post">
                       <input type="hidden" name="intent" value="change-plan" />
                       <input type="hidden" name="planTier" value={option.tier} />
@@ -1239,12 +1687,46 @@ export default function SettingsPage() {
                         <s-text variation="subdued">{permissionHint("change-plan")}</s-text>
                       )}
                     </Form>
+                  ) : (
+                    <s-text variation="subdued">
+                      Free tier 试用仅通过 Shopify 安装自动触发。
+                    </s-text>
                   )}
                 </s-stack>
               </s-card>
             );
           })}
         </s-stack>
+      </s-section>
+
+      {isFreeTier && (
+        <s-section heading="Free tier notes">
+          <s-card tone="info" padding="base">
+            <s-heading level="3">Free tier workspace</s-heading>
+            <s-text variation="subdued">
+              当前工作区处于免费层，含 {freeTierAllowances.stores} 店铺、{freeTierAllowances.orders.toLocaleString()} 订单、{freeTierAllowances.adAccounts} 个广告账号额度。要解锁更多店铺与更高订单限额，请升级到 Basic / Pro 计划。
+            </s-text>
+          </s-card>
+        </s-section>
+      )}
+
+      <s-section heading="Workspace sharing">
+        <s-card padding="base">
+          <s-heading level="3">多店铺聚合</s-heading>
+          <s-text variation="subdued">
+            通过相同 Shopify 所有者邮箱安装 Profit Pulse，可将多个店铺挂在同一个工作区（安装时使用的管理员账号即是该邮箱）。
+          </s-text>
+          <s-unordered-list>
+            {(settings.stores ?? []).map((store) => (
+              <s-list-item key={store.id}>
+                {store.shopDomain} · 状态 {store.status} · {store.currency}
+              </s-list-item>
+            ))}
+            {!settings.stores?.length && (
+              <s-list-item>尚无其他店铺安装。</s-list-item>
+            )}
+          </s-unordered-list>
+        </s-card>
       </s-section>
 
       <s-section heading="Usage & limits">
@@ -1264,6 +1746,35 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </s-data-table>
+      </s-section>
+
+      <s-section heading={localized.auditHeading}>
+        {auditLogs.length === 0 ? (
+          <s-text variation="subdued">{localized.auditEmpty}</s-text>
+        ) : (
+          <s-data-table>
+            <table>
+              <thead>
+                <tr>
+                  <th align="left">{localized.auditTime}</th>
+                  <th align="left">{localized.auditAction}</th>
+                  <th align="left">{localized.auditDetails}</th>
+                  <th align="left">{localized.auditUser}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditLogs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{new Date(log.createdAt).toLocaleString()}</td>
+                    <td>{log.action}</td>
+                    <td>{log.details ?? "—"}</td>
+                    <td>{log.userEmail ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </s-data-table>
+        )}
       </s-section>
 
       <s-section heading="Connected stores">
@@ -1665,6 +2176,54 @@ function formatDateTime(value) {
   return new Date(value).toLocaleDateString();
 }
 
+function UsageMeter({ label, usage, percent }) {
+  if (!usage) return null;
+  const limit = usage.limit ?? null;
+  const gaugePercent =
+    typeof percent === "number"
+      ? percent
+      : limit
+        ? Math.min(100, (usage.count / limit) * 100)
+        : null;
+  const meterTone =
+    usage.status === "danger"
+      ? "#dc2626"
+      : usage.status === "warning"
+        ? "#f97316"
+        : "#10b981";
+
+  return (
+    <div style={{ marginTop: "0.25rem" }}>
+      <s-text variation="subdued">
+        {label}: {usage.count.toLocaleString()}
+        {limit ? ` / ${limit.toLocaleString()} allowed` : ""}
+      </s-text>
+      {gaugePercent !== null && (
+        <div
+          style={{
+            marginTop: "0.35rem",
+            background: "#e5e7eb",
+            borderRadius: "999px",
+            height: "0.4rem",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              width: `${gaugePercent}%`,
+              background: meterTone,
+              height: "100%",
+              borderRadius: "999px",
+              transition: "width 0.3s ease",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function renderUsageRow(label, usage) {
   if (!usage) return null;
   const tone =
@@ -1770,6 +2329,60 @@ function renderAdCredentialFields(providerId) {
         ></s-text-field>
         <s-text variation="subdued">
           Provide a refreshable OAuth token with Google Ads API access and your developer token.
+        </s-text>
+      </>
+    );
+  }
+
+  if (providerId === "BING_ADS") {
+    return (
+      <>
+        <s-text-field
+          name="accountId"
+          label="Account ID"
+          placeholder="Bing account ID"
+          required
+        ></s-text-field>
+        <s-text-field
+          name="accountName"
+          label="Nickname"
+          placeholder="Bing marketing"
+        ></s-text-field>
+        <s-text-field
+          name="accessToken"
+          label="Access token / API key"
+          type="password"
+          required
+        ></s-text-field>
+        <s-text variation="subdued">
+          TikTok/Bing connectors are placeholders for future support; fill in provisional values for now.
+        </s-text>
+      </>
+    );
+  }
+
+  if (providerId === "TIKTOK_ADS") {
+    return (
+      <>
+        <s-text-field
+          name="accountId"
+          label="Ad account ID"
+          placeholder="1234567890"
+          required
+        ></s-text-field>
+        <s-text-field
+          name="accountName"
+          label="Nickname"
+          placeholder="TikTok master"
+        ></s-text-field>
+        <s-text-field
+          name="accessToken"
+          label="Access token"
+          type="password"
+          required
+        ></s-text-field>
+        <s-text variation="subdued">
+          TikTok connector is not active yet; this form captures the credentials we will use in the future.
         </s-text>
       </>
     );
