@@ -1785,7 +1785,7 @@ export default function SettingsPage() {
               </tr>
             </thead>
             <tbody>
-              {settings.stores.map((store) => (
+              {(settings.stores ?? []).map((store) => (
                 <tr key={store.id}>
                   <td>{store.shopDomain}</td>
                   <td>{store.status}</td>
@@ -1801,45 +1801,14 @@ export default function SettingsPage() {
             </tbody>
           </table>
         </s-data-table>
-        <s-section heading="Connected stores">
-          <s-data-table>
-            <table>
-              <thead>
-                <tr>
-                  <th align="left">Store domain</th>
-                  <th align="left">Status</th>
-                  <th align="left">Currency</th>
-                  <th align="left">Timezone</th>
-                  <th align="left">Installed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {connectedStores.map((store) => (
-                  <tr key={store.id}>
-                    <td>{store.shopDomain}</td>
-                    <td>{store.status}</td>
-                    <td>{store.currency}</td>
-                    <td>{store.timezone}</td>
-                    <td>
-                      {store.installedAt
-                        ? new Date(store.installedAt).toLocaleDateString()
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </s-data-table>
 
-          {/* 重要：不再在 iframe 里跳转 /auth/login，这里只给说明文案 */}
-          <s-banner tone="info">
-            <s-text>
-              To use ProfitPulse on another store, open that store&apos;s Shopify
-              admin and install the app from the Shopify App Store. Each store has
-              its own subscription and settings.
-            </s-text>
-          </s-banner>
-        </s-section>
+        <s-banner tone="info">
+          <s-text>
+            To use ProfitPulse on another store, open that store&apos;s Shopify admin
+            and install the app from the Shopify App Store. Each store has its own
+            subscription and settings.
+          </s-text>
+        </s-banner>
       </s-section>
 
       <s-section heading="SKU cost table (COGS)">
