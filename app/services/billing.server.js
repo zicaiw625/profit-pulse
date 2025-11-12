@@ -5,6 +5,7 @@ import {
   findPlanByBillingKey,
   findPlanByTier,
   DEFAULT_PLAN,
+  BILLABLE_PLANS,
 } from "../config/billing";
 
 const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
