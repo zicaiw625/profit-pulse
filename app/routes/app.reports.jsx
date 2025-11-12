@@ -1,8 +1,9 @@
 /* eslint-disable react/prop-types */
-import { Form, useLoaderData } from "react-router";
+import { Form, useLoaderData, useRouteError } from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getAdPerformanceBreakdown, getReportingOverview } from "../services/reports.server";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   formatCurrency,
   formatPercent,
@@ -243,3 +244,11 @@ function formatChannel(channel) {
   if (!channel) return "Unknown";
   return channel.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};

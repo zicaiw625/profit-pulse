@@ -2,6 +2,7 @@ import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
+import { LinkWithQuery } from "../components/LinkWithQuery";
 
 // 让所有 /app/* 子路由在进入时完成 Admin 侧认证
 export const loader = async ({ request }) => {
@@ -16,12 +17,12 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <s-app-nav>
-        <s-link href="/app">Dashboard</s-link>
-        <s-link href="/app/reports">Reports</s-link>
-        <s-link href="/app/refunds">Refunds</s-link>
-        <s-link href="/app/reconciliation">Reconciliation</s-link>
-        <s-link href="/app/settings">Settings</s-link>
-        <s-link href="/app/help">Help</s-link>
+        <LinkWithQuery to="/app">Dashboard</LinkWithQuery>
+        <LinkWithQuery to="/app/reports">Reports</LinkWithQuery>
+        <LinkWithQuery to="/app/refunds">Refunds</LinkWithQuery>
+        <LinkWithQuery to="/app/reconciliation">Reconciliation</LinkWithQuery>
+        <LinkWithQuery to="/app/settings">Settings</LinkWithQuery>
+        <LinkWithQuery to="/app/help">Help</LinkWithQuery>
       </s-app-nav>
       <Outlet />
     </AppProvider>

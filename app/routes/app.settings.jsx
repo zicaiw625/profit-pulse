@@ -1,7 +1,15 @@
 import { Buffer } from "node:buffer";
-import { Form, useActionData, useLoaderData, useNavigation, useSearchParams } from "react-router";
+import {
+  Form,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRouteError,
+  useSearchParams,
+} from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 import { getAccountSettings } from "../services/settings.server";
 import { importSkuCostsFromCsv, seedDemoCostConfiguration } from "../services/costs.server";
 import {
@@ -2413,3 +2421,11 @@ function AggregateMetricCard({
     </s-card>
   );
 }
+
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
+
+export const headers = (headersArgs) => {
+  return boundary.headers(headersArgs);
+};
