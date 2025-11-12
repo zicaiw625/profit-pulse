@@ -7,9 +7,7 @@ import {
   DEFAULT_PLAN,
 } from "../config/billing";
 
-const BILLING_PLAN_KEYS = Object.values(PLAN_DEFINITIONS).map(
-  (plan) => plan.billingKey,
-);
+const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
 
 const BILLING_TEST_MODE =
   process.env.SHOPIFY_BILLING_TEST_MODE === "true" ||
