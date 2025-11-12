@@ -117,6 +117,7 @@ model MerchantAccount {
   fixedCosts      FixedCost[]
   notificationChannels NotificationChannel[]
   attributionRules AttributionRule[]
+  monthlyOrderUsage MonthlyOrderUsage[]
   auditLogs       AuditLog[]
 }
 
