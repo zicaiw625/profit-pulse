@@ -17,6 +17,7 @@
 - 🚩 Shopify 订单/退款：`app/routes/webhooks.orders.create.jsx:1` 和 `app/routes/webhooks.orders.updated.jsx:1` 接受 webhook，将 payload 交给 `processShopifyOrder`；退款 webhook 触发 `syncOrderById`（`app/routes/webhooks.refunds.create.jsx:1`）。
 - 🚩 增量同步 & 手动拉取：`app/services/sync/shopify-orders.server.js:1` 提供手动同步 API，`app/routes/app.settings.jsx:700` 按钮触发 `sync-orders` 意图。
 - 🚩 广告平台 Meta/Google：`app/services/connectors/meta-ads.server.js:1` 和 `google-ads.server.js:1` 拉取 spend/conversion，`syncAdProvider` 在 `app/services/sync/ad-spend.server.js:1` 写入 `AdSpendRecord` 并累计到 `dailyMetric`。
+- 🚩 Amazon Ads / Snapchat Ads：新增 `app/services/connectors/amazon-ads.server.js:1` 与 `snapchat-ads.server.js:1` 连接器，和 UI/计划支持在 Settings 里登记 credential（`app/routes/app.settings.jsx:1661`）。
 - ⭐ 广告扩展准备：TikTok/Bing provider 已有真实 connector（`app/services/connectors/tiktok-ads.server.js:1`, `bing-ads.server.js:1`），只要提供访问令牌/开发者令牌，即可向对应 API 获取 Campaign/Ad Set/Ad 级 spend 与转化数据，Settings 页也继续支持凭证输入。
 - 🚩 支付与手续费：`app/services/sync/payment-payouts.server.js:1` 同步 Shopify Payments，`app/services/imports/payment-payouts.server.js:1` 支持 PayPal/Stripe CSV；`app/services/notifications.server.js:1` 支持 Slack 通知提醒。
 - ⭐ 支付扩展：`importPaymentPayoutCsv` 接收 provider 参数，可导入 Stripe 及 Klarna 结算数据，Settings 中的上传表单也包含对应选项。
@@ -32,6 +33,7 @@
 - 🚩 退款分配与 SKU 处理：`syncRefundRecords` 保存退款明细并在 `dailyMetric` 中按 SKU 分摊（`app/services/profit-engine.server.js:200`）。
 - ⭐ 货币转换：`exchange-rates.server.js:1` 提供汇率刷新与查询，Dashboard/Reports 按主币种转换。
 - ⭐ 归因分配：新的设置页表单允许调整各广告平台的权重与归因窗口，`profit-engine.server.js` 会根据规则把每日渠道 ad spend 分配到订单并写入 `OrderAttribution`（`app/services/attribution.server.js:1`）。
+- ⭐ 多触点归因：`app/services/attribution.server.js:1` 现支持每个 provider 配置首/末触点权重，利润引擎在 `app/services/profit-engine.server.js:876` 按比例平摊花费到每个触点，`app/routes/app.settings.jsx:1592` UI 显示多个触点输入。
 - ⭐ 自动化告警：调度任务在发送报表前还会运行 `alert-triggers.server.js:1`，检测日净利、ROAS 变化并通过 Slack/Teams (payload 块) 通知团队（`app/services/report-schedules-runner.server.js:17`、`app/services/notifications.server.js:1`）。
 
 ## 6. 报表与仪表盘
@@ -39,6 +41,8 @@
 - 🚩 多维报表及导出：`app/routes/app.reports.jsx:1` 展示渠道/产品/广告，`app/routes/app.reports.export.$type.jsx:1` 支持 Channels/Products/Net profit/Ads CSV 输出，`app/services/reports.server.js:1` 计算 MER/NPAS/产品排行。
 - 🚩 退款分析：`app/routes/app.refunds.jsx:1` + `app/services/refunds.server.js:1` 提供退款趋势、产品/理由细分、详细导出。
 - ⭐ Dashboard alerts：`app/services/alerts.server.js:1` 每日检测净利/退款异常，并通过 Slack 告警（`app/services/notifications.server.js:1`）。
+- ⭐ 高级报表构建器：`app/routes/app.reports.jsx:1` 新增维度/指标选择、`app/routes/app.reports.custom.jsx:1` 提供定制数据、`app/services/reports.server.js:1` 支持 channel/product/date 维度及多指标；输出可导出到 `app/routes/app.reports.export.$type.jsx:1` 的 custom CSV。
+- ⭐ 会计明细与税率模板导出：`app/routes/app.reports.export.$type.jsx:1` 新增 `accounting-detailed` 与 `tax-template` 类型，`app/services/accounting.server.js:1` 提供每日账目，`app/services/tax-rates.server.js:1` 提供模板数据。
 
 ## 7. 对账与异常检测
 - 🚩 Shopify vs 支付/广告对账：`app/services/reconciliation.server.js:1` 每次访问时执行差异检测并写入 `ReconciliationIssue`，`app/routes/app.reconciliation.jsx:1` 展示问题摘要与细节。
@@ -55,6 +59,7 @@
 - ⭐ 新增 Help center：`app/routes/app.help.jsx:1` 使用 `constants/helpContent.js:1`，在导航中通过 `/app/help` 暴露，解释指标与 sync 习惯。
 - ⭐ 术语解释：Dashboard/Reports 中卡片下方的说明（`app/routes/app._index.jsx:62`等）提供简要描述。
 - ⭐ 新手引导：`/app/onboarding` 页面利用轻量翻译（中英文）提供 4 步指南，并在帮助页中链接，让团队快速完成数据连接。
+- ⭐ 多语言支持：`app/routes/app.reports.jsx:1` 的新报表页提供中英文语言开关、`app/constants/translations.js:1` 新增报表相关文案，所有新表单/导出只需切换语言即可使用。
 
 ## 10. 系统与合规
 - 🚩 数据建模与会话：Prisma schema 包含 `Session`、`MerchantAccount`、`Subscription`，凭证在 `credentials.server.js:1` 使用加密 JSON 存储。

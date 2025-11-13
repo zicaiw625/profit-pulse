@@ -39,6 +39,8 @@ enum CredentialProvider {
   BING_ADS
   TIKTOK_ADS
   KLARNA
+  AMAZON_ADS
+  SNAPCHAT_ADS
 }
 
 enum CostType {
@@ -178,7 +180,7 @@ model AttributionRule {
   windowHours Int                  @default(24)
   updatedAt   DateTime             @updatedAt
 
-  @@unique([merchantId, provider])
+  @@unique([merchantId, provider, ruleType])
 }
 
 model Subscription {
