@@ -1098,11 +1098,16 @@ export default function SettingsPage() {
   const masterCurrency =
     settings.primaryCurrency || primaryStore?.merchantCurrency || primaryStore?.currency || "USD";
   const merchantSummary = settings.merchantSummary ?? null;
-  const aggregateRangeLabel = merchantSummary?.range
-    ? `${formatDateShort(merchantSummary.range.start)} – ${formatDateShort(
-        merchantSummary.range.end,
-      )}`
-    : "";
+  const summaryTimezone =
+    merchantSummary?.timezone || settings.primaryTimezone || primaryStore?.timezone || "UTC";
+  const aggregateRangeLabel =
+    merchantSummary?.rangeLabel ??
+    (merchantSummary?.range
+      ? `${formatDateShort(merchantSummary.range.start, summaryTimezone)} – ${formatDateShort(
+          merchantSummary.range.end,
+          summaryTimezone,
+        )}`
+      : "");
   const targetPlanTier = navigation.formData?.get("planTier");
   const targetProvider = navigation.formData?.get("provider");
   const pendingMemberId = navigation.formData?.get("memberId");

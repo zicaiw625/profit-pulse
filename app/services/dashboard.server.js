@@ -4,7 +4,12 @@ import { checkNetProfitAlert, checkRefundSpikeAlert } from "./alerts.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import { getPlanUsage } from "./plan-limits.server";
 import { getMerchantPerformanceSummary } from "./merchant-performance.server";
-import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import {
+  startOfDay,
+  shiftDays,
+  resolveTimezone,
+  formatDateKey,
+} from "../utils/dates.server.js";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE = 14;
@@ -21,11 +26,12 @@ export async function getDashboardOverview({
     throw new Error("Store record is required to load dashboard overview");
   }
 
-  const today = startOfDay(new Date());
-  const computedEnd = rangeEnd ? startOfDay(rangeEnd) : today;
+  const timezone = resolveTimezone({ store });
+  const today = startOfDay(new Date(), { timezone });
+  const computedEnd = rangeEnd ? startOfDay(rangeEnd, { timezone }) : today;
   let computedStart = rangeStart
-    ? startOfDay(rangeStart)
-    : shiftDays(computedEnd, -(rangeDays - 1));
+    ? startOfDay(rangeStart, { timezone })
+    : shiftDays(computedEnd, -(rangeDays - 1), { timezone });
   if (computedStart > computedEnd) {
     const temp = computedStart;
     computedStart = computedEnd;
@@ -39,7 +45,7 @@ export async function getDashboardOverview({
   const cacheKey = buildCacheKey(
     "dashboard",
     store.id,
-    `${computedStart.toISOString()}|${computedEnd.toISOString()}`,
+    `${timezone}|${computedStart.toISOString()}|${computedEnd.toISOString()}`,
   );
 
   return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
@@ -47,12 +53,13 @@ export async function getDashboardOverview({
       store,
       rangeDays: computedRangeDays,
       range: { start: computedStart, end: computedEnd },
+      timezone,
     }),
   );
 }
 
-async function buildDashboardOverview({ store, rangeDays, range }) {
-  const previousStart = shiftDays(range.start, -rangeDays);
+async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
+  const previousStart = shiftDays(range.start, -rangeDays, { timezone });
 
   const [currentMetrics, previousMetrics, openIssues, storeRecord] =
     await Promise.all([
@@ -81,6 +88,10 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
     ]);
 
   const merchantId = storeRecord?.merchantId ?? store.merchantId;
+  const resolvedTimezone = resolveTimezone({
+    store: storeRecord ?? store,
+    defaultTimezone: timezone,
+  });
   const storeCurrency = storeRecord?.currency ?? "USD";
   const masterCurrency =
     storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
@@ -113,6 +124,7 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
     rangeDays,
     currentMetrics,
     conversionRate,
+    resolvedTimezone,
   );
   const costBreakdown = buildCostBreakdown(
     currentMetrics,
@@ -159,7 +171,7 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
 
   return {
     shopDomain: storeRecord?.shopDomain ?? store.shopDomain,
-    rangeLabel: formatRangeLabel(range, rangeDays),
+    rangeLabel: formatRangeLabel(range, rangeDays, resolvedTimezone),
     summaryCards: summary,
     timeseries: timeSeries,
     costBreakdown,
@@ -169,6 +181,7 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
     currency: masterCurrency,
     merchantSummary,
     planStatus: buildPlanStatus(planUsageResult),
+    timezone: resolvedTimezone,
   };
 }
 
@@ -267,10 +280,16 @@ function buildSummary(
   ];
 }
 
-function buildTimeSeries(rangeStart, rangeDays, metrics, conversionRate = 1) {
+function buildTimeSeries(
+  rangeStart,
+  rangeDays,
+  metrics,
+  conversionRate = 1,
+  timezone = "UTC",
+) {
   const timeline = new Map();
   for (const metric of metrics) {
-    const key = metric.date.toISOString().slice(0, 10);
+    const key = formatDateKey(metric.date, { timezone });
     timeline.set(key, metric);
   }
 
@@ -281,8 +300,8 @@ function buildTimeSeries(rangeStart, rangeDays, metrics, conversionRate = 1) {
   };
 
   for (let i = 0; i < rangeDays; i += 1) {
-    const date = shiftDays(rangeStart, i);
-    const key = date.toISOString().slice(0, 10);
+    const date = shiftDays(rangeStart, i, { timezone });
+    const key = formatDateKey(date, { timezone });
     const metric = timeline.get(key);
     series.revenue.push({
       date: key,
@@ -405,12 +424,12 @@ function formatAmount(value) {
   return `$${Number(value).toFixed(2)}`;
 }
 
-function formatRangeLabel(range, fallbackDays) {
+function formatRangeLabel(range, fallbackDays, timezone = "UTC") {
   if (!range?.start || !range?.end) {
     return `Last ${fallbackDays} days`;
   }
-  const start = range.start.toISOString().slice(0, 10);
-  const end = range.end.toISOString().slice(0, 10);
+  const start = formatDateKey(range.start, { timezone });
+  const end = formatDateKey(range.end, { timezone });
   return `${start} – ${end}`;
 }
 

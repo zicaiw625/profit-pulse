@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import { sendSlackNotification } from "./notifications.server";
-import { startOfDay } from "../utils/dates.server.js";
+import { startOfDay, resolveTimezone } from "../utils/dates.server.js";
 
 export async function checkNetProfitAlert({ store, netProfitAfterFixed }) {
   if (!store?.merchantId || typeof netProfitAfterFixed !== "number") return;
@@ -8,8 +8,12 @@ export async function checkNetProfitAlert({ store, netProfitAfterFixed }) {
     return;
   }
 
-  const todayKey = startOfDay(new Date());
-  if (store.lastNetLossAlertAt && startOfDay(store.lastNetLossAlertAt) >= todayKey) {
+  const timezone = resolveTimezone({ store });
+  const todayKey = startOfDay(new Date(), { timezone });
+  if (
+    store.lastNetLossAlertAt &&
+    startOfDay(store.lastNetLossAlertAt, { timezone }) >= todayKey
+  ) {
     return;
   }
 
@@ -34,10 +38,11 @@ export async function checkRefundSpikeAlert({
   if (!refundCount || refundCount < 3) return;
   if (refundRate < 0.05) return;
 
-  const todayKey = startOfDay(new Date());
+  const timezone = resolveTimezone({ store });
+  const todayKey = startOfDay(new Date(), { timezone });
   if (
     store.lastRefundSpikeAlertAt &&
-    startOfDay(store.lastRefundSpikeAlertAt) >= todayKey
+    startOfDay(store.lastRefundSpikeAlertAt, { timezone }) >= todayKey
   ) {
     return;
   }
