@@ -152,6 +152,7 @@ model Store {
   refunds              RefundRecord[]
   logisticsRules       LogisticsRule[]
   taxRates             TaxRate[]
+  inventoryLevels      InventoryLevel[]
 
   @@index([merchantId])
 }
@@ -315,6 +316,11 @@ model Order {
   processedAt         DateTime
   sourceName          String?
   customerCountry     String?
+  customerId          String?
+  customerEmail       String?
+  customerName        String?
+  grossProfit         Decimal           @default(0)
+  netProfit           Decimal           @default(0)
   attributions        OrderAttribution[]
   lineItems           OrderLineItem[]
   costs               OrderCost[]
@@ -476,6 +482,23 @@ model PaymentPayout {
 
   @@unique([storeId, payoutId])
   @@index([storeId, provider, payoutDate])
+}
+
+model InventoryLevel {
+  id               String   @id @default(cuid())
+  store            Store    @relation(fields: [storeId], references: [id])
+  storeId          String
+  inventoryItemId  String
+  sku              String?
+  locationId       String?
+  quantity         Int      @default(0)
+  unitCost         Decimal?
+  costCurrency     String?  @default("USD")
+  capturedAt       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([storeId, sku])
+  @@index([storeId, inventoryItemId])
 }
 
 model RefundRecord {
