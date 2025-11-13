@@ -5,6 +5,7 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getDashboardOverview } from "../services/dashboard.server";
 import { formatCurrency, formatPercent, formatDateShort } from "../utils/formatting";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -15,6 +16,7 @@ export const loader = async ({ request }) => {
 
 export default function DashboardIndex() {
   const { overview } = useLoaderData();
+  const buildAppUrl = useAppUrlBuilder();
   const merchantSummary = overview.merchantSummary ?? null;
   const aggregateRangeLabel = merchantSummary?.range
     ? `${formatDateShort(merchantSummary.range.start)} – ${formatDateShort(
@@ -34,7 +36,7 @@ export default function DashboardIndex() {
           <s-banner tone={planWarning.tone} title={planWarning.title}>
             <s-stack direction="block" gap="tight">
               <s-text variation="subdued">{planWarning.message}</s-text>
-              <s-button variant="secondary" href="/app/settings">
+              <s-button variant="secondary" href={buildAppUrl("/app/settings")}>
                 Manage plan
               </s-button>
             </s-stack>

@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import { Form, useFetcher, useLoaderData, useRouteError, useSearchParams } from "react-router";
+import { useEffect, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getAdPerformanceBreakdown, getReportingOverview } from "../services/reports.server";
@@ -14,7 +15,7 @@ import {
  
 import { translate } from "../utils/i18n";
 import { TRANSLATION_KEYS } from "../constants/translations";
-import { useEffect, useState } from "react";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 const DIMENSION_OPTIONS = [
   { value: "channel", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL },
@@ -44,6 +45,7 @@ export const loader = async ({ request }) => {
 
 export default function ReportsPage() {
   const { report, adPerformance, lang } = useLoaderData();
+  const buildAppUrl = useAppUrlBuilder();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedLang = (searchParams.get("lang") ?? lang ?? "en").toLowerCase();
   const handleLanguageChange = (event) => {
@@ -394,32 +396,35 @@ export default function ReportsPage() {
 
       <s-section slot="aside" heading="Exports">
         <s-stack direction="block" gap="base">
-          <Form method="get" action="/app/reports/export/channels">
+          <Form method="get" action={buildAppUrl("/app/reports/export/channels")}>
             <s-button type="submit" variant="secondary" fullWidth>
               Download channel performance CSV
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/products">
+          <Form method="get" action={buildAppUrl("/app/reports/export/products")}>
             <s-button type="submit" variant="secondary" fullWidth>
               Download product profitability CSV
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/net-profit">
+          <Form method="get" action={buildAppUrl("/app/reports/export/net-profit")}>
             <s-button type="submit" variant="secondary" fullWidth>
               Download net profit vs. spend CSV
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/ads">
+          <Form method="get" action={buildAppUrl("/app/reports/export/ads")}>
             <s-button type="submit" variant="secondary" fullWidth>
               Download ad performance CSV
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/accounting">
+          <Form method="get" action={buildAppUrl("/app/reports/export/accounting")}>
             <s-button type="submit" variant="secondary" fullWidth>
               Download accounting CSV
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/accounting-detailed">
+          <Form
+            method="get"
+            action={buildAppUrl("/app/reports/export/accounting-detailed")}
+          >
             <s-button
               type="submit"
               variant="secondary"
@@ -428,7 +433,7 @@ export default function ReportsPage() {
               {translate(TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD, selectedLang)}
             </s-button>
           </Form>
-          <Form method="get" action="/app/reports/export/tax-template">
+          <Form method="get" action={buildAppUrl("/app/reports/export/tax-template")}>
             <s-button
               type="submit"
               variant="secondary"

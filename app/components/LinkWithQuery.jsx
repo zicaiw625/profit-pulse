@@ -1,9 +1,10 @@
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 export function LinkWithQuery({ to, onClick, children, ...props }) {
-  const { search } = useLocation();
+  const buildAppUrl = useAppUrlBuilder();
   const navigate = useNavigate();
-  const destination = `${to}${search || ""}`;
+  const destination = buildAppUrl(to || "") || to || "";
 
   const handleClick = (event) => {
     if (typeof onClick === "function") {

@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getRefundAnalytics } from "../services/refunds.server";
 import { formatCurrency, formatPercent } from "../utils/formatting";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -14,6 +15,7 @@ export const loader = async ({ request }) => {
 
 export default function RefundsPage() {
   const { analytics } = useLoaderData();
+  const buildAppUrl = useAppUrlBuilder();
   const { summary, timeseries, products, reasons, currency } = analytics;
 
   return (
@@ -113,7 +115,7 @@ export default function RefundsPage() {
       </s-section>
 
       <s-section slot="aside" heading="Exports">
-        <Form method="get" action="/app/refunds/export">
+        <Form method="get" action={buildAppUrl("/app/refunds/export")}>
           <s-button type="submit" variant="secondary" fullWidth>
             Download refund detail CSV
           </s-button>

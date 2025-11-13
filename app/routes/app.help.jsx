@@ -6,6 +6,7 @@ import {
   HELP_ONBOARDING_ITEMS,
   HELP_SYNC_ITEMS,
 } from "../constants/helpContent";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -13,6 +14,8 @@ export const loader = async ({ request }) => {
 };
 
 export default function HelpPage() {
+  const buildAppUrl = useAppUrlBuilder();
+
   return (
     <s-page
       heading="Help center"
@@ -29,7 +32,7 @@ export default function HelpPage() {
         <s-text variation="subdued">
           Use the guided walkthrough to finish connecting stores, ads, costs, and alerts.
         </s-text>
-        <s-button variant="primary" href="/app/onboarding">
+        <s-button variant="primary" href={buildAppUrl("/app/onboarding")}>
           Open onboarding guide
         </s-button>
       </s-section>
@@ -56,10 +59,14 @@ export default function HelpPage() {
       <s-section heading="法律与合规">
         <s-unordered-list>
           <s-list-item>
-            <s-link href="/app/privacy" target="_self">隐私政策</s-link>
+            <s-link href={buildAppUrl("/app/privacy")} target="_self">
+              隐私政策
+            </s-link>
           </s-list-item>
           <s-list-item>
-            <s-link href="/app/terms" target="_self">使用条款</s-link>
+            <s-link href={buildAppUrl("/app/terms")} target="_self">
+              使用条款
+            </s-link>
           </s-list-item>
         </s-unordered-list>
       </s-section>
