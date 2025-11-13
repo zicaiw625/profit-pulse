@@ -33,7 +33,11 @@ export async function createNotificationChannel({
         label ||
         (type === NOTIFICATION_CHANNEL_TYPES.TEAMS
           ? "Microsoft Teams"
-          : "Slack"),
+          : type === NOTIFICATION_CHANNEL_TYPES.ZAPIER
+            ? "Zapier Webhook"
+            : type === NOTIFICATION_CHANNEL_TYPES.MAKE
+              ? "Make Webhook"
+              : "Slack"),
       config: { webhookUrl },
     },
   });
@@ -81,13 +85,12 @@ export async function sendSlackNotification({ merchantId, text, payload }) {
 }
 
 export function listNotificationTypeOptions() {
-  return Object.entries(NOTIFICATION_CHANNEL_TYPES).map(([, value]) => ({
-    value,
-    label:
-      value === NOTIFICATION_CHANNEL_TYPES.TEAMS
-        ? "Microsoft Teams (Webhook)"
-        : "Slack (Webhook)",
-  }));
+  return [
+    { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
+    { value: NOTIFICATION_CHANNEL_TYPES.TEAMS, label: "Microsoft Teams (Webhook)" },
+    { value: NOTIFICATION_CHANNEL_TYPES.ZAPIER, label: "Zapier (Webhook)" },
+    { value: NOTIFICATION_CHANNEL_TYPES.MAKE, label: "Make/Integromat (Webhook)" },
+  ];
 }
 
 export { NOTIFICATION_CHANNEL_TYPES };
@@ -98,6 +101,16 @@ function buildPayload(channel, text, customPayload) {
   }
   if (channel.type === NOTIFICATION_CHANNEL_TYPES.TEAMS) {
     return { text };
+  }
+  if (
+    channel.type === NOTIFICATION_CHANNEL_TYPES.ZAPIER ||
+    channel.type === NOTIFICATION_CHANNEL_TYPES.MAKE
+  ) {
+    return {
+      type: "profit-pulse-event",
+      message: text,
+      timestamp: new Date().toISOString(),
+    };
   }
   return { text };
 }

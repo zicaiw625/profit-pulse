@@ -5,6 +5,7 @@ import { startOfDay, shiftDays } from "../utils/dates.server.js";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE_DAYS = 30;
+const DAY_MS = 1000 * 60 * 60 * 24;
 const CACHE_TTL_MS = 30 * 1000;
 
 const DIMENSION_DEFINITIONS = {
@@ -13,17 +14,30 @@ const DIMENSION_DEFINITIONS = {
     label: "Channel",
     where: { channel: { not: "PRODUCT" } },
     format: (value) => value ?? "Unassigned",
+    source: "dailyMetric",
   },
   product: {
     field: "productSku",
     label: "Product SKU",
     where: { channel: "PRODUCT", productSku: { not: null } },
     format: (value) => value ?? "Unknown SKU",
+    source: "dailyMetric",
   },
   date: {
     field: "date",
     label: "Date",
     format: (value) => (value ? value.toISOString().slice(0, 10) : "No date"),
+    source: "dailyMetric",
+  },
+  country: {
+    label: "Country / Region",
+    format: (value) => value ?? "Unknown",
+    source: "orders",
+  },
+  customer: {
+    label: "Customer",
+    format: (value) => value ?? "Guest",
+    source: "orders",
   },
 };
 
@@ -40,22 +54,30 @@ const METRIC_COLUMNS = {
 
 const DEFAULT_CUSTOM_METRICS = ["revenue", "netProfit"];
 
-export async function getReportingOverview({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
+export async function getReportingOverview({
+  storeId,
+  rangeDays = DEFAULT_RANGE_DAYS,
+  rangeStart,
+  rangeEnd,
+}) {
   if (!storeId) {
     throw new Error("storeId is required for reporting overview");
   }
 
-  const end = startOfDay(new Date());
-  const start = shiftDays(end, -rangeDays + 1);
+  const { start, end, resolvedDays } = resolveRange({
+    rangeDays,
+    rangeStart,
+    rangeEnd,
+  });
   const cacheKey = buildCacheKey(
     "reporting-overview",
     storeId,
-    start.toISOString(),
+    `${start.toISOString()}|${end.toISOString()}`,
   );
   return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
     buildReportingOverview({
       storeId,
-      rangeDays,
+      rangeDays: resolvedDays,
       range: { start, end },
     }),
   );
@@ -107,58 +129,71 @@ export async function getCustomReportData({
   const metricsToUse =
     selectedMetrics.length > 0 ? selectedMetrics : DEFAULT_CUSTOM_METRICS;
 
-  const sumSelect = metricsToUse.reduce((acc, metric) => {
-    const column = METRIC_COLUMNS[metric];
-    if (column) {
-      acc[column.field] = true;
+  let rows = [];
+  if (dimensionDef.source === "orders") {
+    rows = await buildOrderDimensionRows({
+      storeId,
+      dimension: normalizedDimension,
+      metrics: metricsToUse,
+      rangeStart,
+      rangeEnd,
+      masterCurrency,
+      limit: Math.max(1, Math.min(limit ?? 25, 200)),
+    });
+  } else {
+    const sumSelect = metricsToUse.reduce((acc, metric) => {
+      const column = METRIC_COLUMNS[metric];
+      if (column) {
+        acc[column.field] = true;
+      }
+      return acc;
+    }, {});
+    if (!sumSelect.revenue) {
+      sumSelect.revenue = true;
+      if (!metricsToUse.includes("revenue")) {
+        metricsToUse.unshift("revenue");
+      }
     }
-    return acc;
-  }, {});
-  if (!sumSelect.revenue) {
-    sumSelect.revenue = true;
-    if (!metricsToUse.includes("revenue")) {
-      metricsToUse.unshift("revenue");
-    }
-  }
 
-  const whereClause = {
-    storeId,
-    date: { gte: rangeStart, lte: rangeEnd },
-    ...dimensionDef.where,
-  };
-
-  const firstMetricField = METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
-  const groupedRows = await prisma.dailyMetric.groupBy({
-    by: [dimensionDef.field],
-    where: whereClause,
-    _sum: sumSelect,
-    orderBy: {
-      _sum: {
-        [firstMetricField]: "desc",
-      },
-    },
-    take: Math.max(1, Math.min(limit ?? 25, 200)),
-  });
-
-  const rows = groupedRows.map((row) => {
-    const value = row[dimensionDef.field];
-    return {
-      dimensionValue: dimensionDef.format(value),
-      metrics: metricsToUse.map((metric) => {
-        const column = METRIC_COLUMNS[metric];
-        const baseValue = Number(row._sum[column.field] ?? 0);
-        const normalized = column.isCurrency
-          ? baseValue * conversionRate
-          : baseValue;
-        return {
-          key: metric,
-          label: column.label,
-          value: normalized,
-          isCurrency: column.isCurrency,
-        };
-      }),
+    const whereClause = {
+      storeId,
+      date: { gte: rangeStart, lte: rangeEnd },
+      ...dimensionDef.where,
     };
-  });
+
+    const firstMetricField = METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
+    const groupedRows = await prisma.dailyMetric.groupBy({
+      by: [dimensionDef.field],
+      where: whereClause,
+      _sum: sumSelect,
+      orderBy: {
+        _sum: {
+          [firstMetricField]: "desc",
+        },
+      },
+      take: Math.max(1, Math.min(limit ?? 25, 200)),
+    });
+
+    rows = groupedRows.map((row) => {
+      const value = row[dimensionDef.field];
+      return {
+        dimensionValue: dimensionDef.format(value),
+        metrics: metricsToUse.map((metric) => {
+          const column = METRIC_COLUMNS[metric];
+          const baseValue = Number(row._sum[column.field] ?? 0);
+          const normalized = column.isCurrency
+            ? baseValue * conversionRate
+            : baseValue;
+          return {
+            key: metric,
+            label: column.label,
+            value: normalized,
+            isCurrency: column.isCurrency,
+          };
+        }),
+      };
+    });
+  }
 
   return {
     range: { start: rangeStart, end: rangeEnd },
@@ -176,6 +211,250 @@ export async function getCustomReportData({
   };
 }
 
+async function buildOrderDimensionRows({
+  storeId,
+  dimension,
+  metrics,
+  rangeStart,
+  rangeEnd,
+  masterCurrency,
+  limit = 25,
+}) {
+  const orders = await prisma.order.findMany({
+    where: {
+      storeId,
+      processedAt: { gte: rangeStart, lte: rangeEnd },
+    },
+    select: {
+      id: true,
+      total: true,
+      netProfit: true,
+      grossProfit: true,
+      currency: true,
+      customerCountry: true,
+      customerEmail: true,
+      customerName: true,
+      customerId: true,
+    },
+  });
+
+  if (!orders.length) {
+    return [];
+  }
+
+  const orderIds = orders.map((order) => order.id);
+  const [costs, refunds, attributions] = await Promise.all([
+    prisma.orderCost.findMany({
+      where: { orderId: { in: orderIds } },
+      select: {
+        orderId: true,
+        amount: true,
+        currency: true,
+        type: true,
+      },
+    }),
+    prisma.refundRecord.findMany({
+      where: { orderId: { in: orderIds } },
+      select: {
+        orderId: true,
+        amount: true,
+        currency: true,
+      },
+    }),
+    prisma.orderAttribution.findMany({
+      where: { orderId: { in: orderIds } },
+      select: {
+        orderId: true,
+        amount: true,
+        currency: true,
+      },
+    }),
+  ]);
+
+  const currencies = new Set(
+    [
+      ...orders.map((order) => order.currency ?? masterCurrency),
+      ...costs.map((cost) => cost.currency ?? masterCurrency),
+      ...refunds.map((refund) => refund.currency ?? masterCurrency),
+      ...attributions.map((attr) => attr.currency ?? masterCurrency),
+    ].filter(Boolean),
+  );
+  const rateCache = await buildRateCache(currencies, masterCurrency);
+
+  const orderMap = new Map(orders.map((order) => [order.id, order]));
+  const bucketMap = new Map();
+
+  const ensureBucket = (order) => {
+    const key = getOrderDimensionKey(order, dimension);
+    if (!key) return null;
+    if (!bucketMap.has(key)) {
+      bucketMap.set(key, {
+        key,
+        label: getOrderDimensionLabel(order, dimension, key),
+        revenue: 0,
+        netProfit: 0,
+        adSpend: 0,
+        orders: 0,
+        cogs: 0,
+        shippingCost: 0,
+        paymentFees: 0,
+        refundAmount: 0,
+      });
+    }
+    return bucketMap.get(key);
+  };
+
+  orders.forEach((order) => {
+    const bucket = ensureBucket(order);
+    if (!bucket) return;
+    bucket.orders += 1;
+    bucket.revenue += convertAmount(order.total, order.currency, rateCache);
+    bucket.netProfit += convertAmount(order.netProfit, order.currency, rateCache);
+  });
+
+  const costMap = new Map();
+  costs.forEach((cost) => {
+    const entry = costMap.get(cost.orderId) ?? {
+      COGS: 0,
+      SHIPPING: 0,
+      PAYMENT_FEE: 0,
+      PLATFORM_FEE: 0,
+      CUSTOM: 0,
+      currency: cost.currency ?? masterCurrency,
+    };
+    entry[cost.type] = (entry[cost.type] ?? 0) + Number(cost.amount ?? 0);
+    costMap.set(cost.orderId, entry);
+  });
+
+  costMap.forEach((value, orderId) => {
+    const order = orderMap.get(orderId);
+    if (!order) return;
+    const bucket = ensureBucket(order);
+    if (!bucket) return;
+    bucket.cogs += convertAmount(value.COGS, value.currency, rateCache);
+    bucket.shippingCost += convertAmount(value.SHIPPING, value.currency, rateCache);
+    bucket.paymentFees += convertAmount(value.PAYMENT_FEE, value.currency, rateCache);
+  });
+
+  refunds.forEach((refund) => {
+    const order = orderMap.get(refund.orderId);
+    if (!order) return;
+    const bucket = ensureBucket(order);
+    if (!bucket) return;
+    bucket.refundAmount += convertAmount(refund.amount, refund.currency, rateCache);
+  });
+
+  attributions.forEach((attribution) => {
+    const order = orderMap.get(attribution.orderId);
+    if (!order) return;
+    const bucket = ensureBucket(order);
+    if (!bucket) return;
+    bucket.adSpend += convertAmount(attribution.amount, attribution.currency, rateCache);
+  });
+
+  const metricRows = Array.from(bucketMap.values())
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, limit)
+    .map((bucket) => ({
+      dimensionValue: bucket.label,
+      metrics: metrics.map((metricKey) => {
+        const column = METRIC_COLUMNS[metricKey];
+        const value = resolveBucketMetric(bucket, metricKey);
+        return {
+          key: metricKey,
+          label: column.label,
+          value,
+          isCurrency: column.isCurrency,
+        };
+      }),
+    }));
+
+  return metricRows;
+}
+
+async function buildRateCache(currencies, masterCurrency) {
+  const cache = new Map();
+  for (const currency of currencies) {
+    if (!currency || cache.has(currency)) {
+      continue;
+    }
+    if (currency === masterCurrency) {
+      cache.set(currency, 1);
+      continue;
+    }
+    const rate = await getExchangeRate({
+      base: currency,
+      quote: masterCurrency,
+    });
+    cache.set(currency, rate || 1);
+  }
+  if (!cache.has(masterCurrency)) {
+    cache.set(masterCurrency, 1);
+  }
+  return cache;
+}
+
+function convertAmount(amount, currency, cache) {
+  const numeric = Number(amount ?? 0);
+  if (!numeric) return 0;
+  const rate = cache.get(currency) ?? 1;
+  return numeric * rate;
+}
+
+function getOrderDimensionKey(order, dimension) {
+  if (dimension === "country") {
+    return order.customerCountry ?? "Unknown";
+  }
+  if (dimension === "customer") {
+    return (
+      order.customerEmail ??
+      order.customerName ??
+      order.customerId ??
+      "Guest"
+    );
+  }
+  return "Unknown";
+}
+
+function getOrderDimensionLabel(order, dimension, fallback) {
+  if (dimension === "customer") {
+    return (
+      order.customerName ??
+      order.customerEmail ??
+      order.customerId ??
+      fallback ??
+      "Guest"
+    );
+  }
+  if (dimension === "country") {
+    return fallback ?? "Unknown";
+  }
+  return fallback ?? "Unknown";
+}
+
+function resolveBucketMetric(bucket, metricKey) {
+  switch (metricKey) {
+    case "revenue":
+      return bucket.revenue;
+    case "netProfit":
+      return bucket.netProfit;
+    case "adSpend":
+      return bucket.adSpend;
+    case "cogs":
+      return bucket.cogs;
+    case "shippingCost":
+      return bucket.shippingCost;
+    case "paymentFees":
+      return bucket.paymentFees;
+    case "refundAmount":
+      return bucket.refundAmount;
+    case "orders":
+      return bucket.orders;
+    default:
+      return 0;
+  }
+}
+
 async function buildReportingOverview({ storeId, rangeDays, range }) {
   const [channelRows, productRows, aggregateMetrics, storeRecord] =
     await Promise.all([
@@ -183,7 +462,7 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
         by: ["channel"],
         where: {
           storeId,
-          date: { gte: range.start },
+          date: { gte: range.start, lte: range.end },
           channel: { not: "PRODUCT" },
         },
         _sum: {
@@ -199,7 +478,7 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
           storeId,
           channel: "PRODUCT",
           productSku: { not: null },
-          date: { gte: range.start },
+          date: { gte: range.start, lte: range.end },
         },
         _sum: {
           revenue: true,
@@ -218,7 +497,7 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
         take: 15,
       }),
       prisma.dailyMetric.aggregate({
-        where: { storeId, date: { gte: range.start } },
+        where: { storeId, date: { gte: range.start, lte: range.end } },
         _sum: {
           revenue: true,
           netProfit: true,
@@ -226,6 +505,9 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
           orders: true,
           refundAmount: true,
           refunds: true,
+          cogs: true,
+          shippingCost: true,
+          paymentFees: true,
         },
       }),
       prisma.store.findUnique({
@@ -270,6 +552,7 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
         mer,
         npas,
         margin,
+        breakEvenRoas: margin > 0 ? 1 / margin : null,
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
@@ -304,6 +587,11 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
     refundAmount:
       Number(aggregateMetrics._sum.refundAmount || 0) * conversionRate,
     refunds: Number(aggregateMetrics._sum.refunds || 0),
+    cogs: Number(aggregateMetrics._sum.cogs || 0) * conversionRate,
+    shippingCost:
+      Number(aggregateMetrics._sum.shippingCost || 0) * conversionRate,
+    paymentFees:
+      Number(aggregateMetrics._sum.paymentFees || 0) * conversionRate,
   };
 
   summary.netMargin =
@@ -312,11 +600,18 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
     summary.adSpend > 0 ? summary.revenue / summary.adSpend : null;
   summary.npas =
     summary.adSpend > 0 ? summary.netProfit / summary.adSpend : null;
+  summary.grossProfit =
+    summary.revenue -
+    summary.cogs -
+    summary.shippingCost -
+    summary.paymentFees;
   summary.fixedCosts = fixedCostTotal;
   summary.netProfitAfterFixed = summary.netProfit - fixedCostTotal;
   summary.netMarginAfterFixed =
     summary.revenue > 0 ? summary.netProfitAfterFixed / summary.revenue : 0;
   summary.refundRate = summary.orders > 0 ? summary.refunds / summary.orders : 0;
+  summary.breakEvenRoas =
+    summary.netMargin > 0 ? 1 / summary.netMargin : null;
 
   return {
     range,
@@ -326,13 +621,17 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
     currency: masterCurrency,
   };
 }
-export async function getNetProfitVsSpendSeries({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
+export async function getNetProfitVsSpendSeries({
+  storeId,
+  rangeDays = DEFAULT_RANGE_DAYS,
+  rangeStart,
+  rangeEnd,
+}) {
   if (!storeId) {
     throw new Error("storeId is required for performance timeseries");
   }
 
-  const end = startOfDay(new Date());
-  const start = shiftDays(end, -rangeDays + 1);
+  const { start, end } = resolveRange({ rangeDays, rangeStart, rangeEnd });
 
   const storeRecord = await prisma.store.findUnique({
     where: { id: storeId },
@@ -388,13 +687,17 @@ export async function getNetProfitVsSpendSeries({ storeId, rangeDays = DEFAULT_R
   };
 }
 
-export async function getAdPerformanceBreakdown({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
+export async function getAdPerformanceBreakdown({
+  storeId,
+  rangeDays = DEFAULT_RANGE_DAYS,
+  rangeStart,
+  rangeEnd,
+}) {
   if (!storeId) {
     throw new Error("storeId is required for ad performance report");
   }
 
-  const end = startOfDay(new Date());
-  const start = shiftDays(end, -rangeDays + 1);
+  const { start, end } = resolveRange({ rangeDays, rangeStart, rangeEnd });
 
   const [adSpendRows, channelMetrics, storeRecord] = await Promise.all([
     prisma.adSpendRecord.findMany({
@@ -539,4 +842,22 @@ function formatProvider(provider) {
     default:
       return provider;
   }
+}
+
+function resolveRange({ rangeStart, rangeEnd, rangeDays = DEFAULT_RANGE_DAYS }) {
+  const today = startOfDay(new Date());
+  const computedEnd = rangeEnd ? startOfDay(rangeEnd) : today;
+  let computedStart = rangeStart
+    ? startOfDay(rangeStart)
+    : shiftDays(computedEnd, -(rangeDays - 1));
+  if (computedStart > computedEnd) {
+    const tmp = computedStart;
+    computedStart = computedEnd;
+    computedEnd = tmp;
+  }
+  const resolvedDays = Math.max(
+    1,
+    Math.round((computedEnd - computedStart) / DAY_MS) + 1,
+  );
+  return { start: computedStart, end: computedEnd, resolvedDays };
 }

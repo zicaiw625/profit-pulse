@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useLoaderData } from "react-router";
+import { Form, useLoaderData, useSearchParams } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
@@ -10,13 +10,38 @@ import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const store = await ensureMerchantAndStore(session.shop, session.email);
-  const overview = await getDashboardOverview({ store });
-  return { overview };
+  const url = new URL(request.url);
+  const startParam = url.searchParams.get("start");
+  const endParam = url.searchParams.get("end");
+  const daysParam = Number(url.searchParams.get("days"));
+  const overview = await getDashboardOverview({
+    store,
+    rangeDays: Number.isFinite(daysParam) && daysParam > 0 ? daysParam : undefined,
+    rangeStart: parseDateInput(startParam),
+    rangeEnd: parseDateInput(endParam),
+  });
+  return {
+    overview,
+    filters: {
+      start: startParam ?? "",
+      end: endParam ?? "",
+      days: Number.isFinite(daysParam) && daysParam > 0 ? String(daysParam) : "",
+    },
+  };
 };
 
+function parseDateInput(value) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export default function DashboardIndex() {
-  const { overview } = useLoaderData();
+  const { overview, filters } = useLoaderData();
+  const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
+  const hostParam = searchParams.get("host");
+  const shopParam = searchParams.get("shop");
   const merchantSummary = overview.merchantSummary ?? null;
   const aggregateRangeLabel = merchantSummary?.range
     ? `${formatDateShort(merchantSummary.range.start)} – ${formatDateShort(
@@ -43,6 +68,41 @@ export default function DashboardIndex() {
           </s-banner>
         </s-section>
       )}
+      <s-section heading="Date filters">
+        <Form method="get">
+          {hostParam && <input type="hidden" name="host" value={hostParam} />}
+          {shopParam && <input type="hidden" name="shop" value={shopParam} />}
+          <s-stack direction="inline" gap="base" wrap align="end">
+            <label>
+              Start date
+              <input type="date" name="start" defaultValue={filters.start || ""} />
+            </label>
+            <label>
+              End date
+              <input type="date" name="end" defaultValue={filters.end || ""} />
+            </label>
+            <label>
+              Quick range
+              <select name="days" defaultValue={filters.days || "14"}>
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="60">Last 60 days</option>
+              </select>
+            </label>
+            <s-button type="submit" variant="primary">
+              Apply
+            </s-button>
+            <s-button
+              type="button"
+              variant="tertiary"
+              href={buildAppUrl("/app")}
+            >
+              Reset
+            </s-button>
+          </s-stack>
+        </Form>
+      </s-section>
       <s-section heading={`Performance (${overview.rangeLabel})`}>
         <s-stack direction="inline" gap="base" wrap>
           {overview.summaryCards.map((card) => (

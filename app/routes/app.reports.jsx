@@ -21,6 +21,8 @@ const DIMENSION_OPTIONS = [
   { value: "channel", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL },
   { value: "product", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_PRODUCT },
   { value: "date", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_DATE },
+  { value: "country", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_COUNTRY },
+  { value: "customer", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_CUSTOMER },
 ];
 
 const METRIC_OPTIONS = [
@@ -34,19 +36,45 @@ const DEFAULT_BUILDER_LIMIT = 50;
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const store = await ensureMerchantAndStore(session.shop, session.email);
+  const url = new URL(request.url);
+  const startParam = url.searchParams.get("start");
+  const endParam = url.searchParams.get("end");
+  const rangeDaysParam = Number(url.searchParams.get("days"));
+  const rangeArgs = {
+    rangeDays: Number.isFinite(rangeDaysParam) && rangeDaysParam > 0 ? rangeDaysParam : 30,
+    rangeStart: parseDateInput(startParam),
+    rangeEnd: parseDateInput(endParam),
+  };
   const [report, adPerformance] = await Promise.all([
-    getReportingOverview({ storeId: store.id, rangeDays: 30 }),
-    getAdPerformanceBreakdown({ storeId: store.id, rangeDays: 30 }),
+    getReportingOverview({ storeId: store.id, ...rangeArgs }),
+    getAdPerformanceBreakdown({ storeId: store.id, ...rangeArgs }),
   ]);
   const langParam = (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
   const lang = ["en", "zh"].includes(langParam) ? langParam : "en";
-  return { report, adPerformance, lang };
+  return {
+    report,
+    adPerformance,
+    lang,
+    filters: {
+      start: startParam ?? "",
+      end: endParam ?? "",
+      days: rangeArgs.rangeDays ? String(rangeArgs.rangeDays) : "",
+    },
+  };
 };
 
+function parseDateInput(value) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
 export default function ReportsPage() {
-  const { report, adPerformance, lang } = useLoaderData();
+  const { report, adPerformance, lang, filters } = useLoaderData();
   const buildAppUrl = useAppUrlBuilder();
   const [searchParams, setSearchParams] = useSearchParams();
+  const hostParam = searchParams.get("host");
+  const shopParam = searchParams.get("shop");
   const selectedLang = (searchParams.get("lang") ?? lang ?? "en").toLowerCase();
   const handleLanguageChange = (event) => {
     const nextLang = event.target.value;
@@ -60,7 +88,12 @@ export default function ReportsPage() {
   };
 
   const currency = report.currency ?? "USD";
-  const rangeLabel = `${formatDateShort(report.range.start)} – ${formatDateShort(report.range.end)}`;
+  const rangeLabel = `${formatDateShort(report.range.start)} – ${formatDateShort(
+    report.range.end,
+  )}`;
+  const baseReportsUrl = buildAppUrl(
+    selectedLang ? `/app/reports?lang=${selectedLang}` : "/app/reports",
+  );
 
   const builderFetcher = useFetcher();
   const initialStart = report.range?.start ? new Date(report.range.start) : new Date();
@@ -119,15 +152,48 @@ export default function ReportsPage() {
     builderFetcher.state === "loading" || builderFetcher.state === "submitting";
 
   return (
-    <s-page heading="Performance reports" subtitle={`Last 30 days · ${rangeLabel}`}>
-      <s-stack direction="inline" gap="tight" align="center" style={{ marginBottom: "1rem" }}>
-        <s-text variation="subdued">
-          {translate(TRANSLATION_KEYS.REPORTS_LANG_LABEL, selectedLang)}:
-        </s-text>
-        <select value={selectedLang} onChange={handleLanguageChange}>
-          <option value="en">English</option>
-          <option value="zh">简体中文</option>
-        </select>
+    <s-page heading="Performance reports" subtitle={rangeLabel}>
+      <s-stack direction="block" gap="base" style={{ marginBottom: "1rem" }}>
+        <s-stack direction="inline" gap="tight" align="center">
+          <s-text variation="subdued">
+            {translate(TRANSLATION_KEYS.REPORTS_LANG_LABEL, selectedLang)}:
+          </s-text>
+          <select value={selectedLang} onChange={handleLanguageChange}>
+            <option value="en">English</option>
+            <option value="zh">简体中文</option>
+          </select>
+        </s-stack>
+        <Form method="get">
+          {hostParam && <input type="hidden" name="host" value={hostParam} />}
+          {shopParam && <input type="hidden" name="shop" value={shopParam} />}
+          {selectedLang && <input type="hidden" name="lang" value={selectedLang} />}
+          <s-stack direction="inline" gap="base" wrap align="end">
+            <label>
+              Start date
+              <input type="date" name="start" defaultValue={filters.start || ""} />
+            </label>
+            <label>
+              End date
+              <input type="date" name="end" defaultValue={filters.end || ""} />
+            </label>
+            <label>
+              Quick range
+              <select name="days" defaultValue={filters.days || "30"}>
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="60">Last 60 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </label>
+            <s-button type="submit" variant="primary">
+              Apply filters
+            </s-button>
+            <s-button type="button" variant="tertiary" href={baseReportsUrl}>
+              Reset
+            </s-button>
+          </s-stack>
+        </Form>
       </s-stack>
       <s-section heading="Summary">
         <s-stack direction="inline" gap="base" wrap>
@@ -154,9 +220,35 @@ export default function ReportsPage() {
             variant="ratio"
             fallback="—"
           />
+          <SummaryCard
+            label="Break-even ROAS"
+            value={report.summary.breakEvenRoas ?? 0}
+            variant="ratio"
+            fallback="—"
+          />
           <SummaryCard label="Refund amount" value={report.summary.refundAmount} currency={currency} />
           <SummaryCard label="Refund rate" value={report.summary.refundRate} variant="percentage" />
         </s-stack>
+      </s-section>
+      <s-section heading="Profit & Loss view">
+        <s-data-table>
+          <table>
+            <thead>
+              <tr>
+                <th align="left">Line item</th>
+                <th align="right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buildPnlRows(report.summary).map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td align="right">{formatCurrency(row.value, currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </s-data-table>
       </s-section>
 
       <s-section heading={translate(TRANSLATION_KEYS.REPORTS_BUILDER_HEADING, selectedLang)}>
@@ -283,6 +375,7 @@ export default function ReportsPage() {
                 <th align="right">Ad spend</th>
                 <th align="right">MER</th>
                 <th align="right">NPAS</th>
+                <th align="right">Break-even ROAS</th>
                 <th align="right">Net profit</th>
                 <th align="right">Margin</th>
                 <th align="right">Orders</th>
@@ -296,6 +389,7 @@ export default function ReportsPage() {
                   <td align="right">{formatCurrency(channel.adSpend, currency, 0)}</td>
                   <td align="right">{formatRatio(channel.mer)}</td>
                   <td align="right">{formatRatio(channel.npas)}</td>
+                  <td align="right">{formatRatio(channel.breakEvenRoas)}</td>
                   <td align="right">{formatCurrency(channel.netProfit, currency, 0)}</td>
                   <td align="right">{formatPercent(channel.margin)}</td>
                   <td align="right">{channel.orders.toLocaleString()}</td>
@@ -433,6 +527,16 @@ export default function ReportsPage() {
               {translate(TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD, selectedLang)}
             </s-button>
           </Form>
+          <Form method="get" action={buildAppUrl("/app/reports/export/quickbooks")}>
+            <s-button type="submit" variant="secondary" fullWidth>
+              QuickBooks CSV
+            </s-button>
+          </Form>
+          <Form method="get" action={buildAppUrl("/app/reports/export/xero")}>
+            <s-button type="submit" variant="secondary" fullWidth>
+              Xero CSV
+            </s-button>
+          </Form>
           <Form method="get" action={buildAppUrl("/app/reports/export/tax-template")}>
             <s-button
               type="submit"
@@ -473,6 +577,22 @@ function SummaryCard({ label, value, variant = "currency", fallback, currency = 
       <s-display-text size="small">{displayValue}</s-display-text>
     </s-card>
   );
+}
+
+function buildPnlRows(summary) {
+  return [
+    { label: "Revenue", value: summary.revenue ?? 0 },
+    { label: "Cost of goods sold", value: summary.cogs ?? 0 },
+    { label: "Gross profit", value: summary.grossProfit ?? summary.netProfit ?? 0 },
+    { label: "Shipping cost", value: summary.shippingCost ?? 0 },
+    { label: "Payment fees", value: summary.paymentFees ?? 0 },
+    { label: "Advertising", value: summary.adSpend ?? 0 },
+    { label: "Net profit", value: summary.netProfit ?? 0 },
+    {
+      label: "Net profit (after fixed)",
+      value: summary.netProfitAfterFixed ?? summary.netProfit ?? 0,
+    },
+  ];
 }
 
 function formatChannel(channel) {

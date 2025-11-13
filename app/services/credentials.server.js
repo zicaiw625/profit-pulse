@@ -1,5 +1,9 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
+import {
+  decryptSensitiveString,
+  encryptSensitiveString,
+} from "../utils/security.server";
 
 const { CredentialProvider } = pkg;
 
@@ -9,9 +13,14 @@ export function parseCredentialSecret(encryptedSecret) {
   }
 
   try {
-    return JSON.parse(encryptedSecret);
+    const serialized = decryptSensitiveString(encryptedSecret) ?? encryptedSecret;
+    return JSON.parse(serialized);
   } catch (error) {
-    return { accessToken: encryptedSecret };
+    try {
+      return JSON.parse(encryptedSecret);
+    } catch (fallbackError) {
+      return { accessToken: encryptedSecret };
+    }
   }
 }
 
@@ -43,13 +52,23 @@ export async function upsertAdCredential({
     throw new Error(`Unsupported provider: ${provider}`);
   }
 
+  const serializedSecret = JSON.stringify(secret ?? {});
+  let encryptedPayload;
+  try {
+    encryptedPayload = encryptSensitiveString(serializedSecret);
+  } catch (error) {
+    throw new Error(
+      "Failed to encrypt credential secret. Ensure CREDENTIAL_ENCRYPTION_KEY is configured.",
+    );
+  }
+
   const payload = {
     merchantId,
     storeId,
     provider,
     accountId,
     accountName,
-    encryptedSecret: JSON.stringify(secret ?? {}),
+    encryptedSecret: encryptedPayload,
     scopes: scopes ?? null,
     expiresAt: expiresAt ?? null,
   };

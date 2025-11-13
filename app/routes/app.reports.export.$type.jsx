@@ -15,6 +15,7 @@ import {
   formatPercent,
   formatRatio,
 } from "../utils/formatting";
+import { logAuditEvent } from "../services/audit.server";
 
 const EXPORT_BUILDERS = {
   channels: buildChannelCsv,
@@ -25,6 +26,8 @@ const EXPORT_BUILDERS = {
   custom: buildCustomCsv,
   "accounting-detailed": buildAccountingDetailedCsv,
   "tax-template": buildTaxTemplateCsv,
+  quickbooks: buildQuickbooksCsv,
+  xero: buildXeroCsv,
 };
 
 export const loader = async ({ request, params }) => {
@@ -41,6 +44,13 @@ export const loader = async ({ request, params }) => {
   const { filename, content } = await builder({
     storeId: store.id,
     searchParams,
+  });
+
+  await logAuditEvent({
+    merchantId: store.merchantId,
+    userEmail: session.email,
+    action: "export_report_csv",
+    details: `Exported ${type} report for ${store.shopDomain}`,
   });
 
   return new Response(content, {
@@ -316,6 +326,111 @@ async function buildTaxTemplateCsv({ storeId }) {
 
   return {
     filename: `tax-template-${new Date().toISOString().slice(0, 10)}.csv`,
+    content: buildCsv(headers, dataRows),
+  };
+}
+
+async function buildQuickbooksCsv({ storeId, searchParams }) {
+  const rangeStart = searchParams.get("start") ?? undefined;
+  const rangeEnd = searchParams.get("end") ?? undefined;
+  const { rows, currency, range } = await getAccountingDetailRows({
+    storeId,
+    start: rangeStart,
+    end: rangeEnd,
+  });
+
+  const headers = ["Date", "Account", "Debit", "Credit", "Memo", "Currency"];
+  const dataRows = [];
+  rows.forEach((row) => {
+    const dateLabel = formatDateShort(row.date);
+    dataRows.push([
+      dateLabel,
+      "Sales",
+      "",
+      formatDecimal(row.revenue),
+      "Revenue",
+      currency,
+    ]);
+    dataRows.push([
+      dateLabel,
+      "Cost of Goods Sold",
+      formatDecimal(row.cogs),
+      "",
+      "COGS",
+      currency,
+    ]);
+    dataRows.push([
+      dateLabel,
+      "Shipping Expense",
+      formatDecimal(row.shippingCost),
+      "",
+      "Shipping",
+      currency,
+    ]);
+    dataRows.push([
+      dateLabel,
+      "Payment Fees",
+      formatDecimal(row.paymentFees),
+      "",
+      "Payment processing fees",
+      currency,
+    ]);
+    dataRows.push([
+      dateLabel,
+      "Refunds",
+      formatDecimal(row.refundAmount),
+      "",
+      "Refund impact",
+      currency,
+    ]);
+    dataRows.push([
+      dateLabel,
+      "Advertising Expense",
+      formatDecimal(row.adSpend),
+      "",
+      "Ad spend allocation",
+      currency,
+    ]);
+  });
+
+  return {
+    filename: `quickbooks-${dateStamp(range)}.csv`,
+    content: buildCsv(headers, dataRows),
+  };
+}
+
+async function buildXeroCsv({ storeId, searchParams }) {
+  const rangeStart = searchParams.get("start") ?? undefined;
+  const rangeEnd = searchParams.get("end") ?? undefined;
+  const { rows, currency, range } = await getAccountingDetailRows({
+    storeId,
+    start: rangeStart,
+    end: rangeEnd,
+  });
+
+  const headers = [
+    "Date",
+    "Type",
+    "Reference",
+    "Account",
+    "Description",
+    "Tax",
+    "Amount",
+    "Currency",
+  ];
+  const dataRows = rows.map((row, index) => [
+    formatDateShort(row.date),
+    "Journal",
+    `P&L-${index + 1}`,
+    "Net Profit",
+    "Net operating profit",
+    "NONE",
+    formatDecimal(row.netProfit),
+    currency,
+  ]);
+
+  return {
+    filename: `xero-${dateStamp(range)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }

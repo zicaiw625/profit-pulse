@@ -8,26 +8,45 @@ import { startOfDay, shiftDays } from "../utils/dates.server.js";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE = 14;
+const DAY_MS = 1000 * 60 * 60 * 24;
 const CACHE_TTL_MS = 15 * 1000;
 
-export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE }) {
+export async function getDashboardOverview({
+  store,
+  rangeDays = DEFAULT_RANGE,
+  rangeStart,
+  rangeEnd,
+}) {
   if (!store?.id) {
     throw new Error("Store record is required to load dashboard overview");
   }
 
   const today = startOfDay(new Date());
-  const rangeStart = shiftDays(today, -(rangeDays - 1));
+  const computedEnd = rangeEnd ? startOfDay(rangeEnd) : today;
+  let computedStart = rangeStart
+    ? startOfDay(rangeStart)
+    : shiftDays(computedEnd, -(rangeDays - 1));
+  if (computedStart > computedEnd) {
+    const temp = computedStart;
+    computedStart = computedEnd;
+    // ensure at least one day window
+    computedEnd = temp;
+  }
+  const computedRangeDays = Math.max(
+    1,
+    Math.round((computedEnd - computedStart) / DAY_MS) + 1,
+  );
   const cacheKey = buildCacheKey(
     "dashboard",
     store.id,
-    rangeStart.toISOString(),
+    `${computedStart.toISOString()}|${computedEnd.toISOString()}`,
   );
 
   return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
     buildDashboardOverview({
       store,
-      rangeDays,
-      range: { start: rangeStart, end: today },
+      rangeDays: computedRangeDays,
+      range: { start: computedStart, end: computedEnd },
     }),
   );
 }
@@ -38,7 +57,10 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
   const [currentMetrics, previousMetrics, openIssues, storeRecord] =
     await Promise.all([
       prisma.dailyMetric.findMany({
-        where: { storeId: store.id, date: { gte: range.start } },
+        where: {
+          storeId: store.id,
+          date: { gte: range.start, lte: range.end },
+        },
         orderBy: { date: "asc" },
       }),
       prisma.dailyMetric.findMany({
@@ -100,6 +122,7 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
   const topProducts = await loadTopProducts(
     store.id,
     range.start,
+    range.end,
     conversionRate,
   );
   const alerts = openIssues.map(issueToAlert);
@@ -136,7 +159,7 @@ async function buildDashboardOverview({ store, rangeDays, range }) {
 
   return {
     shopDomain: storeRecord?.shopDomain ?? store.shopDomain,
-    rangeLabel: `Last ${rangeDays} days`,
+    rangeLabel: formatRangeLabel(range, rangeDays),
     summaryCards: summary,
     timeseries: timeSeries,
     costBreakdown,
@@ -319,13 +342,13 @@ function buildPlanStatus(planUsageResult) {
   };
 }
 
-async function loadTopProducts(storeId, rangeStart, conversionRate = 1) {
+async function loadTopProducts(storeId, rangeStart, rangeEnd, conversionRate = 1) {
   const productGroups = await prisma.dailyMetric.groupBy({
     by: ["productSku"],
     where: {
       storeId,
       productSku: { not: null },
-      date: { gte: rangeStart },
+      date: { gte: rangeStart, lte: rangeEnd },
     },
     _sum: {
       revenue: true,
@@ -380,6 +403,15 @@ function issueDescription(issue) {
 
 function formatAmount(value) {
   return `$${Number(value).toFixed(2)}`;
+}
+
+function formatRangeLabel(range, fallbackDays) {
+  if (!range?.start || !range?.end) {
+    return `Last ${fallbackDays} days`;
+  }
+  const start = range.start.toISOString().slice(0, 10);
+  const end = range.end.toISOString().slice(0, 10);
+  return `${start} – ${end}`;
 }
 
 function sumField(metrics, field) {

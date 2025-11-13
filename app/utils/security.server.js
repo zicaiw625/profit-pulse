@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 export const SECURITY_HEADERS = {
   "Content-Security-Policy":
     "default-src 'self' https: data:; " +
@@ -18,4 +20,58 @@ export function applySecurityHeaders(headers) {
       headers.set(name, value);
     }
   });
+}
+
+const CREDENTIAL_SECRET_PREFIX = "enc.v1:";
+let cachedCredentialKey = null;
+
+function getCredentialKey() {
+  if (cachedCredentialKey) {
+    return cachedCredentialKey;
+  }
+  const secret = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!secret) {
+    throw new Error(
+      "CREDENTIAL_ENCRYPTION_KEY is required to encrypt sensitive credentials",
+    );
+  }
+  cachedCredentialKey = crypto.createHash("sha256").update(secret).digest();
+  return cachedCredentialKey;
+}
+
+export function encryptSensitiveString(value) {
+  if (!value) return value;
+  const key = getCredentialKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+  const payload = Buffer.concat([iv, authTag, encrypted]).toString("base64");
+  return `${CREDENTIAL_SECRET_PREFIX}${payload}`;
+}
+
+export function decryptSensitiveString(value) {
+  if (!value) return value;
+  if (!value.startsWith(CREDENTIAL_SECRET_PREFIX)) {
+    return value;
+  }
+  const base64 = value.slice(CREDENTIAL_SECRET_PREFIX.length);
+  const buffer = Buffer.from(base64, "base64");
+  if (buffer.length <= 28) {
+    throw new Error("Encrypted credential payload malformed");
+  }
+  const iv = buffer.subarray(0, 12);
+  const authTag = buffer.subarray(12, 28);
+  const encrypted = buffer.subarray(28);
+  const key = getCredentialKey();
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+  const decrypted = Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final(),
+  ]);
+  return decrypted.toString("utf8");
 }

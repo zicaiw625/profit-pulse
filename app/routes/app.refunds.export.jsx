@@ -1,6 +1,7 @@
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { listRefundRecords } from "../services/refunds.server";
+import { logAuditEvent } from "../services/audit.server";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -27,6 +28,13 @@ export const loader = async ({ request }) => {
   const body = [headers, ...rows]
     .map((row) => row.map(csvSafe).join(","))
     .join("\n");
+
+  await logAuditEvent({
+    merchantId: store.merchantId,
+    userEmail: session.email,
+    action: "export_refunds_csv",
+    details: `Downloaded refund export for ${store.shopDomain}`,
+  });
 
   return new Response(body, {
     headers: {

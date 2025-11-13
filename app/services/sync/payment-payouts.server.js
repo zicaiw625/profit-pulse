@@ -2,6 +2,8 @@ import pkg from "@prisma/client";
 import prisma from "../../db.server";
 import shopify from "../../shopify.server";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
+import { fetchPaypalPayouts } from "../payments/paypal.server";
+import { fetchStripePayouts } from "../payments/stripe.server";
 
 const { CredentialProvider, SyncJobType } = pkg;
 
@@ -47,6 +49,67 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
       processedCount: payouts.length,
     });
 
+    return { processed: payouts.length };
+  } catch (error) {
+    await failSyncJob(job.id, error);
+    throw error;
+  }
+}
+
+export async function syncPaypalPayments({ store, days = 7 }) {
+  if (!store?.id) {
+    throw new Error("Store is required for PayPal sync");
+  }
+
+  const job = await startSyncJob({
+    storeId: store.id,
+    jobType: SyncJobType.PAYMENT_PAYOUT,
+    provider: CredentialProvider.PAYPAL,
+    metadata: { days },
+  });
+
+  try {
+    const payouts = await fetchPaypalPayouts({
+      startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+      endDate: new Date(),
+    });
+    await Promise.all(
+      payouts.map((payout) =>
+        persistExternalPayout(store.id, CredentialProvider.PAYPAL, payout),
+      ),
+    );
+    await finishSyncJob(job.id, {
+      processedCount: payouts.length,
+    });
+    return { processed: payouts.length };
+  } catch (error) {
+    await failSyncJob(job.id, error);
+    throw error;
+  }
+}
+
+export async function syncStripePayments({ store, days = 7 }) {
+  if (!store?.id) {
+    throw new Error("Store is required for Stripe sync");
+  }
+
+  const job = await startSyncJob({
+    storeId: store.id,
+    jobType: SyncJobType.PAYMENT_PAYOUT,
+    provider: CredentialProvider.STRIPE,
+    metadata: { days },
+  });
+
+  try {
+    const payouts = await fetchStripePayouts({ days });
+    await Promise.all(
+      payouts.map((payout) =>
+        persistExternalPayout(store.id, CredentialProvider.STRIPE, payout),
+      ),
+    );
+    await finishSyncJob(job.id, {
+      processedCount: payouts.length,
+    });
     return { processed: payouts.length };
   } catch (error) {
     await failSyncJob(job.id, error);
@@ -108,4 +171,30 @@ function mapPayout(store, payout, transactions) {
     netAmount,
     transactions,
   };
+}
+
+async function persistExternalPayout(storeId, provider, payout) {
+  const record = {
+    storeId,
+    provider,
+    payoutId: payout.payoutId,
+    status: payout.status ?? "PAID",
+    payoutDate: payout.payoutDate instanceof Date ? payout.payoutDate : new Date(payout.payoutDate ?? Date.now()),
+    currency: payout.currency ?? "USD",
+    grossAmount: Number(payout.grossAmount ?? 0),
+    feeTotal: Number(payout.feeTotal ?? 0),
+    netAmount: Number(payout.netAmount ?? (Number(payout.grossAmount ?? 0) - Number(payout.feeTotal ?? 0))),
+    transactions: payout.transactions ?? payout.metadata ?? payout.raw ?? null,
+  };
+
+  await prisma.paymentPayout.upsert({
+    where: {
+      storeId_payoutId: {
+        storeId,
+        payoutId: record.payoutId,
+      },
+    },
+    create: record,
+    update: record,
+  });
 }

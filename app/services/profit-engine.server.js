@@ -158,6 +158,11 @@ export async function processShopifyOrder({ store, payload }) {
     processedAt: orderDate,
     sourceName,
     customerCountry,
+    customerId: payload.customer?.id ? String(payload.customer.id) : null,
+    customerEmail: payload.customer?.email?.toLowerCase?.() ?? null,
+    customerName: buildCustomerName(payload.customer),
+    grossProfit,
+    netProfit,
   };
 
   try {
@@ -871,6 +876,22 @@ function resolveOrderChannel(sourceName) {
     .replace(/[^\w]+/g, "_")
     .replace(/^_|_$/g, "")
     .toUpperCase() || "ONLINE_STORE";
+}
+
+function buildCustomerName(customer) {
+  if (!customer) return null;
+  const first = customer.first_name ?? customer.firstName;
+  const last = customer.last_name ?? customer.lastName;
+  const combined = [first, last].filter(Boolean).join(" ").trim();
+  if (combined) {
+    return combined;
+  }
+  return (
+    customer.default_address?.name ??
+    customer.display_name ??
+    customer.email ??
+    null
+  );
 }
 
 async function allocateAdSpendAttributions(tx, payload) {

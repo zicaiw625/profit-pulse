@@ -21,7 +21,11 @@ import {
   syncSubscriptionFromShopify,
 } from "../services/billing.server";
 import { syncAdProvider } from "../services/sync/ad-spend.server";
-import { syncShopifyPayments } from "../services/sync/payment-payouts.server";
+import {
+  syncShopifyPayments,
+  syncPaypalPayments,
+  syncStripePayments,
+} from "../services/sync/payment-payouts.server";
 import { syncShopifyOrders } from "../services/sync/shopify-orders.server";
 import {
   findTeamMemberByEmail,
@@ -61,6 +65,7 @@ import pkg from "@prisma/client";
 import { importLogisticsRatesFromCsv } from "../services/logistics.server";
 import { importTaxRatesFromCsv } from "../services/tax-rates.server";
 import { syncErpCosts } from "../services/erp-costs.server";
+import { syncInventoryAndCosts } from "../services/inventory.server";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -227,11 +232,15 @@ const { CredentialProvider, AttributionRuleType } = pkg;
 const NOTIFICATION_TYPE_OPTIONS = [
   { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
   { value: NOTIFICATION_CHANNEL_TYPES.TEAMS, label: "Microsoft Teams (Webhook)" },
+  { value: NOTIFICATION_CHANNEL_TYPES.ZAPIER, label: "Zapier Webhook" },
+  { value: NOTIFICATION_CHANNEL_TYPES.MAKE, label: "Make (Integromat) Webhook" },
 ];
 
 const NOTIFICATION_TYPE_LABELS = {
   [NOTIFICATION_CHANNEL_TYPES.SLACK]: "Slack",
   [NOTIFICATION_CHANNEL_TYPES.TEAMS]: "Microsoft Teams",
+  [NOTIFICATION_CHANNEL_TYPES.ZAPIER]: "Zapier",
+  [NOTIFICATION_CHANNEL_TYPES.MAKE]: "Make / Integromat",
 };
 
 const ATTRIBUTION_PROVIDER_OPTIONS = [
@@ -288,6 +297,9 @@ const ROLE_PERMISSIONS = {
   "import-paypal-csv": ["OWNER", "FINANCE"],
   "sync-orders": ["OWNER", "FINANCE"],
   "sync-payments": ["OWNER", "FINANCE"],
+  "sync-paypal-payments": ["OWNER", "FINANCE"],
+  "sync-stripe-payments": ["OWNER", "FINANCE"],
+  "sync-inventory": ["OWNER", "FINANCE"],
   "import-cogs": ["OWNER", "FINANCE"],
   "invite-member": ["OWNER"],
   "update-member-role": ["OWNER"],
@@ -316,7 +328,10 @@ const INTENT_LABELS = {
   "import-paypal-csv": "Import PayPal payouts",
   "sync-orders": "Pull Shopify orders",
   "sync-payments": "Pull payout summary",
+  "sync-paypal-payments": "Sync PayPal payouts",
+  "sync-stripe-payments": "Sync Stripe payouts",
   "import-cogs": "Import COGS CSV",
+  "sync-inventory": "Sync Shopify inventory",
   "invite-member": "Invite teammate",
   "update-member-role": "Update teammate role",
   "remove-member": "Remove teammate",
@@ -651,6 +666,62 @@ export const action = async ({ request }) => {
       console.error(error);
       return {
         message: "Failed to sync Shopify Payments. Try again shortly.",
+      };
+    }
+  }
+
+  if (intent === "sync-paypal-payments") {
+    try {
+      const result = await syncPaypalPayments({ store, days: 30 });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_paypal_payments",
+        details: `Fetched ${result.processed} PayPal payouts`,
+      });
+      return { message: `PayPal payouts synced (${result.processed} records).` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "Failed to sync PayPal payouts. Check API credentials.",
+      };
+    }
+  }
+
+  if (intent === "sync-stripe-payments") {
+    try {
+      const result = await syncStripePayments({ store, days: 30 });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_stripe_payments",
+        details: `Fetched ${result.processed} Stripe payouts`,
+      });
+      return { message: `Stripe payouts synced (${result.processed} records).` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "Failed to sync Stripe payouts. Verify STRIPE_SECRET_KEY.",
+      };
+    }
+  }
+
+  if (intent === "sync-inventory") {
+    try {
+      const summary = await syncInventoryAndCosts({ store, session });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_inventory_costs",
+        details: `Synced ${summary.variants} variants and ${summary.inventoryRows} inventory rows`,
+      });
+      return {
+        message: `Inventory updated (${summary.variants} variants / ${summary.inventoryRows} rows).`,
+      };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "Inventory sync failed. Confirm product & inventory scopes.",
       };
     }
   }
@@ -1127,6 +1198,12 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "sync-orders";
   const syncingPayments =
     isSubmitting && currentIntent === "sync-payments";
+  const syncingPaypalApi =
+    isSubmitting && currentIntent === "sync-paypal-payments";
+  const syncingStripeApi =
+    isSubmitting && currentIntent === "sync-stripe-payments";
+  const syncingInventory =
+    isSubmitting && currentIntent === "sync-inventory";
   const importingCogs =
     isSubmitting && currentIntent === "import-cogs";
   const creatingFixedCost =
@@ -1177,6 +1254,9 @@ export default function SettingsPage() {
     connectAdCredential: canPerformIntent("connect-ad-credential", currentRole),
     importPaypalCsv: canPerformIntent("import-paypal-csv", currentRole),
     syncPayments: canPerformIntent("sync-payments", currentRole),
+    syncPaypalPayments: canPerformIntent("sync-paypal-payments", currentRole),
+    syncStripePayments: canPerformIntent("sync-stripe-payments", currentRole),
+    syncInventory: canPerformIntent("sync-inventory", currentRole),
     deleteNotificationChannel: canPerformIntent("delete-notification-channel", currentRole),
     connectSlackWebhook: canPerformIntent("connect-slack-webhook", currentRole),
     testSlackNotification: canPerformIntent("test-slack-notification", currentRole),
@@ -1427,6 +1507,31 @@ export default function SettingsPage() {
             </s-card>
           </div>
           <div>
+            <s-heading level="3">Inventory & COGS</s-heading>
+            <s-card padding="base">
+              <s-stack direction="block" gap="base">
+                <s-text variation="subdued">
+                  Pulls Shopify variant inventory levels and unit costs to keep SKU costs aligned
+                  with ERP data. Requires read_products + read_inventory scopes.
+                </s-text>
+                <Form method="post">
+                  <input type="hidden" name="intent" value="sync-inventory" />
+                  <s-button
+                    type="submit"
+                    variant="secondary"
+                    disabled={!intentAccess.syncInventory}
+                    {...(syncingInventory ? { loading: true } : {})}
+                  >
+                    Sync inventory & costs
+                  </s-button>
+                  {!intentAccess.syncInventory && (
+                    <s-text variation="subdued">{permissionHint("sync-inventory")}</s-text>
+                  )}
+                </Form>
+              </s-stack>
+            </s-card>
+          </div>
+          <div>
           <s-heading level="3">Ad networks</s-heading>
           <s-stack direction="inline" gap="base" wrap>
             {settings.integrations.ads.map((integration) => {
@@ -1520,9 +1625,24 @@ export default function SettingsPage() {
             <s-heading level="3">Payment processors</s-heading>
             <s-stack direction="inline" gap="base" wrap>
               {settings.integrations.payments.map((integration) => {
-                const syncLoading =
-                  syncingPayments && targetProvider === integration.id;
                 const isPaypal = integration.id === "PAYPAL";
+                const isStripe = integration.id === "STRIPE";
+                const apiIntent = isPaypal
+                  ? "sync-paypal-payments"
+                  : isStripe
+                    ? "sync-stripe-payments"
+                    : "sync-payments";
+                const apiLoading = isPaypal
+                  ? syncingPaypalApi
+                  : isStripe
+                    ? syncingStripeApi
+                    : syncingPayments && targetProvider === integration.id;
+                const apiAllowed = isPaypal
+                  ? intentAccess.syncPaypalPayments
+                  : isStripe
+                    ? intentAccess.syncStripePayments
+                    : intentAccess.syncPayments;
+
                 return (
                   <s-card key={integration.id} padding="base">
                     <s-heading>{integration.label}</s-heading>
@@ -1533,54 +1653,57 @@ export default function SettingsPage() {
                         ? formatDateTime(integration.lastSyncedAt)
                         : "Never"}
                     </s-text>
-                    {isPaypal ? (
-                      <Form method="post" encType="multipart/form-data">
-                        <input type="hidden" name="intent" value="import-paypal-csv" />
-                        <s-stack direction="block" gap="base">
-                          <label>
-                            Provider
-                            <select name="paymentProvider" defaultValue="PAYPAL">
-                              <option value="PAYPAL">PayPal</option>
-                              <option value="STRIPE">Stripe</option>
-                              <option value="KLARNA">Klarna</option>
-                            </select>
-                          </label>
-                          <label>
-                            Upload CSV
-                            <input type="file" name="paymentCsv" accept=".csv" />
-                          </label>
-                          <s-button
-                            type="submit"
-                            variant="secondary"
-                            disabled={!intentAccess.importPaypalCsv}
-                            {...(importingPaypal ? { loading: true } : {})}
-                          >
-                            Import payouts CSV
-                          </s-button>
-                          {!intentAccess.importPaypalCsv && (
-                            <s-text variation="subdued">
-                              {permissionHint("import-paypal-csv")}
-                            </s-text>
-                          )}
-                        </s-stack>
+                    <s-stack direction="block" gap="base">
+                      <Form method="post">
+                        <input type="hidden" name="intent" value={apiIntent} />
+                        <input type="hidden" name="provider" value={integration.id} />
+                        <s-button
+                          type="submit"
+                          variant="secondary"
+                          disabled={!apiAllowed}
+                          {...(apiLoading ? { loading: true } : {})}
+                        >
+                          Sync {integration.label} payouts
+                        </s-button>
+                        {!apiAllowed && (
+                          <s-text variation="subdued">
+                            {permissionHint(apiIntent)}
+                          </s-text>
+                        )}
                       </Form>
-                    ) : (
-                        <Form method="post">
-                          <input type="hidden" name="intent" value="sync-payments" />
-                          <input type="hidden" name="provider" value={integration.id} />
-                          <s-button
-                            type="submit"
-                            variant="secondary"
-                            disabled={!intentAccess.syncPayments}
-                            {...(syncLoading ? { loading: true } : {})}
-                          >
-                            Sync payouts
-                          </s-button>
-                          {!intentAccess.syncPayments && (
-                            <s-text variation="subdued">{permissionHint("sync-payments")}</s-text>
-                          )}
+                      {isPaypal && (
+                        <Form method="post" encType="multipart/form-data">
+                          <input type="hidden" name="intent" value="import-paypal-csv" />
+                          <s-stack direction="block" gap="base">
+                            <label>
+                              Provider
+                              <select name="paymentProvider" defaultValue="PAYPAL">
+                                <option value="PAYPAL">PayPal</option>
+                                <option value="STRIPE">Stripe</option>
+                                <option value="KLARNA">Klarna</option>
+                              </select>
+                            </label>
+                            <label>
+                              Upload CSV
+                              <input type="file" name="paymentCsv" accept=".csv" />
+                            </label>
+                            <s-button
+                              type="submit"
+                              variant="secondary"
+                              disabled={!intentAccess.importPaypalCsv}
+                              {...(importingPaypal ? { loading: true } : {})}
+                            >
+                              Import payouts CSV
+                            </s-button>
+                            {!intentAccess.importPaypalCsv && (
+                              <s-text variation="subdued">
+                                {permissionHint("import-paypal-csv")}
+                              </s-text>
+                            )}
+                          </s-stack>
                         </Form>
-                    )}
+                      )}
+                    </s-stack>
                   </s-card>
                 );
               })}
