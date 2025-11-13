@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import { sendSlackNotification } from "./notifications.server";
-import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import { startOfDay, shiftDays, resolveTimezone } from "../utils/dates.server.js";
 
 
 const DEFAULT_ROAS_THRESHOLD = 1.0;
@@ -8,8 +8,9 @@ const NET_PROFIT_DROP_PERCENT = 0.3;
 
 export async function evaluatePerformanceAlerts({ store, thresholds = {} }) {
   if (!store?.id || !store.merchantId) return [];
-  const today = startOfDay(new Date());
-  const yesterday = shiftDays(today, -1);
+  const timezone = resolveTimezone({ store });
+  const today = startOfDay(new Date(), { timezone });
+  const yesterday = shiftDays(today, -1, { timezone });
 
   const [todayMetric, yesterdayMetric] = await Promise.all([
     prisma.dailyMetric.findFirst({

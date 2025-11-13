@@ -87,7 +87,7 @@ async function buildChannelCsv({ storeId }) {
     ]);
 
   return {
-    filename: `channels-${dateStamp(report.range)}.csv`,
+    filename: `channels-${dateStamp(report.range, report.timezone)}.csv`,
     content: buildCsv(headers, rows),
   };
 }
@@ -115,13 +115,13 @@ async function buildProductCsv({ storeId }) {
     ]);
 
   return {
-    filename: `products-${dateStamp(report.range)}.csv`,
+    filename: `products-${dateStamp(report.range, report.timezone)}.csv`,
     content: buildCsv(headers, rows),
   };
 }
 
 async function buildNetProfitCsv({ storeId }) {
-  const { range, points } = await getNetProfitVsSpendSeries({ storeId });
+  const { range, points, timezone } = await getNetProfitVsSpendSeries({ storeId });
     const headers = ["Date", "Revenue", "Ad Spend", "Net Profit"];
     const rows = points.map((row) => [
       row.date,
@@ -131,7 +131,7 @@ async function buildNetProfitCsv({ storeId }) {
     ]);
 
   return {
-    filename: `net-profit-${dateStamp(range)}.csv`,
+    filename: `net-profit-${dateStamp(range, timezone)}.csv`,
     content: buildCsv(headers, rows),
   };
 }
@@ -176,7 +176,7 @@ async function buildAdsCsv({ storeId }) {
     });
 
   return {
-    filename: `ad-performance-${dateStamp(report.range)}.csv`,
+    filename: `ad-performance-${dateStamp(report.range, report.timezone)}.csv`,
     content: buildCsv(headers, rows),
   };
 }
@@ -210,7 +210,7 @@ async function buildAccountingCsv({ storeId }) {
   ]);
 
   return {
-    filename: `accounting-${dateStamp(range)}.csv`,
+    filename: `accounting-${dateStamp(range, report.timezone)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }
@@ -248,7 +248,7 @@ async function buildCustomCsv({ storeId, searchParams }) {
   ]);
 
   return {
-    filename: `custom-${report.dimension.key}-${dateStamp(report.range)}.csv`,
+    filename: `custom-${report.dimension.key}-${dateStamp(report.range, report.timezone)}.csv`,
     content: buildCsv(headers, rows),
   };
 }
@@ -256,7 +256,7 @@ async function buildCustomCsv({ storeId, searchParams }) {
 async function buildAccountingDetailedCsv({ storeId, searchParams }) {
   const rangeStart = searchParams.get("start") ?? undefined;
   const rangeEnd = searchParams.get("end") ?? undefined;
-  const { rows, range } = await getAccountingDetailRows({
+  const { rows, range, timezone } = await getAccountingDetailRows({
     storeId,
     start: rangeStart,
     end: rangeEnd,
@@ -274,7 +274,7 @@ async function buildAccountingDetailedCsv({ storeId, searchParams }) {
     "Orders",
   ];
   const dataRows = rows.map((row) => [
-    formatDateShort(row.date),
+    formatDateShort(row.date, timezone),
     formatDecimal(row.revenue),
     formatDecimal(row.cogs),
     formatDecimal(row.shippingCost),
@@ -286,7 +286,7 @@ async function buildAccountingDetailedCsv({ storeId, searchParams }) {
   ]);
 
   return {
-    filename: `accounting-detail-${dateStamp(range)}.csv`,
+    filename: `accounting-detail-${dateStamp(range, timezone)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }
@@ -333,7 +333,7 @@ async function buildTaxTemplateCsv({ storeId }) {
 async function buildQuickbooksCsv({ storeId, searchParams }) {
   const rangeStart = searchParams.get("start") ?? undefined;
   const rangeEnd = searchParams.get("end") ?? undefined;
-  const { rows, currency, range } = await getAccountingDetailRows({
+  const { rows, currency, range, timezone } = await getAccountingDetailRows({
     storeId,
     start: rangeStart,
     end: rangeEnd,
@@ -342,7 +342,7 @@ async function buildQuickbooksCsv({ storeId, searchParams }) {
   const headers = ["Date", "Account", "Debit", "Credit", "Memo", "Currency"];
   const dataRows = [];
   rows.forEach((row) => {
-    const dateLabel = formatDateShort(row.date);
+    const dateLabel = formatDateShort(row.date, timezone);
     dataRows.push([
       dateLabel,
       "Sales",
@@ -394,7 +394,7 @@ async function buildQuickbooksCsv({ storeId, searchParams }) {
   });
 
   return {
-    filename: `quickbooks-${dateStamp(range)}.csv`,
+    filename: `quickbooks-${dateStamp(range, timezone)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }
@@ -402,7 +402,7 @@ async function buildQuickbooksCsv({ storeId, searchParams }) {
 async function buildXeroCsv({ storeId, searchParams }) {
   const rangeStart = searchParams.get("start") ?? undefined;
   const rangeEnd = searchParams.get("end") ?? undefined;
-  const { rows, currency, range } = await getAccountingDetailRows({
+  const { rows, currency, range, timezone } = await getAccountingDetailRows({
     storeId,
     start: rangeStart,
     end: rangeEnd,
@@ -419,7 +419,7 @@ async function buildXeroCsv({ storeId, searchParams }) {
     "Currency",
   ];
   const dataRows = rows.map((row, index) => [
-    formatDateShort(row.date),
+    formatDateShort(row.date, timezone),
     "Journal",
     `P&L-${index + 1}`,
     "Net Profit",
@@ -430,7 +430,7 @@ async function buildXeroCsv({ storeId, searchParams }) {
   ]);
 
   return {
-    filename: `xero-${dateStamp(range)}.csv`,
+    filename: `xero-${dateStamp(range, timezone)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }
@@ -453,8 +453,8 @@ function csvSafe(value) {
   return stringValue;
 }
 
-function dateStamp(range) {
-  const start = formatDateShort(range?.start ?? range?.end);
-  const end = formatDateShort(range?.end ?? range?.start);
+function dateStamp(range, timezone = "UTC") {
+  const start = formatDateShort(range?.start ?? range?.end, timezone);
+  const end = formatDateShort(range?.end ?? range?.start, timezone);
   return `${start || "start"}-${end || "end"}`;
 }

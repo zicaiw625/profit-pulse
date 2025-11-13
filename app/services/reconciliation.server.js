@@ -1,7 +1,12 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
 import { sendSlackNotification } from "./notifications.server";
-import { shiftDays, formatDateKey } from "../utils/dates.server.js";
+import {
+  startOfDay,
+  shiftDays,
+  formatDateKey,
+  resolveTimezone,
+} from "../utils/dates.server.js";
 import { formatCurrency } from "../utils/formatting";
 
 const { ReconciliationIssueType, IssueStatus } = pkg;
@@ -15,7 +20,9 @@ export async function getReconciliationSnapshot({
     throw new Error("storeId is required for reconciliation snapshot");
   }
 
-  const since = shiftDays(new Date(), -(Math.max(rangeDays, 1) - 1));
+  const timezone = await getStoreTimezone(storeId);
+  const today = startOfDay(new Date(), { timezone });
+  const since = shiftDays(today, -(Math.max(rangeDays, 1) - 1), { timezone });
   const issues = await prisma.reconciliationIssue.findMany({
     where: {
       storeId,
@@ -42,10 +49,12 @@ export async function getReconciliationSnapshot({
       status: issue.status,
       amountDelta: issue.amountDelta,
     })),
+    timezone,
   };
 }
 
-export async function detectPaymentDiscrepancies({ storeId }) {
+export async function detectPaymentDiscrepancies({ storeId, timezone }) {
+  const tz = timezone ?? (await getStoreTimezone(storeId));
   const payouts = await prisma.paymentPayout.findMany({
     where: { storeId },
     orderBy: { payoutDate: "desc" },
@@ -57,7 +66,9 @@ export async function detectPaymentDiscrepancies({ storeId }) {
     where: {
       storeId,
       processedAt: {
-        gte: shiftDays(new Date(), -30),
+        gte: shiftDays(startOfDay(new Date(), { timezone: tz }), -30, {
+          timezone: tz,
+        }),
       },
     },
     _sum: {
@@ -70,7 +81,8 @@ export async function detectPaymentDiscrepancies({ storeId }) {
   payouts.forEach((payout) => {
     const dayOrders = ordersByDate.filter(
       (group) =>
-        formatDateKey(group.processedAt) === formatDateKey(payout.payoutDate),
+        formatDateKey(group.processedAt, { timezone: tz }) ===
+        formatDateKey(payout.payoutDate, { timezone: tz }),
     );
     const orderTotal = dayOrders.reduce(
       (sum, group) => sum + Number(group._sum.total || 0),
@@ -99,12 +111,17 @@ export async function detectPaymentDiscrepancies({ storeId }) {
   return issues;
 }
 
-export async function detectAdConversionAnomalies({ storeId }) {
+export async function detectAdConversionAnomalies({ storeId, timezone }) {
+  const tz = timezone ?? (await getStoreTimezone(storeId));
   const adSpend = await prisma.adSpendRecord.groupBy({
     by: ["provider", "date"],
     where: {
       storeId,
-      date: { gte: shiftDays(new Date(), -14) },
+      date: {
+        gte: shiftDays(startOfDay(new Date(), { timezone: tz }), -14, {
+          timezone: tz,
+        }),
+      },
     },
     _sum: {
       conversions: true,
@@ -116,20 +133,24 @@ export async function detectAdConversionAnomalies({ storeId }) {
     by: ["processedAt"],
     where: {
       storeId,
-      processedAt: { gte: shiftDays(new Date(), -14) },
+      processedAt: {
+        gte: shiftDays(startOfDay(new Date(), { timezone: tz }), -14, {
+          timezone: tz,
+        }),
+      },
     },
     _count: { _all: true },
   });
 
   const orderCountByDay = ordersByDay.reduce((map, group) => {
-    map.set(formatDateKey(group.processedAt), group._count._all);
+    map.set(formatDateKey(group.processedAt, { timezone: tz }), group._count._all);
     return map;
   }, new Map());
 
   const issues = [];
 
   adSpend.forEach((row) => {
-    const dateKey = formatDateKey(row.date);
+    const dateKey = formatDateKey(row.date, { timezone: tz });
     const conversions = Number(row._sum.conversions || 0);
     const orders = orderCountByDay.get(dateKey) ?? 0;
     if (conversions > orders * 1.5) {
@@ -162,8 +183,9 @@ export async function detectAdConversionAnomalies({ storeId }) {
 }
 
 export async function runReconciliationChecks({ storeId }) {
-  await detectPaymentDiscrepancies({ storeId });
-  await detectAdConversionAnomalies({ storeId });
+  const timezone = await getStoreTimezone(storeId);
+  await detectPaymentDiscrepancies({ storeId, timezone });
+  await detectAdConversionAnomalies({ storeId, timezone });
 }
 
 async function persistIssues(storeId, issues, issueType) {
@@ -199,6 +221,17 @@ async function persistIssues(storeId, issues, issueType) {
       text: formatSlackAlert(issueType, issues, store.shopDomain),
     });
   }
+}
+
+async function getStoreTimezone(storeId) {
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    include: { merchant: true },
+  });
+  if (!store) {
+    return "UTC";
+  }
+  return resolveTimezone({ store });
 }
 
 function formatSlackAlert(issueType, issues, shopDomain) {

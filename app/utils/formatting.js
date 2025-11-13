@@ -34,13 +34,17 @@ export function formatChannelLabel(channel = "") {
   );
 }
 
-export function formatDateShort(value) {
+export function formatDateShort(value, timezone) {
   if (!value) return "";
   const date = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat("en-US", {
+  const options = {
     month: "short",
     day: "numeric",
-  }).format(date);
+  };
+  if (timezone) {
+    options.timeZone = timezone;
+  }
+  return new Intl.DateTimeFormat("en-US", options).format(date);
 }
 
 export function formatDecimal(value, digits = 2) {

@@ -43,11 +43,18 @@ export default function DashboardIndex() {
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
   const merchantSummary = overview.merchantSummary ?? null;
-  const aggregateRangeLabel = merchantSummary?.range
-    ? `${formatDateShort(merchantSummary.range.start)} – ${formatDateShort(
-        merchantSummary.range.end,
-      )}`
-    : null;
+  const overviewTimezone = overview.timezone ?? "UTC";
+  const aggregateRangeLabel =
+    merchantSummary?.rangeLabel ??
+    (merchantSummary?.range
+      ? `${formatDateShort(
+          merchantSummary.range.start,
+          merchantSummary.timezone ?? overviewTimezone,
+        )} – ${formatDateShort(
+          merchantSummary.range.end,
+          merchantSummary.timezone ?? overviewTimezone,
+        )}`
+      : null);
   const planStatus = overview.planStatus ?? null;
   const planWarning = planStatus ? buildPlanWarning(planStatus) : null;
 
