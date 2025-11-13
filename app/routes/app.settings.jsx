@@ -1162,7 +1162,6 @@ export default function SettingsPage() {
   const connectingSlack = currentIntent === "connect-slack-webhook" && isSubmitting;
   const testingSlack = currentIntent === "test-slack-notification" && isSubmitting;
   const importingPaypal = currentIntent === "import-paypal-csv" && isSubmitting;
-  const attributionRules = settings.attributionRules ?? [];
   const updatingAttributionRules =
     currentIntent === "update-attribution-rules" && isSubmitting;
 
