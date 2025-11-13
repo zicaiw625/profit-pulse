@@ -57,6 +57,10 @@ export default function DashboardIndex() {
       : null);
   const planStatus = overview.planStatus ?? null;
   const planWarning = planStatus ? buildPlanWarning(planStatus) : null;
+  const netRevenueCard = overview.summaryCards.find(
+    (card) => card.key === "netRevenue",
+  );
+  const revenueBasis = Number(netRevenueCard?.value ?? 0);
 
   return (
     <s-page
@@ -127,16 +131,11 @@ export default function DashboardIndex() {
       </s-section>
 
       <s-section heading="Cost composition">
-        <s-stack direction="inline" gap="base" wrap>
-          {overview.costBreakdown.map((slice) => (
-            <s-card key={slice.label} padding="base">
-              <s-heading>{slice.label}</s-heading>
-              <s-text variation="subdued">
-                {(slice.value * 100).toFixed(1)}% of revenue
-              </s-text>
-            </s-card>
-          ))}
-        </s-stack>
+        <CostCompositionChart
+          slices={overview.costBreakdown}
+          revenue={revenueBasis}
+          currency={overview.currency}
+        />
       </s-section>
 
       <s-section heading="Top products by net profit">
@@ -258,6 +257,140 @@ function buildPlanWarning(planStatus) {
 
 function formatOrderCount(value) {
   return Number(value ?? 0).toLocaleString();
+}
+
+function CostCompositionChart({ slices, revenue, currency }) {
+  const sanitized = (slices ?? []).map((slice) => ({
+    ...slice,
+    value: Math.max(0, Number(slice.value ?? 0)),
+  }));
+  const totalShare = sanitized.reduce((sum, slice) => sum + slice.value, 0);
+
+  if (!sanitized.length || totalShare <= 0) {
+    return (
+      <s-card padding="base">
+        <s-text variation="subdued">No cost data available for this range.</s-text>
+      </s-card>
+    );
+  }
+
+  const normalized = sanitized.map((slice) => ({
+    ...slice,
+    share: slice.value / totalShare,
+    amount: revenue > 0 ? revenue * slice.value : null,
+  }));
+
+  const chartSize = 200;
+  const radius = 80;
+  const circumference = 2 * Math.PI * radius;
+  const colors = [
+    "#5c6ac4",
+    "#47c1bf",
+    "#f49342",
+    "#f37676",
+    "#9c6ade",
+    "#e0b457",
+    "#627680",
+  ];
+
+  let offset = 0;
+  const segments = normalized.map((slice, index) => {
+    const length = slice.share * circumference;
+    const strokeDasharray = `${length} ${circumference - length}`;
+    const strokeDashoffset = circumference * 0.25 - offset;
+    offset += length;
+    return (
+      <circle
+        key={`${slice.label}-${index}`}
+        cx={chartSize / 2}
+        cy={chartSize / 2}
+        r={radius}
+        fill="transparent"
+        stroke={colors[index % colors.length]}
+        strokeWidth={24}
+        strokeDasharray={strokeDasharray}
+        strokeDashoffset={strokeDashoffset}
+      />
+    );
+  });
+
+  return (
+    <s-card padding="base">
+      <s-stack direction="inline" gap="base" wrap align="center">
+        <div
+          style={{
+            position: "relative",
+            width: `${chartSize}px`,
+            height: `${chartSize}px`,
+          }}
+        >
+          <svg
+            role="img"
+            viewBox={`0 0 ${chartSize} ${chartSize}`}
+            width={chartSize}
+            height={chartSize}
+            style={{ transform: "rotate(-90deg)" }}
+          >
+            <circle
+              cx={chartSize / 2}
+              cy={chartSize / 2}
+              r={radius}
+              fill="transparent"
+              stroke="#e3e8ee"
+              strokeWidth={24}
+            />
+            {segments}
+          </svg>
+          <div
+            style={{
+              position: "absolute",
+              inset: "0",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              padding: "0.75rem",
+            }}
+          >
+            <s-text variation="subdued">Revenue basis</s-text>
+            <s-heading>{formatCurrency(revenue, currency)}</s-heading>
+          </div>
+        </div>
+        <s-stack direction="block" gap="tight" align="start">
+          {normalized.map((slice, index) => (
+            <s-stack
+              key={`${slice.label}-legend-${index}`}
+              direction="inline"
+              gap="tight"
+              align="center"
+              wrap
+            >
+              <span
+                aria-hidden
+                style={{
+                  display: "inline-block",
+                  width: "0.75rem",
+                  height: "0.75rem",
+                  borderRadius: "999px",
+                  backgroundColor: colors[index % colors.length],
+                }}
+              />
+              <s-text strong>{slice.label}</s-text>
+              <s-text variation="subdued">
+                {formatPercent(slice.value)} of revenue
+              </s-text>
+              {slice.amount !== null && (
+                <s-text variation="subdued">
+                  {formatCurrency(slice.amount, currency)}
+                </s-text>
+              )}
+            </s-stack>
+          ))}
+        </s-stack>
+      </s-stack>
+    </s-card>
+  );
 }
 
 function MetricCard({ card, currency }) {
