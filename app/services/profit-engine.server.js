@@ -911,7 +911,7 @@ async function allocateAdSpendAttributions(tx, payload) {
   if (!providerRows.length) return;
 
   const rules = await getAttributionRules(merchantId);
-  const ruleMap = new Map(rules.map((rule) => [rule.provider, rule]));
+  const ruleTouchMap = new Map((rules ?? []).map((rule) => [rule.provider, rule.touches ?? []]));
 
   const attributions = providerRows
     .map((row) => {
@@ -919,17 +919,24 @@ async function allocateAdSpendAttributions(tx, payload) {
       const providerSpend = Number(row.adSpend || 0);
       if (!providerSpend) return null;
       const baseProportion = totalAdSpend ? providerSpend / totalAdSpend : 0;
-      const rule = ruleMap.get(provider);
-      const weight = rule?.weight ?? 1;
-      const amount = totalAdSpend * baseProportion * orderShare * weight;
-      if (!amount) return null;
-      return {
-        provider,
-        amount,
-        ruleType: rule?.ruleType ?? "LAST_TOUCH",
-      };
+      const touches = ruleTouchMap.get(provider) ?? [];
+      const totalTouchWeight =
+        touches.reduce((sum, touch) => sum + (Number(touch.weight ?? 0)), 0) || 1;
+      return touches
+        .map((touch) => {
+          const normalized = Number(touch.weight ?? 0) / totalTouchWeight;
+          if (normalized <= 0) return null;
+          const amount = totalAdSpend * baseProportion * orderShare * normalized;
+          if (!amount) return null;
+          return {
+            provider,
+            amount,
+            ruleType: touch.ruleType ?? "LAST_TOUCH",
+          };
+        })
+        .filter(Boolean);
     })
-    .filter(Boolean);
+    .flat();
 
   if (!attributions.length) return;
 

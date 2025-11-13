@@ -21,12 +21,26 @@ export default function DashboardIndex() {
         merchantSummary.range.end,
       )}`
     : null;
+  const planStatus = overview.planStatus ?? null;
+  const planWarning = planStatus ? buildPlanWarning(planStatus) : null;
 
   return (
     <s-page
       heading="Profit Pulse overview"
       subtitle={`Connected store: ${overview.shopDomain}`}
     >
+      {planWarning && (
+        <s-section>
+          <s-banner tone={planWarning.tone} title={planWarning.title}>
+            <s-stack direction="block" gap="tight">
+              <s-text variation="subdued">{planWarning.message}</s-text>
+              <s-button variant="secondary" href="/app/settings">
+                Manage plan
+              </s-button>
+            </s-stack>
+          </s-banner>
+        </s-section>
+      )}
       <s-section heading={`Performance (${overview.rangeLabel})`}>
         <s-stack direction="inline" gap="base" wrap>
           {overview.summaryCards.map((card) => (
@@ -142,6 +156,39 @@ export default function DashboardIndex() {
       </s-section>
     </s-page>
   );
+}
+
+function buildPlanWarning(planStatus) {
+  if (!planStatus) return null;
+  const orderUsage = `${formatOrderCount(planStatus.orderCount)} / ${formatOrderCount(
+    planStatus.orderLimit,
+  )}`;
+  if (planStatus.orderStatus === "danger") {
+    return {
+      tone: "critical",
+      title: "Order ingestion paused",
+      message: `You've used ${orderUsage} of your monthly order allowance. Upgrade or adjust usage to resume syncing.`,
+    };
+  }
+  if (planStatus.orderStatus === "warning") {
+    return {
+      tone: "warning",
+      title: "Order allowance approaching limit",
+      message: `Current order usage is ${orderUsage}. Upgrade to avoid interrupted ingestion.`,
+    };
+  }
+  if (planStatus.planStatus && planStatus.planStatus !== "ACTIVE") {
+    return {
+      tone: "critical",
+      title: "Billing action required",
+      message: `${planStatus.planName ?? "Profit Pulse"} billing status is ${planStatus.planStatus}. Resolve it in Shopify to keep data flowing.`,
+    };
+  }
+  return null;
+}
+
+function formatOrderCount(value) {
+  return Number(value ?? 0).toLocaleString();
 }
 
 function MetricCard({ card, currency }) {

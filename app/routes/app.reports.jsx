@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { Form, useLoaderData, useRouteError } from "react-router";
+import { Form, useFetcher, useLoaderData, useRouteError, useSearchParams } from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getAdPerformanceBreakdown, getReportingOverview } from "../services/reports.server";
@@ -11,7 +11,25 @@ import {
   formatChannelLabel,
   formatDateShort,
 } from "../utils/formatting";
+ 
+import { translate } from "../utils/i18n";
+import { TRANSLATION_KEYS } from "../constants/translations";
+import { useEffect, useState } from "react";
 
+const DIMENSION_OPTIONS = [
+  { value: "channel", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL },
+  { value: "product", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_PRODUCT },
+  { value: "date", labelKey: TRANSLATION_KEYS.REPORTS_DIMENSION_DATE },
+];
+
+const METRIC_OPTIONS = [
+  { value: "revenue", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_REVENUE },
+  { value: "netProfit", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT },
+  { value: "adSpend", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND },
+  { value: "orders", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_ORDERS },
+];
+
+const DEFAULT_BUILDER_LIMIT = 50;
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const store = await ensureMerchantAndStore(session.shop, session.email);
@@ -19,16 +37,96 @@ export const loader = async ({ request }) => {
     getReportingOverview({ storeId: store.id, rangeDays: 30 }),
     getAdPerformanceBreakdown({ storeId: store.id, rangeDays: 30 }),
   ]);
-  return { report, adPerformance };
+  const langParam = (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
+  const lang = ["en", "zh"].includes(langParam) ? langParam : "en";
+  return { report, adPerformance, lang };
 };
 
 export default function ReportsPage() {
-  const { report, adPerformance } = useLoaderData();
+  const { report, adPerformance, lang } = useLoaderData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedLang = (searchParams.get("lang") ?? lang ?? "en").toLowerCase();
+  const handleLanguageChange = (event) => {
+    const nextLang = event.target.value;
+    const nextParams = new URLSearchParams(searchParams);
+    if (nextLang) {
+      nextParams.set("lang", nextLang);
+    } else {
+      nextParams.delete("lang");
+    }
+    setSearchParams(nextParams);
+  };
+
   const currency = report.currency ?? "USD";
   const rangeLabel = `${formatDateShort(report.range.start)} – ${formatDateShort(report.range.end)}`;
 
+  const builderFetcher = useFetcher();
+  const initialStart = report.range?.start ? new Date(report.range.start) : new Date();
+  const initialEnd = report.range?.end ? new Date(report.range.end) : new Date();
+  const [builderValues, setBuilderValues] = useState(() => ({
+    dimension: "channel",
+    metrics: ["revenue", "netProfit"],
+    start: initialStart.toISOString().slice(0, 10),
+    end: initialEnd.toISOString().slice(0, 10),
+  }));
+  const buildCustomUrl = (values = builderValues, overrides = {}) => {
+    const params = new URLSearchParams();
+    params.set("dimension", values.dimension);
+    params.set("metrics", values.metrics.join(","));
+    if (values.start) params.set("start", values.start);
+    if (values.end) params.set("end", values.end);
+    params.set("limit", String(overrides.limit ?? DEFAULT_BUILDER_LIMIT));
+    return `/app/reports/custom?${params.toString()}`;
+  };
+
+  useEffect(() => {
+    builderFetcher.load(buildCustomUrl());
+  }, [builderFetcher]);
+
+  const handleBuilderSubmit = (event) => {
+    event.preventDefault();
+    builderFetcher.load(buildCustomUrl());
+  };
+
+  const toggleMetric = (key) => {
+    setBuilderValues((prev) => {
+      const exists = prev.metrics.includes(key);
+      const nextMetrics = exists
+        ? prev.metrics.filter((item) => item !== key)
+        : [...prev.metrics, key];
+      return { ...prev, metrics: nextMetrics };
+    });
+  };
+
+  const handleBuilderFieldChange = (field) => (event) => {
+    setBuilderValues((prev) => ({
+      ...prev,
+      [field]: event.target.value,
+    }));
+  };
+
+  const exportCustomCsvLink = buildCustomUrl(builderValues, { limit: 200 });
+  const builderData = builderFetcher.data;
+  const builderRows = builderData?.rows ?? [];
+  const builderMetrics = builderData?.metrics ?? [];
+  const builderDimensionLabel =
+    builderData?.dimension?.label ??
+    translate(TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL, selectedLang);
+  const builderCurrency = builderData?.currency ?? currency;
+  const builderLoading =
+    builderFetcher.state === "loading" || builderFetcher.state === "submitting";
+
   return (
     <s-page heading="Performance reports" subtitle={`Last 30 days · ${rangeLabel}`}>
+      <s-stack direction="inline" gap="tight" align="center" style={{ marginBottom: "1rem" }}>
+        <s-text variation="subdued">
+          {translate(TRANSLATION_KEYS.REPORTS_LANG_LABEL, selectedLang)}:
+        </s-text>
+        <select value={selectedLang} onChange={handleLanguageChange}>
+          <option value="en">English</option>
+          <option value="zh">简体中文</option>
+        </select>
+      </s-stack>
       <s-section heading="Summary">
         <s-stack direction="inline" gap="base" wrap>
           <SummaryCard label="Revenue" value={report.summary.revenue} currency={currency} />
@@ -57,6 +155,120 @@ export default function ReportsPage() {
           <SummaryCard label="Refund amount" value={report.summary.refundAmount} currency={currency} />
           <SummaryCard label="Refund rate" value={report.summary.refundRate} variant="percentage" />
         </s-stack>
+      </s-section>
+
+      <s-section heading={translate(TRANSLATION_KEYS.REPORTS_BUILDER_HEADING, selectedLang)}>
+        <s-card padding="base">
+          <s-heading level="4">
+            {translate(TRANSLATION_KEYS.REPORTS_BUILDER_HEADING, selectedLang)}
+          </s-heading>
+          <s-text variation="subdued">
+            {translate(TRANSLATION_KEYS.REPORTS_BUILDER_DESC, selectedLang)}
+          </s-text>
+          <form
+            onSubmit={handleBuilderSubmit}
+            style={{
+              marginTop: "1rem",
+            }}
+          >
+            <s-stack direction="block" gap="base">
+              <s-stack direction="inline" gap="base" align="center">
+                <label>
+                  {translate(TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL, selectedLang)}
+                  <select
+                    value={builderValues.dimension}
+                    onChange={handleBuilderFieldChange("dimension")}
+                  >
+                    {DIMENSION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {translate(option.labelKey, selectedLang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {translate(TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL, selectedLang)}
+                  <input
+                    type="date"
+                    name="startDate"
+                    value={builderValues.start}
+                    onChange={handleBuilderFieldChange("start")}
+                  />
+                </label>
+                <label>
+                  <input
+                    type="date"
+                    name="endDate"
+                    value={builderValues.end}
+                    onChange={handleBuilderFieldChange("end")}
+                  />
+                </label>
+              </s-stack>
+              <s-stack direction="inline" gap="base" align="baseline">
+                <s-text variation="subdued">
+                  {translate(TRANSLATION_KEYS.REPORTS_METRICS_LABEL, selectedLang)}
+                  :
+                </s-text>
+                {METRIC_OPTIONS.map((metric) => (
+                  <label key={metric.value}>
+                    <input
+                      type="checkbox"
+                      checked={builderValues.metrics.includes(metric.value)}
+                      onChange={() => toggleMetric(metric.value)}
+                    />
+                    {translate(metric.labelKey, selectedLang)}
+                  </label>
+                ))}
+              </s-stack>
+              <s-stack direction="inline" gap="base">
+                <s-button type="submit" variant="primary">
+                  {translate(TRANSLATION_KEYS.REPORTS_RUN_REPORT, selectedLang)}
+                </s-button>
+                <s-link href={exportCustomCsvLink} target="_blank" tone="primary">
+                  {translate(TRANSLATION_KEYS.REPORTS_EXPORT_CUSTOM, selectedLang)}
+                </s-link>
+              </s-stack>
+            </s-stack>
+          </form>
+          <s-stack direction="block" gap="base" style={{ marginTop: "1rem" }}>
+            {builderLoading && <s-text variation="subdued">Loading...</s-text>}
+            {!builderLoading && builderRows.length === 0 && (
+              <s-text variation="subdued">
+                {translate(TRANSLATION_KEYS.REPORTS_NO_DATA, selectedLang)}
+              </s-text>
+            )}
+            {builderRows.length > 0 && (
+              <s-data-table>
+                <table>
+                  <thead>
+                    <tr>
+                      <th align="left">{builderDimensionLabel}</th>
+                      {builderMetrics.map((metric) => (
+                        <th key={metric.key} align="right">
+                          {metric.label}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {builderRows.map((row, index) => (
+                      <tr key={`${row.dimensionValue}-${index}`}>
+                        <td>{row.dimensionValue}</td>
+                        {row.metrics.map((metric) => (
+                          <td key={`${row.dimensionValue}-${metric.key}`} align="right">
+                            {metric.isCurrency
+                              ? formatCurrency(metric.value, builderCurrency)
+                              : Number(metric.value ?? 0).toLocaleString()}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </s-data-table>
+            )}
+          </s-stack>
+        </s-card>
       </s-section>
 
       <s-section heading="Channel performance">
@@ -207,13 +419,31 @@ export default function ReportsPage() {
               Download accounting CSV
             </s-button>
           </Form>
+          <Form method="get" action="/app/reports/export/accounting-detailed">
+            <s-button
+              type="submit"
+              variant="secondary"
+              fullWidth
+            >
+              {translate(TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD, selectedLang)}
+            </s-button>
+          </Form>
+          <Form method="get" action="/app/reports/export/tax-template">
+            <s-button
+              type="submit"
+              variant="secondary"
+              fullWidth
+            >
+              {translate(TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DOWNLOAD, selectedLang)}
+            </s-button>
+          </Form>
         </s-stack>
       </s-section>
       <s-section slot="aside" heading="Coming soon">
         <s-unordered-list>
-          <s-list-item>Refund impact report</s-list-item>
-          <s-list-item>Ad cohort performance</s-list-item>
-          <s-list-item>Custom report builder</s-list-item>
+          <s-list-item>Global tax templates</s-list-item>
+          <s-list-item>Accounting sync to ERP</s-list-item>
+          <s-list-item>Shared report dashboards</s-list-item>
         </s-unordered-list>
       </s-section>
     </s-page>

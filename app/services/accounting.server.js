@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import { getExchangeRate } from "./exchange-rates.server";
-import { startOfDay } from "../utils/dates.server.js";
+import { startOfDay, shiftDays } from "../utils/dates.server.js";
 
 export async function getAccountingMonthlySummary({
   storeId,
@@ -74,6 +74,72 @@ export async function getAccountingMonthlySummary({
     rows,
     currency: masterCurrency,
     range: { start, end },
+  };
+}
+
+export async function getAccountingDetailRows({
+  storeId,
+  start,
+  end,
+} = {}) {
+  if (!storeId) {
+    throw new Error("storeId is required for detailed accounting exports");
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    include: { merchant: true },
+  });
+  if (!store) {
+    throw new Error("Store not found");
+  }
+
+  const storeCurrency = store.currency ?? "USD";
+  const masterCurrency = store.merchant?.primaryCurrency ?? storeCurrency;
+  const endDate = end
+    ? startOfDay(new Date(end))
+    : startOfDay(new Date());
+  let startDate = start
+    ? startOfDay(new Date(start))
+    : shiftDays(endDate, -Math.max(1, 30) + 1);
+  if (startDate > endDate) {
+    [startDate, endDate] = [endDate, startDate];
+  }
+
+  const conversionRate = await getExchangeRate({
+    base: storeCurrency,
+    quote: masterCurrency,
+  });
+
+  const metrics = await prisma.dailyMetric.findMany({
+    where: {
+      storeId,
+      channel: "TOTAL",
+      productSku: null,
+      date: {
+        gte: startDate,
+        lte: endDate,
+      },
+    },
+    orderBy: { date: "asc" },
+  });
+
+  const rows = metrics.map((metric) => ({
+    date: metric.date,
+    revenue: toNumber(metric.revenue) * conversionRate,
+    cogs: toNumber(metric.cogs) * conversionRate,
+    shippingCost: toNumber(metric.shippingCost) * conversionRate,
+    paymentFees: toNumber(metric.paymentFees) * conversionRate,
+    refundAmount: toNumber(metric.refundAmount) * conversionRate,
+    adSpend: toNumber(metric.adSpend) * conversionRate,
+    netProfit: toNumber(metric.netProfit) * conversionRate,
+    orders: toNumber(metric.orders),
+  }));
+
+  return {
+    range: { start: startDate, end: endDate },
+    rows,
+    currency: masterCurrency,
   };
 }
 

@@ -2,74 +2,237 @@ import prisma from "../db.server";
 import { getFixedCostTotal } from "./fixed-costs.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE_DAYS = 30;
+const CACHE_TTL_MS = 30 * 1000;
+
+const DIMENSION_DEFINITIONS = {
+  channel: {
+    field: "channel",
+    label: "Channel",
+    where: { channel: { not: "PRODUCT" } },
+    format: (value) => value ?? "Unassigned",
+  },
+  product: {
+    field: "productSku",
+    label: "Product SKU",
+    where: { channel: "PRODUCT", productSku: { not: null } },
+    format: (value) => value ?? "Unknown SKU",
+  },
+  date: {
+    field: "date",
+    label: "Date",
+    format: (value) => (value ? value.toISOString().slice(0, 10) : "No date"),
+  },
+};
+
+const METRIC_COLUMNS = {
+  revenue: { field: "revenue", label: "Revenue", isCurrency: true },
+  netProfit: { field: "netProfit", label: "Net profit", isCurrency: true },
+  adSpend: { field: "adSpend", label: "Ad spend", isCurrency: true },
+  cogs: { field: "cogs", label: "COGS", isCurrency: true },
+  shippingCost: { field: "shippingCost", label: "Shipping", isCurrency: true },
+  paymentFees: { field: "paymentFees", label: "Payment fees", isCurrency: true },
+  refundAmount: { field: "refundAmount", label: "Refund amount", isCurrency: true },
+  orders: { field: "orders", label: "Orders", isCurrency: false },
+};
+
+const DEFAULT_CUSTOM_METRICS = ["revenue", "netProfit"];
 
 export async function getReportingOverview({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
   if (!storeId) {
     throw new Error("storeId is required for reporting overview");
   }
 
-  const range = {
-    end: startOfDay(new Date()),
-    start: shiftDays(startOfDay(new Date()), -rangeDays + 1),
+  const end = startOfDay(new Date());
+  const start = shiftDays(end, -rangeDays + 1);
+  const cacheKey = buildCacheKey(
+    "reporting-overview",
+    storeId,
+    start.toISOString(),
+  );
+  return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
+    buildReportingOverview({
+      storeId,
+      rangeDays,
+      range: { start, end },
+    }),
+  );
+}
+
+export async function getCustomReportData({
+  storeId,
+  dimension = "channel",
+  metrics = DEFAULT_CUSTOM_METRICS,
+  start,
+  end,
+  rangeDays = DEFAULT_RANGE_DAYS,
+  limit = 25,
+}) {
+  if (!storeId) {
+    throw new Error("storeId is required for custom reports");
+  }
+
+  const normalizedDimension = DIMENSION_DEFINITIONS[dimension]
+    ? dimension
+    : "channel";
+  const dimensionDef = DIMENSION_DEFINITIONS[normalizedDimension];
+
+  const today = startOfDay(new Date());
+  const rangeEnd = end ? startOfDay(new Date(end)) : today;
+  const rangeStart = start
+    ? startOfDay(new Date(start))
+    : shiftDays(rangeEnd, -Math.max(rangeDays, 1) + 1);
+
+  const storeRecord = await prisma.store.findUnique({
+    where: { id: storeId },
+    include: { merchant: true },
+  });
+  const storeCurrency = storeRecord?.currency ?? "USD";
+  const masterCurrency =
+    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
+  const conversionRate = await getExchangeRate({
+    base: storeCurrency,
+    quote: masterCurrency,
+  });
+
+  const selectedMetrics = Array.from(
+    new Set(
+      (Array.isArray(metrics) ? metrics : [metrics])
+        .map((name) => name?.toString().trim().toLowerCase())
+        .filter((name) => METRIC_COLUMNS[name]),
+    ),
+  );
+  const metricsToUse =
+    selectedMetrics.length > 0 ? selectedMetrics : DEFAULT_CUSTOM_METRICS;
+
+  const sumSelect = metricsToUse.reduce((acc, metric) => {
+    const column = METRIC_COLUMNS[metric];
+    if (column) {
+      acc[column.field] = true;
+    }
+    return acc;
+  }, {});
+  if (!sumSelect.revenue) {
+    sumSelect.revenue = true;
+    if (!metricsToUse.includes("revenue")) {
+      metricsToUse.unshift("revenue");
+    }
+  }
+
+  const whereClause = {
+    storeId,
+    date: { gte: rangeStart, lte: rangeEnd },
+    ...dimensionDef.where,
   };
 
-  const [channelRows, productRows, aggregateMetrics, storeRecord] = await Promise.all([
-    prisma.dailyMetric.groupBy({
-      by: ["channel"],
-      where: {
-        storeId,
-        date: { gte: range.start },
-        channel: { not: "PRODUCT" },
-      },
+  const firstMetricField = METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
+  const groupedRows = await prisma.dailyMetric.groupBy({
+    by: [dimensionDef.field],
+    where: whereClause,
+    _sum: sumSelect,
+    orderBy: {
       _sum: {
-        revenue: true,
-        adSpend: true,
-        netProfit: true,
-        orders: true,
+        [firstMetricField]: "desc",
       },
-    }),
-    prisma.dailyMetric.groupBy({
-      by: ["productSku"],
-      where: {
-        storeId,
-        channel: "PRODUCT",
-        productSku: { not: null },
-        date: { gte: range.start },
-      },
-      _sum: {
-        revenue: true,
-        netProfit: true,
-        orders: true,
-        units: true,
-        adSpend: true,
-        refundAmount: true,
-        refunds: true,
-      },
-      orderBy: {
-        _sum: {
-          revenue: "desc",
+    },
+    take: Math.max(1, Math.min(limit ?? 25, 200)),
+  });
+
+  const rows = groupedRows.map((row) => {
+    const value = row[dimensionDef.field];
+    return {
+      dimensionValue: dimensionDef.format(value),
+      metrics: metricsToUse.map((metric) => {
+        const column = METRIC_COLUMNS[metric];
+        const baseValue = Number(row._sum[column.field] ?? 0);
+        const normalized = column.isCurrency
+          ? baseValue * conversionRate
+          : baseValue;
+        return {
+          key: metric,
+          label: column.label,
+          value: normalized,
+          isCurrency: column.isCurrency,
+        };
+      }),
+    };
+  });
+
+  return {
+    range: { start: rangeStart, end: rangeEnd },
+    dimension: {
+      key: normalizedDimension,
+      label: dimensionDef.label,
+    },
+    metrics: metricsToUse.map((metric) => ({
+      key: metric,
+      label: METRIC_COLUMNS[metric].label,
+      isCurrency: METRIC_COLUMNS[metric].isCurrency,
+    })),
+    rows,
+    currency: masterCurrency,
+  };
+}
+
+async function buildReportingOverview({ storeId, rangeDays, range }) {
+  const [channelRows, productRows, aggregateMetrics, storeRecord] =
+    await Promise.all([
+      prisma.dailyMetric.groupBy({
+        by: ["channel"],
+        where: {
+          storeId,
+          date: { gte: range.start },
+          channel: { not: "PRODUCT" },
         },
-      },
-      take: 15,
-    }),
-    prisma.dailyMetric.aggregate({
-      where: { storeId, date: { gte: range.start } },
-      _sum: {
-        revenue: true,
-        netProfit: true,
-        adSpend: true,
-        orders: true,
-        refundAmount: true,
-        refunds: true,
-      },
-    }),
-    prisma.store.findUnique({
-      where: { id: storeId },
-      include: { merchant: true },
-    }),
-  ]);
+        _sum: {
+          revenue: true,
+          adSpend: true,
+          netProfit: true,
+          orders: true,
+        },
+      }),
+      prisma.dailyMetric.groupBy({
+        by: ["productSku"],
+        where: {
+          storeId,
+          channel: "PRODUCT",
+          productSku: { not: null },
+          date: { gte: range.start },
+        },
+        _sum: {
+          revenue: true,
+          netProfit: true,
+          orders: true,
+          units: true,
+          adSpend: true,
+          refundAmount: true,
+          refunds: true,
+        },
+        orderBy: {
+          _sum: {
+            revenue: "desc",
+          },
+        },
+        take: 15,
+      }),
+      prisma.dailyMetric.aggregate({
+        where: { storeId, date: { gte: range.start } },
+        _sum: {
+          revenue: true,
+          netProfit: true,
+          adSpend: true,
+          orders: true,
+          refundAmount: true,
+          refunds: true,
+        },
+      }),
+      prisma.store.findUnique({
+        where: { id: storeId },
+        include: { merchant: true },
+      }),
+    ]);
 
   const storeCurrency = storeRecord?.currency ?? "USD";
   const masterCurrency =
@@ -138,7 +301,8 @@ export async function getReportingOverview({ storeId, rangeDays = DEFAULT_RANGE_
     netProfit: Number(aggregateMetrics._sum.netProfit || 0) * conversionRate,
     adSpend: Number(aggregateMetrics._sum.adSpend || 0) * conversionRate,
     orders: Number(aggregateMetrics._sum.orders || 0),
-    refundAmount: Number(aggregateMetrics._sum.refundAmount || 0) * conversionRate,
+    refundAmount:
+      Number(aggregateMetrics._sum.refundAmount || 0) * conversionRate,
     refunds: Number(aggregateMetrics._sum.refunds || 0),
   };
 
@@ -162,7 +326,6 @@ export async function getReportingOverview({ storeId, rangeDays = DEFAULT_RANGE_
     currency: masterCurrency,
   };
 }
-
 export async function getNetProfitVsSpendSeries({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
   if (!storeId) {
     throw new Error("storeId is required for performance timeseries");

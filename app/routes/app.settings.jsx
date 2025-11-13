@@ -115,6 +115,33 @@ const LOCALIZED_TEXT = {
     planActionButton: "Upgrade to {plan}",
     planActionTrialPrompt: "Trial ending soon? Upgrading keeps the workspace running.",
     planActionMaxPlan: "You are on the most advanced plan. Contact support for bespoke limits.",
+    billingStatusMessages: {
+      PENDING: {
+        title: "Billing pending",
+        message: "Approve the Shopify charge so Profit Pulse can continue syncing orders.",
+      },
+      PAST_DUE: {
+        title: "Billing overdue",
+        message: "Your plan is past due and ingestion may stop until the charge is settled in Shopify.",
+      },
+      CANCELLED: {
+        title: "Subscription cancelled",
+        message: "The billing cycle has been cancelled. Reinstall or reactivate the app in Shopify to restart syncing.",
+      },
+      FROZEN: {
+        title: "Billing frozen",
+        message: "Billing has been paused by Shopify. Resolve the outstanding charge to unlock data sync again.",
+      },
+      SUSPENDED: {
+        title: "Billing suspended",
+        message: "Shopify has suspended billing. Visit Shopify to resume the subscription.",
+      },
+      EXPIRED: {
+        title: "Billing expired",
+        message: "Your billing cycle expired. Renew via Shopify to keep Profit Pulse active.",
+      },
+    },
+    billingStatusLinkLabel: "Open Shopify billing",
   },
   zh: {
     trialSection: "试用与额度监控",
@@ -148,6 +175,33 @@ const LOCALIZED_TEXT = {
     planActionButton: "升级到 {plan}",
     planActionTrialPrompt: "试用即将结束？升级后继续同步数据。",
     planActionMaxPlan: "您已在最高级计划，需自定义额度请联系支持。",
+    billingStatusMessages: {
+      PENDING: {
+        title: "计费等待中",
+        message: "请在 Shopify 中确认收费，Profit Pulse 才能继续同步订单。",
+      },
+      PAST_DUE: {
+        title: "计费逾期",
+        message: "计费状态已过期，需在 Shopify 结算后才能恢复同步。",
+      },
+      CANCELLED: {
+        title: "订阅已取消",
+        message: "订阅被取消，请在 Shopify 中重新激活应用以恢复同步。",
+      },
+      FROZEN: {
+        title: "计费被冻结",
+        message: "Shopify 已暂停计费，请先处理未结算的订单再恢复同步。",
+      },
+      SUSPENDED: {
+        title: "计费已停用",
+        message: "Shopify 暂停了订阅计费，请在 Shopify 端恢复后继续使用。",
+      },
+      EXPIRED: {
+        title: "计费已过期",
+        message: "账单已过期，请在 Shopify 中续费以维持 Profit Pulse 的运行。",
+      },
+    },
+    billingStatusLinkLabel: "前往 Shopify 计费页",
   },
 };
 
@@ -168,7 +222,7 @@ const REPORT_CHANNEL_OPTIONS = [
 ];
 
 const FREE_PLAN_TIER = "FREE";
-const { CredentialProvider } = pkg;
+const { CredentialProvider, AttributionRuleType } = pkg;
 
 const NOTIFICATION_TYPE_OPTIONS = [
   { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
@@ -185,7 +239,34 @@ const ATTRIBUTION_PROVIDER_OPTIONS = [
   { value: CredentialProvider.GOOGLE_ADS, label: "Google Ads" },
   { value: CredentialProvider.BING_ADS, label: "Bing Ads" },
   { value: CredentialProvider.TIKTOK_ADS, label: "TikTok Ads" },
+  { value: CredentialProvider.AMAZON_ADS, label: "Amazon Ads" },
+  { value: CredentialProvider.SNAPCHAT_ADS, label: "Snapchat Ads" },
 ];
+const ATTRIBUTION_RULE_TYPES = [
+  AttributionRuleType.LAST_TOUCH,
+  AttributionRuleType.FIRST_TOUCH,
+];
+const RULE_TYPE_LABELS = {
+  [AttributionRuleType.LAST_TOUCH]: {
+    en: "Last-touch weight",
+    zh: "末触权重",
+  },
+  [AttributionRuleType.FIRST_TOUCH]: {
+    en: "First-touch weight",
+    zh: "首触权重",
+  },
+};
+
+function getProviderLabel(provider) {
+  const option = ATTRIBUTION_PROVIDER_OPTIONS.find((item) => item.value === provider);
+  return option?.label ?? provider;
+}
+
+function getRuleTypeLabel(ruleType, lang) {
+  const labels = RULE_TYPE_LABELS[ruleType];
+  if (!labels) return ruleType;
+  return labels[lang] ?? labels.en;
+}
 const DEFAULT_ATTRIBUTION_WINDOW = 24;
 
 const ROLE_LABELS = {
@@ -790,24 +871,33 @@ export const action = async ({ request }) => {
       return { message: "无法识别商户。" };
     }
     try {
-      await Promise.all(
-        ATTRIBUTION_PROVIDER_OPTIONS.map((option) => {
-          const weightValue = Number(formData.get(`weight_${option.value}`));
-          const windowValue = Number(formData.get(`window_${option.value}`));
+      const updates = [];
+      for (const option of ATTRIBUTION_PROVIDER_OPTIONS) {
+        for (const ruleType of ATTRIBUTION_RULE_TYPES) {
+          const weightValue = Number(
+            formData.get(`weight_${option.value}_${ruleType}`),
+          );
+          const windowValue = Number(
+            formData.get(`window_${option.value}_${ruleType}`),
+          );
           const weight =
             Number.isFinite(weightValue) && weightValue > 0 ? weightValue : 1;
           const windowHours =
             Number.isFinite(windowValue) && windowValue > 0
               ? windowValue
               : DEFAULT_ATTRIBUTION_WINDOW;
-          return upsertAttributionRule({
-            merchantId: store.merchantId,
-            provider: option.value,
-            weight,
-            windowHours,
-          });
-        }),
-      );
+          updates.push(
+            upsertAttributionRule({
+              merchantId: store.merchantId,
+              provider: option.value,
+              ruleType,
+              weight,
+              windowHours,
+            }),
+          );
+        }
+      }
+      await Promise.all(updates);
       await logAuditEvent({
         merchantId: store.merchantId,
         userEmail: session.email,
@@ -963,6 +1053,15 @@ export default function SettingsPage() {
         .replace("{limit}", usage.orders.limit.toLocaleString())
     : "";
   const planInfo = settings.plan ?? {};
+  const billingStatusKey = planInfo.status ? planInfo.status.toUpperCase() : null;
+  const billingNotice =
+    billingStatusKey && localized.billingStatusMessages
+      ? localized.billingStatusMessages[billingStatusKey] ?? null
+      : null;
+  const billingActionHref =
+    primaryStore?.shopDomain != null
+      ? `https://${primaryStore.shopDomain}/admin/apps`
+      : "/app";
   const now = new Date();
   const trialEndsAt = planInfo.trialEndsAt ? new Date(planInfo.trialEndsAt) : null;
   const trialActive = trialEndsAt ? trialEndsAt >= now : false;
@@ -1022,6 +1121,7 @@ export default function SettingsPage() {
   const reportSchedules = settings.reportSchedules ?? [];
   const logisticsRules = settings.logisticsRules ?? [];
   const taxRates = settings.taxRates ?? [];
+  const attributionRules = settings.attributionRules ?? [];
   const defaultCurrency = primaryStore?.currency ?? "USD";
   const syncingOrders =
     isSubmitting && currentIntent === "sync-orders";
@@ -1243,6 +1343,16 @@ export default function SettingsPage() {
                 </s-text>
               )}
             </div>
+            {billingNotice && (
+              <s-banner tone="critical" title={billingNotice.title}>
+                <s-stack direction="block" gap="tight">
+                  <s-text>{billingNotice.message}</s-text>
+                  <s-button variant="secondary" href={billingActionHref}>
+                    {localized.billingStatusLinkLabel}
+                  </s-button>
+                </s-stack>
+              </s-banner>
+            )}
             <s-text variation="subdued">
               {localized.orderUsageNote}
             </s-text>
@@ -1490,38 +1600,52 @@ export default function SettingsPage() {
             <Form method="post">
               <input type="hidden" name="intent" value="update-attribution-rules" />
               <s-stack direction="block" gap="small">
-                {ATTRIBUTION_PROVIDER_OPTIONS.map((option) => {
-                  const rule =
-                    attributionRules.find((item) => item.provider === option.value) ?? {
-                      weight: 1,
-                      windowHours: DEFAULT_ATTRIBUTION_WINDOW,
-                    };
-                  return (
-                    <s-stack key={option.value} direction="inline" gap="base" align="baseline">
-                      <s-text variation="strong">{option.label}</s-text>
-                      <label>
-                        Weight
-                        <input
-                          type="number"
-                          name={`weight_${option.value}`}
-                          step="0.1"
-                          min="0"
-                          defaultValue={rule.weight ?? 1}
-                        />
-                      </label>
-                      <label>
-                        Attribution window (hrs)
-                        <input
-                          type="number"
-                          name={`window_${option.value}`}
-                          step="1"
-                          min="1"
-                          defaultValue={rule.windowHours ?? DEFAULT_ATTRIBUTION_WINDOW}
-                        />
-                      </label>
+                {attributionRules.length === 0 && (
+                  <s-text variation="subdued">
+                    请先连接广告账号，才能设置归因权重。
+                  </s-text>
+                )}
+                {attributionRules.map((entry) => (
+                  <s-card key={entry.provider} padding="base" tone="transparent">
+                    <s-heading level="4">{getProviderLabel(entry.provider)}</s-heading>
+                    <s-stack direction="block" gap="tight">
+                      {(entry.touches ?? []).map((touch) => (
+                        <s-stack
+                          key={`${entry.provider}_${touch.ruleType}`}
+                          direction="inline"
+                          gap="base"
+                          align="baseline"
+                        >
+                          <s-text variation="subdued">
+                            {getRuleTypeLabel(touch.ruleType, selectedLang)}
+                          </s-text>
+                          <label>
+                            Weight
+                            <input
+                              type="number"
+                              name={`weight_${entry.provider}_${touch.ruleType}`}
+                              step="0.1"
+                              min="0"
+                              defaultValue={touch.weight ?? 1}
+                            />
+                          </label>
+                          <label>
+                            Attribution window (hrs)
+                            <input
+                              type="number"
+                              name={`window_${entry.provider}_${touch.ruleType}`}
+                              step="1"
+                              min="1"
+                              defaultValue={
+                                touch.windowHours ?? DEFAULT_ATTRIBUTION_WINDOW
+                              }
+                            />
+                          </label>
+                        </s-stack>
+                      ))}
                     </s-stack>
-                  );
-                })}
+                  </s-card>
+                ))}
                 <s-button
                   type="submit"
                   variant="primary"

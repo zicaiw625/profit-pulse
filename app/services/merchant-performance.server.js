@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 export async function getMerchantPerformanceSummary({
   merchantId,
@@ -10,6 +11,21 @@ export async function getMerchantPerformanceSummary({
     return null;
   }
 
+  const now = new Date();
+  const end = startOfDay(now);
+  const start = shiftDays(end, -(Math.max(rangeDays ?? 30, 1) - 1));
+  const cacheKey = buildCacheKey(
+    "merchant-performance",
+    merchantId,
+    start.toISOString(),
+  );
+
+  return memoizeAsync(cacheKey, 60 * 1000, () =>
+    buildMerchantPerformanceSummary({ merchantId, rangeDays, range: { start, end } }),
+  );
+}
+
+async function buildMerchantPerformanceSummary({ merchantId, rangeDays, range }) {
   const merchant = await prisma.merchantAccount.findUnique({
     where: { id: merchantId },
     include: { stores: true },
@@ -20,11 +36,8 @@ export async function getMerchantPerformanceSummary({
 
   const stores = merchant.stores ?? [];
   const masterCurrency = merchant.primaryCurrency ?? "USD";
-  const rangeEnd = startOfDay(new Date());
-  const rangeStart = shiftDays(
-    rangeEnd,
-    -(Math.max(rangeDays ?? 30, 1) - 1),
-  );
+  const rangeStart = range.start;
+  const rangeEnd = range.end;
 
   if (!stores.length) {
     return {

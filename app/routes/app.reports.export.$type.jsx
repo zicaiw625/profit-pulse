@@ -4,7 +4,10 @@ import {
   getReportingOverview,
   getNetProfitVsSpendSeries,
   getAdPerformanceBreakdown,
+  getCustomReportData,
 } from "../services/reports.server";
+import { getAccountingMonthlySummary, getAccountingDetailRows } from "../services/accounting.server";
+import { listTaxRates } from "../services/tax-rates.server";
 import {
   formatChannelLabel,
   formatDateShort,
@@ -12,7 +15,6 @@ import {
   formatPercent,
   formatRatio,
 } from "../utils/formatting";
-import { getAccountingMonthlySummary } from "../services/accounting.server";
 
 const EXPORT_BUILDERS = {
   channels: buildChannelCsv,
@@ -20,6 +22,9 @@ const EXPORT_BUILDERS = {
   "net-profit": buildNetProfitCsv,
   ads: buildAdsCsv,
   accounting: buildAccountingCsv,
+  custom: buildCustomCsv,
+  "accounting-detailed": buildAccountingDetailedCsv,
+  "tax-template": buildTaxTemplateCsv,
 };
 
 export const loader = async ({ request, params }) => {
@@ -32,7 +37,11 @@ export const loader = async ({ request, params }) => {
     throw new Response("Export type not found", { status: 404 });
   }
 
-  const { filename, content } = await builder({ storeId: store.id });
+  const searchParams = new URL(request.url).searchParams;
+  const { filename, content } = await builder({
+    storeId: store.id,
+    searchParams,
+  });
 
   return new Response(content, {
     headers: {
@@ -192,6 +201,121 @@ async function buildAccountingCsv({ storeId }) {
 
   return {
     filename: `accounting-${dateStamp(range)}.csv`,
+    content: buildCsv(headers, dataRows),
+  };
+}
+
+async function buildCustomCsv({ storeId, searchParams }) {
+  const dimension = searchParams.get("dimension") ?? undefined;
+  const metricsParam = searchParams.get("metrics");
+  const metrics = metricsParam
+    ? metricsParam.split(",").map((item) => item.trim()).filter(Boolean)
+    : undefined;
+  const rangeStart = searchParams.get("start") ?? undefined;
+  const rangeEnd = searchParams.get("end") ?? undefined;
+  const limit = Number(searchParams.get("limit")) || 25;
+
+  const report = await getCustomReportData({
+    storeId,
+    dimension,
+    metrics,
+    start: rangeStart,
+    end: rangeEnd,
+    limit,
+  });
+
+  const headers = [
+    report.dimension.label,
+    ...report.metrics.map((metric) => metric.label),
+  ];
+  const rows = report.rows.map((row) => [
+    row.dimensionValue,
+    ...row.metrics.map((metric) =>
+      metric.isCurrency
+        ? formatDecimal(metric.value)
+        : Number(metric.value ?? 0).toLocaleString(),
+    ),
+  ]);
+
+  return {
+    filename: `custom-${report.dimension.key}-${dateStamp(report.range)}.csv`,
+    content: buildCsv(headers, rows),
+  };
+}
+
+async function buildAccountingDetailedCsv({ storeId, searchParams }) {
+  const rangeStart = searchParams.get("start") ?? undefined;
+  const rangeEnd = searchParams.get("end") ?? undefined;
+  const { rows, range } = await getAccountingDetailRows({
+    storeId,
+    start: rangeStart,
+    end: rangeEnd,
+  });
+
+  const headers = [
+    "Date",
+    "Revenue",
+    "COGS",
+    "Shipping",
+    "Payment fees",
+    "Refund amount",
+    "Ad spend",
+    "Net profit",
+    "Orders",
+  ];
+  const dataRows = rows.map((row) => [
+    formatDateShort(row.date),
+    formatDecimal(row.revenue),
+    formatDecimal(row.cogs),
+    formatDecimal(row.shippingCost),
+    formatDecimal(row.paymentFees),
+    formatDecimal(row.refundAmount),
+    formatDecimal(row.adSpend),
+    formatDecimal(row.netProfit),
+    Number(row.orders ?? 0),
+  ]);
+
+  return {
+    filename: `accounting-detail-${dateStamp(range)}.csv`,
+    content: buildCsv(headers, dataRows),
+  };
+}
+
+async function buildTaxTemplateCsv({ storeId }) {
+  const rates = await listTaxRates(storeId);
+  const defaultRows =
+    rates.length > 0
+      ? rates
+      : [
+          {
+            country: "United States",
+            state: "CA",
+            rate: 7.25,
+            effectiveFrom: null,
+            effectiveTo: null,
+            notes: "Example rate",
+          },
+          {
+            country: "Canada",
+            state: "ON",
+            rate: 13,
+            effectiveFrom: null,
+            effectiveTo: null,
+            notes: "Example rate",
+          },
+        ];
+  const headers = ["Country", "State", "Rate", "Effective from", "Effective to", "Notes"];
+  const dataRows = defaultRows.map((row) => [
+    row.country,
+    row.state ?? "",
+    formatDecimal(row.rate),
+    row.effectiveFrom ? formatDateShort(new Date(row.effectiveFrom)) : "",
+    row.effectiveTo ? formatDateShort(new Date(row.effectiveTo)) : "",
+    row.notes ?? "",
+  ]);
+
+  return {
+    filename: `tax-template-${new Date().toISOString().slice(0, 10)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }

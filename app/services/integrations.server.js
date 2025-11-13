@@ -24,6 +24,16 @@ const AD_PROVIDERS = [
     label: "TikTok Ads",
     requiresCredential: true,
   },
+  {
+    id: CredentialProvider.AMAZON_ADS,
+    label: "Amazon Ads",
+    requiresCredential: true,
+  },
+  {
+    id: CredentialProvider.SNAPCHAT_ADS,
+    label: "Snapchat Ads",
+    requiresCredential: true,
+  },
 ];
 
 const PAYMENT_PROVIDERS = [

@@ -2,10 +2,13 @@ import prisma from "../db.server";
 import { getFixedCostTotal } from "./fixed-costs.server";
 import { checkNetProfitAlert, checkRefundSpikeAlert } from "./alerts.server";
 import { getExchangeRate } from "./exchange-rates.server";
+import { getPlanUsage } from "./plan-limits.server";
 import { getMerchantPerformanceSummary } from "./merchant-performance.server";
 import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE = 14;
+const CACHE_TTL_MS = 15 * 1000;
 
 export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE }) {
   if (!store?.id) {
@@ -14,18 +17,34 @@ export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE })
 
   const today = startOfDay(new Date());
   const rangeStart = shiftDays(today, -(rangeDays - 1));
-  const previousStart = shiftDays(rangeStart, -rangeDays);
+  const cacheKey = buildCacheKey(
+    "dashboard",
+    store.id,
+    rangeStart.toISOString(),
+  );
+
+  return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
+    buildDashboardOverview({
+      store,
+      rangeDays,
+      range: { start: rangeStart, end: today },
+    }),
+  );
+}
+
+async function buildDashboardOverview({ store, rangeDays, range }) {
+  const previousStart = shiftDays(range.start, -rangeDays);
 
   const [currentMetrics, previousMetrics, openIssues, storeRecord] =
     await Promise.all([
       prisma.dailyMetric.findMany({
-        where: { storeId: store.id, date: { gte: rangeStart } },
+        where: { storeId: store.id, date: { gte: range.start } },
         orderBy: { date: "asc" },
       }),
       prisma.dailyMetric.findMany({
         where: {
           storeId: store.id,
-          date: { gte: previousStart, lt: rangeStart },
+          date: { gte: previousStart, lt: range.start },
         },
       }),
       prisma.reconciliationIssue.findMany({
@@ -51,8 +70,8 @@ export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE })
     ? await getFixedCostTotal({
         merchantId,
         rangeDays,
-        rangeStart,
-        rangeEnd: today,
+        rangeStart: range.start,
+        rangeEnd: range.end,
       })
     : 0;
   const fixedCostTotal = fixedCostTotalStore * conversionRate;
@@ -63,10 +82,12 @@ export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE })
     fixedCostTotal,
     conversionRate,
   );
-  const netProfitAfterFixedCard = summary.find((card) => card.key === "netProfitAfterFixed");
+  const netProfitAfterFixedCard = summary.find(
+    (card) => card.key === "netProfitAfterFixed",
+  );
   const refundRateCard = summary.find((card) => card.key === "refundRate");
   const timeSeries = buildTimeSeries(
-    rangeStart,
+    range.start,
     rangeDays,
     currentMetrics,
     conversionRate,
@@ -78,10 +99,15 @@ export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE })
   );
   const topProducts = await loadTopProducts(
     store.id,
-    rangeStart,
+    range.start,
     conversionRate,
   );
   const alerts = openIssues.map(issueToAlert);
+
+  const planUsageResult =
+    storeRecord?.merchantId != null
+      ? await getPlanUsage({ merchantId: storeRecord.merchantId })
+      : null;
 
   if (storeRecord) {
     await checkNetProfitAlert({
@@ -119,6 +145,7 @@ export async function getDashboardOverview({ store, rangeDays = DEFAULT_RANGE })
     fixedCosts: fixedCostTotal,
     currency: masterCurrency,
     merchantSummary,
+    planStatus: buildPlanStatus(planUsageResult),
   };
 }
 
@@ -276,6 +303,20 @@ function buildCostBreakdown(
   slices.push({ label: "Other", value: Math.max(0, 1 - accounted) });
 
   return slices;
+}
+
+function buildPlanStatus(planUsageResult) {
+  if (!planUsageResult) {
+    return null;
+  }
+  const usage = planUsageResult.usage?.orders ?? null;
+  return {
+    planName: planUsageResult.planDefinition?.name ?? null,
+    planStatus: planUsageResult.subscription?.status ?? "INACTIVE",
+    orderStatus: usage?.status,
+    orderLimit: usage?.limit ?? 0,
+    orderCount: usage?.count ?? 0,
+  };
 }
 
 async function loadTopProducts(storeId, rangeStart, conversionRate = 1) {

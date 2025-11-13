@@ -7,6 +7,7 @@ import {
   DEFAULT_PLAN,
   BILLABLE_PLANS,
 } from "../config/billing";
+import { sendSlackNotification } from "./notifications.server";
 
 const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
 
@@ -118,6 +119,10 @@ export async function applySubscriptionWebhook({ shopDomain, payload }) {
     return;
   }
 
+  const existingSubscription = await prisma.subscription.findUnique({
+    where: { merchantId: store.merchantId },
+  });
+
   const planDefinition =
     findPlanByBillingKey(payload.name) ?? getPlanDefinitionByTier(null);
   const subscriptionPayload = {
@@ -140,5 +145,39 @@ export async function applySubscriptionWebhook({ shopDomain, payload }) {
       ...subscriptionPayload,
     },
     update: subscriptionPayload,
+  });
+
+  await maybeNotifyBillingStatus({
+    merchantId: store.merchantId,
+    shopDomain,
+    status: subscriptionPayload.status,
+    previousStatus: existingSubscription?.status,
+  });
+}
+
+const BILLING_ALERT_STATUSES = new Set([
+  "PAST_DUE",
+  "PENDING",
+  "FROZEN",
+  "CANCELLED",
+  "SUSPENDED",
+  "EXPIRED",
+]);
+
+async function maybeNotifyBillingStatus({
+  merchantId,
+  shopDomain,
+  status,
+  previousStatus,
+}) {
+  if (!merchantId || !status) return;
+  const normalizedStatus = status.toUpperCase();
+  if (previousStatus && normalizedStatus === previousStatus.toUpperCase()) {
+    return;
+  }
+  if (!BILLING_ALERT_STATUSES.has(normalizedStatus)) return;
+  await sendSlackNotification({
+    merchantId,
+    text: `⚠️ Profit Pulse billing status for ${shopDomain} is ${normalizedStatus}. Resolve the charge in Shopify to keep data syncing.`,
   });
 }
