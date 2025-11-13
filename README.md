@@ -40,6 +40,19 @@ Press P to open the URL to your app. Once you click install, you can start devel
 
 Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/tools/cli). It logs into your partners account, connects to an app, provides environment variables, updates remote config, creates a tunnel and provides commands to generate extensions.
 
+### Required environment variables
+
+The server now validates the following variables during startup. Missing values will stop the process so misconfigurations surface early:
+
+| Variable | Purpose |
+| --- | --- |
+| `SHOPIFY_API_KEY` | App client ID used by OAuth flows and App Bridge. |
+| `SHOPIFY_API_SECRET` | App secret from the Partner Dashboard (used to verify callbacks). |
+| `SHOPIFY_APP_URL` | Public base URL Shopify should call during auth and webhook delivery. |
+| `SCOPES` | Comma-separated Admin API scopes that the app requests on install. |
+| `DATABASE_URL` | Prisma connection string for session and application data. |
+| `CREDENTIAL_ENCRYPTION_KEY` | 32+ byte secret for encrypting stored API credentials. |
+
 ### Authenticating and querying data
 
 To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.js`:
