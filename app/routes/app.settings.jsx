@@ -58,6 +58,9 @@ import {
 import { upsertAttributionRule } from "../services/attribution.server";
 import { logAuditEvent } from "../services/audit.server";
 import pkg from "@prisma/client";
+import { importLogisticsRatesFromCsv } from "../services/logistics.server";
+import { importTaxRatesFromCsv } from "../services/tax-rates.server";
+import { syncErpCosts } from "../services/erp-costs.server";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -106,6 +109,12 @@ const LOCALIZED_TEXT = {
     auditAction: "Action",
     auditDetails: "Details",
     auditUser: "User",
+    planActionHeading: "Plan actions",
+    planActionDescription:
+      "When a trial ends or you approach your allowance, upgrading keeps data synced without interruptions.",
+    planActionButton: "Upgrade to {plan}",
+    planActionTrialPrompt: "Trial ending soon? Upgrading keeps the workspace running.",
+    planActionMaxPlan: "You are on the most advanced plan. Contact support for bespoke limits.",
   },
   zh: {
     trialSection: "试用与额度监控",
@@ -133,6 +142,12 @@ const LOCALIZED_TEXT = {
     auditAction: "操作",
     auditDetails: "详情",
     auditUser: "用户",
+    planActionHeading: "计划操作",
+    planActionDescription:
+      "试用结束或额度接近上限时，升级计划可以持续同步数据，避免暂停。",
+    planActionButton: "升级到 {plan}",
+    planActionTrialPrompt: "试用即将结束？升级后继续同步数据。",
+    planActionMaxPlan: "您已在最高级计划，需自定义额度请联系支持。",
   },
 };
 
@@ -202,6 +217,9 @@ const ROLE_PERMISSIONS = {
   "create-report-schedule": ["OWNER", "FINANCE"],
   "delete-report-schedule": ["OWNER", "FINANCE"],
   "update-attribution-rules": ["OWNER", "FINANCE"],
+  "import-logistics": ["OWNER", "FINANCE"],
+  "import-tax-rates": ["OWNER", "FINANCE"],
+  "sync-erp-costs": ["OWNER", "FINANCE"],
 };
 
 const INTENT_LABELS = {
@@ -227,6 +245,9 @@ const INTENT_LABELS = {
   "create-report-schedule": "Add report schedule",
   "delete-report-schedule": "Remove report schedule",
   "update-attribution-rules": "Update attribution rules",
+  "import-logistics": "Import logistics rates",
+  "import-tax-rates": "Import tax templates",
+  "sync-erp-costs": "Sync ERP SKU costs",
 };
 
 function normalizeRole(role) {
@@ -802,8 +823,89 @@ export const action = async ({ request }) => {
     }
   }
 
+  if (intent === "import-logistics") {
+    const csvInput = await readTextField(formData.get("logisticsCsv"));
+    if (!csvInput) {
+      return { message: "请提供物流费用规则 CSV 内容。" };
+    }
+    try {
+      const imported = await importLogisticsRatesFromCsv({
+        storeId: store.id,
+        csv: csvInput,
+        defaultCurrency: store.currency || "USD",
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "import_logistics_rules",
+        details: `Imported ${imported} logistics rules`,
+      });
+      return { message: `导入 ${imported} 条物流规则。` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "无法导入物流规则，请检查 CSV 格式。",
+      };
+    }
+  }
+
+  if (intent === "import-tax-rates") {
+    const csvInput = await readTextField(formData.get("taxRatesCsv"));
+    if (!csvInput) {
+      return { message: "请提供税率模板 CSV 内容。" };
+    }
+    try {
+      const imported = await importTaxRatesFromCsv({
+        storeId: store.id,
+        csv: csvInput,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "import_tax_rates",
+        details: `Imported ${imported} tax rate rows`,
+      });
+      return { message: `导入 ${imported} 条税率模板。` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "无法导入税率模板，请检查 CSV。",
+      };
+    }
+  }
+
+  if (intent === "sync-erp-costs") {
+    try {
+      const imported = await syncErpCosts({ storeId: store.id });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_erp_costs",
+        details: `Synced ${imported} ERP cost rows`,
+      });
+      return { message: `ERP cost sync completed (${imported} rows).` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message:
+          error.message ?? "无法同步 ERP 成本，请检查配置或稍后重试。",
+      };
+    }
+  }
+
   return { message: "No action performed." };
 };
+
+async function readTextField(value) {
+  if (!value) return "";
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value?.text === "function") {
+    return await value.text();
+  }
+  return "";
+}
 
 export default function SettingsPage() {
   const { settings, currentRole, lang } = useLoaderData();
@@ -894,6 +996,23 @@ export default function SettingsPage() {
       : orderStatus === "warning"
         ? localized.overageWarning
         : null;
+  const planTiers = [FREE_PLAN_TIER, "BASIC", "PRO"];
+  const currentPlanIndex = planTiers.indexOf(planTier);
+  const upgradeTargetTier =
+    currentPlanIndex >= 0 && currentPlanIndex < planTiers.length - 1
+      ? planTiers[currentPlanIndex + 1]
+      : null;
+  const recommendedPlanOption = upgradeTargetTier
+    ? settings.planOptions?.find((option) => option.tier === upgradeTargetTier)
+    : null;
+  const planActionText = overageNote || localized.planActionDescription;
+  const upgradeButtonLabel = recommendedPlanOption
+    ? localized.planActionButton.replace("{plan}", recommendedPlanOption.name)
+    : null;
+  const upgradingRecommendedPlan =
+    isSubmitting &&
+    currentIntent === "change-plan" &&
+    targetPlanTier === recommendedPlanOption?.tier;
   const shopifyData = settings.shopifyData ?? {};
   const teamMembers = settings.teamMembers ?? [];
   const integrations = settings.integrations ?? {};
@@ -901,6 +1020,8 @@ export default function SettingsPage() {
   const notificationChannels = settings.notifications ?? [];
   const exchangeRates = settings.exchangeRates ?? {};
   const reportSchedules = settings.reportSchedules ?? [];
+  const logisticsRules = settings.logisticsRules ?? [];
+  const taxRates = settings.taxRates ?? [];
   const defaultCurrency = primaryStore?.currency ?? "USD";
   const syncingOrders =
     isSubmitting && currentIntent === "sync-orders";
@@ -920,6 +1041,12 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "delete-report-schedule"
       ? navigation.formData?.get("scheduleId")
       : null;
+  const importingLogistics =
+    isSubmitting && currentIntent === "import-logistics";
+  const importingTaxRates =
+    isSubmitting && currentIntent === "import-tax-rates";
+  const syncingErpCosts =
+    isSubmitting && currentIntent === "sync-erp-costs";
   const connectingAdProvider =
     isSubmitting && currentIntent === "connect-ad-credential"
       ? navigation.formData?.get("provider")
@@ -967,6 +1094,9 @@ export default function SettingsPage() {
     createReportSchedule: canPerformIntent("create-report-schedule", currentRole),
     deleteReportSchedule: canPerformIntent("delete-report-schedule", currentRole),
     updateAttributionRules: canPerformIntent("update-attribution-rules", currentRole),
+    importLogistics: canPerformIntent("import-logistics", currentRole),
+    importTaxRates: canPerformIntent("import-tax-rates", currentRole),
+    syncErpCosts: canPerformIntent("sync-erp-costs", currentRole),
   };
 
   const allowedActions = Object.keys(ROLE_PERMISSIONS)
@@ -1075,6 +1205,42 @@ export default function SettingsPage() {
               />
               {overageNote && (
                 <s-text variation="critical">{overageNote}</s-text>
+              )}
+            </div>
+            <div>
+              <s-heading level="3">{localized.planActionHeading}</s-heading>
+              <s-text variation="subdued">{planActionText}</s-text>
+              {trialActive && localized.planActionTrialPrompt && (
+                <s-text variation="subdued">
+                  {localized.planActionTrialPrompt}
+                </s-text>
+              )}
+              {recommendedPlanOption ? (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="change-plan" />
+                  <input
+                    type="hidden"
+                    name="planTier"
+                    value={recommendedPlanOption.tier}
+                  />
+                  <s-button
+                    type="submit"
+                    variant="primary"
+                    disabled={!intentAccess.changePlan}
+                    {...(upgradingRecommendedPlan ? { loading: true } : {})}
+                  >
+                    {upgradeButtonLabel}
+                  </s-button>
+                  {!intentAccess.changePlan && (
+                    <s-text variation="subdued">
+                      {permissionHint("change-plan")}
+                    </s-text>
+                  )}
+                </Form>
+              ) : (
+                <s-text variation="subdued">
+                  {localized.planActionMaxPlan}
+                </s-text>
               )}
             </div>
             <s-text variation="subdued">
@@ -1730,6 +1896,132 @@ export default function SettingsPage() {
             )}
           </s-unordered-list>
         </s-card>
+      </s-section>
+
+      <s-section heading="Cost & tax automation">
+        <s-stack direction="block" gap="base">
+          <s-card padding="base">
+            <s-heading level="3">
+              Logistics templates ({logisticsRules.length})
+            </s-heading>
+            <s-text variation="subdued">
+              Define provider → region → weight brackets to estimate fulfillment cost on every order.
+            </s-text>
+            {logisticsRules.length > 0 && (
+              <s-unordered-list>
+                {logisticsRules.slice(0, 3).map((rule) => (
+                  <s-list-item key={rule.id}>
+                    {rule.provider ?? "Carrier"} · {rule.country ?? "Global"}
+                    {rule.region ? ` / ${rule.region}` : ""}
+                    · {rule.weightMin ?? 0}–{rule.weightMax ?? "∞"} kg ·
+                    {rule.flatFee ?? 0}/{rule.perKg ?? 0} {rule.currency ?? "USD"}
+                  </s-list-item>
+                ))}
+                {logisticsRules.length > 3 && (
+                  <s-list-item>
+                    +{logisticsRules.length - 3} more rules
+                  </s-list-item>
+                )}
+              </s-unordered-list>
+            )}
+            <Form method="post">
+              <input type="hidden" name="intent" value="import-logistics" />
+              <label htmlFor="logisticsCsv" style={{ display: "block", marginBottom: "0.5rem" }}>
+                CSV (provider,country,region,weight_min,weight_max,flat_fee,per_kg,currency,effective_from,effective_to)
+              </label>
+              <textarea
+                id="logisticsCsv"
+                name="logisticsCsv"
+                rows="4"
+                style={{ width: "100%", marginBottom: "0.5rem" }}
+              ></textarea>
+              <s-button
+                type="submit"
+                variant="primary"
+                disabled={!intentAccess.importLogistics}
+                {...(importingLogistics ? { loading: true } : {})}
+              >
+                Import logistics rates
+              </s-button>
+              {!intentAccess.importLogistics && (
+                <s-text variation="subdued">
+                  {permissionHint("import-logistics")}
+                </s-text>
+              )}
+            </Form>
+          </s-card>
+
+          <s-card padding="base">
+            <s-heading level="3">
+              Tax rate templates ({taxRates.length})
+            </s-heading>
+            <s-text variation="subdued">
+              Upload per-country/state tax rates so the profit engine can flag high-tax orders.
+            </s-text>
+            {taxRates.length > 0 && (
+              <s-unordered-list>
+                {taxRates.slice(0, 3).map((rate) => (
+                  <s-list-item key={rate.id}>
+                    {rate.country}
+                    {rate.state ? ` / ${rate.state}` : ""}
+                    · {Number(rate.rate ?? 0).toFixed(2)}%
+                  </s-list-item>
+                ))}
+                {taxRates.length > 3 && (
+                  <s-list-item>+{taxRates.length - 3} more tax rows</s-list-item>
+                )}
+              </s-unordered-list>
+            )}
+            <Form method="post">
+              <input type="hidden" name="intent" value="import-tax-rates" />
+              <label htmlFor="taxRatesCsv" style={{ display: "block", marginBottom: "0.5rem" }}>
+                CSV (country,state,rate,effective_from,effective_to)
+              </label>
+              <textarea
+                id="taxRatesCsv"
+                name="taxRatesCsv"
+                rows="4"
+                style={{ width: "100%", marginBottom: "0.5rem" }}
+              ></textarea>
+              <s-button
+                type="submit"
+                variant="primary"
+                disabled={!intentAccess.importTaxRates}
+                {...(importingTaxRates ? { loading: true } : {})}
+              >
+                Import tax templates
+              </s-button>
+              {!intentAccess.importTaxRates && (
+                <s-text variation="subdued">
+                  {permissionHint("import-tax-rates")}
+                </s-text>
+              )}
+            </Form>
+          </s-card>
+
+          <s-card padding="base">
+            <s-heading level="3">ERP cost sync</s-heading>
+            <s-text variation="subdued">
+              Pull SKU cost updates from your ERP endpoint defined in `ERP_COST_SYNC_URL`.
+            </s-text>
+            <Form method="post">
+              <input type="hidden" name="intent" value="sync-erp-costs" />
+              <s-button
+                type="submit"
+                variant="secondary"
+                disabled={!intentAccess.syncErpCosts}
+                {...(syncingErpCosts ? { loading: true } : {})}
+              >
+                Sync ERP SKU costs
+              </s-button>
+              {!intentAccess.syncErpCosts && (
+                <s-text variation="subdued">
+                  {permissionHint("sync-erp-costs")}
+                </s-text>
+              )}
+            </Form>
+          </s-card>
+        </s-stack>
       </s-section>
 
       <s-section heading="Usage & limits">

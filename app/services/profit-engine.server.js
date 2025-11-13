@@ -4,6 +4,7 @@ import {
   getActiveSkuCostMap,
   getVariableCostTemplates,
 } from "./costs.server";
+import { getLogisticsCost } from "./logistics.server";
 import { ensureOrderCapacity } from "./plan-limits.server";
 import { notifyPlanOverage } from "./overages.server";
 import { isPlanLimitError } from "../errors/plan-limit-error";
@@ -46,9 +47,8 @@ export async function processShopifyOrder({ store, payload }) {
   const subtotal = toNumber(
     payload.current_subtotal_price ?? payload.subtotal_price ?? 0,
   );
-  const shippingRevenue = sumArray(payload.shipping_lines, (line) =>
-    toNumber(line.price),
-  );
+  const shippingLines = payload.shipping_lines ?? [];
+  const shippingRevenue = sumArray(shippingLines, (line) => toNumber(line.price));
   const tax = toNumber(payload.current_total_tax ?? payload.total_tax ?? 0);
   const discount = toNumber(
     payload.current_total_discounts ?? payload.total_discounts ?? 0,
@@ -98,10 +98,44 @@ export async function processShopifyOrder({ store, payload }) {
     channel: channelKey,
   });
 
+  const shippingAddress =
+    payload.shipping_address ?? payload.customer?.default_address ?? null;
+  const destinationCountry =
+    shippingAddress?.country_code ??
+    customerCountry ??
+    undefined;
+  const destinationRegion =
+    shippingAddress?.province_code ??
+    shippingAddress?.province ??
+    undefined;
+  const totalWeightGrams =
+    toNumber(payload.total_weight ?? 0) ||
+    lineItems.reduce(
+      (sum, item) =>
+        sum + toNumber(item.grams ?? 0) * (item.quantity ?? 0),
+      0,
+    );
+  const weightKg = totalWeightGrams / 1000;
+  const shippingCarrier =
+    shippingLines[0]?.carrier_identifier ??
+    shippingLines[0]?.carrier ??
+    shippingLines[0]?.title ??
+    undefined;
+  const logisticsCost = await getLogisticsCost({
+    storeId: store.id,
+    country: destinationCountry,
+    region: destinationRegion,
+    weightKg,
+    provider: shippingCarrier,
+    date: orderDate,
+    currency,
+  });
+
   const refunds = extractRefunds(payload, currency);
 
   const costTotals = aggregateCostTotals(variableCosts);
-  const shippingCost = costTotals[CostType.SHIPPING] ?? 0;
+  const shippingTemplateCost = costTotals[CostType.SHIPPING] ?? 0;
+  const shippingCost = shippingTemplateCost + logisticsCost;
   const paymentFees = costTotals[CostType.PAYMENT_FEE] ?? 0;
   const platformFees = costTotals[CostType.PLATFORM_FEE] ?? 0;
   const customCosts = costTotals[CostType.CUSTOM] ?? 0;
@@ -177,7 +211,8 @@ export async function processShopifyOrder({ store, payload }) {
           orderId: order.id,
           currency,
           cogsTotal,
-          shippingCost,
+          shippingTemplateCost,
+          logisticsCost,
           paymentFees,
           platformFees,
           customCosts,
@@ -345,7 +380,8 @@ function buildOrderCostRows({
   orderId,
   currency,
   cogsTotal,
-  shippingCost,
+  shippingTemplateCost,
+  logisticsCost,
   paymentFees,
   platformFees,
   customCosts,
@@ -360,13 +396,22 @@ function buildOrderCostRows({
       source: "SKU cost",
     });
   }
-  if (shippingCost > 0) {
+  if (shippingTemplateCost > 0) {
     rows.push({
       orderId,
       type: CostType.SHIPPING,
-      amount: shippingCost,
+      amount: shippingTemplateCost,
       currency,
       source: "Template",
+    });
+  }
+  if (logisticsCost > 0) {
+    rows.push({
+      orderId,
+      type: CostType.SHIPPING,
+      amount: logisticsCost,
+      currency,
+      source: "Logistics rule",
     });
   }
   if (paymentFees > 0) {

@@ -148,6 +148,8 @@ model Store {
   syncJobs             SyncJob[]
   adSpendRecords       AdSpendRecord[]
   refunds              RefundRecord[]
+  logisticsRules       LogisticsRule[]
+  taxRates             TaxRate[]
 
   @@index([merchantId])
 }
@@ -496,6 +498,42 @@ model RefundRecord {
   @@index([storeId, orderShopifyId])
 }
 
+model LogisticsRule {
+  id            String   @id @default(cuid())
+  store         Store    @relation(fields: [storeId], references: [id])
+  storeId       String
+  provider      String?
+  region        String?
+  country       String?
+  weightMin     Decimal?
+  weightMax     Decimal?
+  flatFee       Decimal  @default(0)
+  perKg         Decimal  @default(0)
+  currency      String   @default("USD")
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([storeId, provider])
+  @@index([storeId, country, region])
+}
+
+model TaxRate {
+  id            String   @id @default(cuid())
+  store         Store    @relation(fields: [storeId], references: [id])
+  storeId       String
+  country       String
+  state         String?
+  rate          Decimal
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([storeId, country, state])
+}
 model FixedCost {
   id         String          @id @default(cuid())
   merchant   MerchantAccount @relation(fields: [merchantId], references: [id])
