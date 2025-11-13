@@ -1,4 +1,3 @@
-import { json } from "react-router";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getCustomReportData } from "../services/reports.server";
@@ -22,5 +21,7 @@ export const loader = async ({ request }) => {
     limit,
   });
 
-  return json(payload);
+  return new Response(JSON.stringify(payload), {
+    headers: { "Content-Type": "application/json" },
+  });
 };
