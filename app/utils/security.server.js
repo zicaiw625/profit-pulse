@@ -1,21 +1,36 @@
 import crypto from "node:crypto";
 
-export const SECURITY_HEADERS = {
-  "Content-Security-Policy":
-    "default-src 'self' https: data:; " +
-    "script-src 'self' https://cdn.shopify.com https://unpkg.com; " +
-    "style-src 'self' 'unsafe-inline' https://cdn.shopify.com; " +
-    "img-src 'self' data: https://cdn.shopify.com; " +
-    "font-src 'self' https://cdn.shopify.com; " +
-    "frame-ancestors 'self' https://*.myshopify.com https://admin.shopify.com;",
+const BASE_SECURITY_HEADERS = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
   "X-Content-Type-Options": "nosniff",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 };
 
-export function applySecurityHeaders(headers) {
-  Object.entries(SECURITY_HEADERS).forEach(([name, value]) => {
+function buildContentSecurityPolicy(cspNonce) {
+  if (!cspNonce) {
+    throw new Error("CSP nonce is required to build the Content-Security-Policy header.");
+  }
+  const directives = {
+    "default-src": ["'self'", "https:", "data:"],
+    "script-src": ["'self'", "https://cdn.shopify.com", `'nonce-${cspNonce}'`],
+    "style-src": ["'self'", "'unsafe-inline'", "https://cdn.shopify.com"],
+    "img-src": ["'self'", "data:", "https://cdn.shopify.com"],
+    "font-src": ["'self'", "https://cdn.shopify.com"],
+    "connect-src": ["'self'", "https://cdn.shopify.com", "https://admin.shopify.com"],
+    "frame-ancestors": ["'self'", "https://*.myshopify.com", "https://admin.shopify.com"],
+  };
+  return Object.entries(directives)
+    .map(([name, values]) => `${name} ${values.join(" ")}`)
+    .join("; ");
+}
+
+export function applySecurityHeaders(headers, { cspNonce } = {}) {
+  const policy = buildContentSecurityPolicy(cspNonce);
+  if (!headers.has("Content-Security-Policy")) {
+    headers.set("Content-Security-Policy", policy);
+  }
+  Object.entries(BASE_SECURITY_HEADERS).forEach(([name, value]) => {
     if (!headers.has(name)) {
       headers.set(name, value);
     }

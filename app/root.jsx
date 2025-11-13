@@ -1,6 +1,20 @@
-import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import {
+  Links,
+  Meta,
+  Outlet,
+  Scripts,
+  ScrollRestoration,
+  useLoaderData,
+} from "react-router";
+import { generateCspNonce } from "./utils/csp-nonce.server";
+
+export const loader = () => {
+  return { cspNonce: generateCspNonce() };
+};
 
 export default function App() {
+  const { cspNonce } = useLoaderData();
+
   return (
     <html lang="en">
       <head>
@@ -16,8 +30,8 @@ export default function App() {
       </head>
       <body>
         <Outlet />
-        <ScrollRestoration />
-        <Scripts />
+        <ScrollRestoration nonce={cspNonce} />
+        <Scripts nonce={cspNonce} />
       </body>
     </html>
   );

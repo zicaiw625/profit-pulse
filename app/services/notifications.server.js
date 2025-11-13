@@ -1,5 +1,15 @@
 import prisma from "../db.server";
 import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes";
+import { logAuditEvent } from "./audit.server";
+
+const WEBHOOK_TIMEOUT_MS = 5000;
+const WEBHOOK_MAX_ATTEMPTS = 3;
+const EXACT_ALLOWED_HOSTS = new Set([
+  "hooks.slack.com",
+  "hooks.zapier.com",
+  "hooks.make.com",
+]);
+const WILDCARD_HOST_SUFFIXES = ["office.com"];
 
 export async function listNotificationChannels(merchantId, type) {
   if (!merchantId) return [];
@@ -25,6 +35,12 @@ export async function createNotificationChannel({
   if (!Object.values(NOTIFICATION_CHANNEL_TYPES).includes(type)) {
     throw new Error(`不支持的通知渠道类型：${type}`);
   }
+  const normalizedUrl = webhookUrl.trim();
+  if (!isAllowedWebhookUrl(normalizedUrl)) {
+    throw new Error(
+      "Webhook URL 必须为 https 并指向经过允许的 Slack/Teams/Zapier/Make 域名。",
+    );
+  }
   return prisma.notificationChannel.create({
     data: {
       merchantId,
@@ -38,7 +54,7 @@ export async function createNotificationChannel({
             : type === NOTIFICATION_CHANNEL_TYPES.MAKE
               ? "Make Webhook"
               : "Slack"),
-      config: { webhookUrl },
+      config: { webhookUrl: normalizedUrl },
     },
   });
 }
@@ -53,22 +69,30 @@ export async function deleteNotificationChannel({ merchantId, channelId }) {
 }
 
 function getWebhookUrlFromChannel(channel) {
-  return channel.config?.webhookUrl;
+  return channel.config?.webhookUrl?.trim();
 }
 
 async function sendToChannel(channel, text, customPayload) {
   const webhookUrl = getWebhookUrlFromChannel(channel);
-  if (!webhookUrl) return;
-  try {
-    const payloadToSend = buildPayload(channel, text, customPayload);
-    await fetch(webhookUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payloadToSend),
+  if (!webhookUrl) return false;
+  if (!isAllowedWebhookUrl(webhookUrl)) {
+    await logAuditEvent({
+      merchantId: channel.merchantId,
+      action: "notification.webhook_blocked",
+      details: `Blocked webhook for channel ${channel.id} (${channel.type}) to ${webhookUrl}`,
     });
-  } catch (error) {
-    console.error(`Failed to send ${channel.type} notification`, error);
+    return false;
   }
+  const payloadToSend = buildPayload(channel, text, customPayload);
+  const result = await postJsonWithRetry(webhookUrl, payloadToSend);
+  if (!result.ok) {
+    await logAuditEvent({
+      merchantId: channel.merchantId,
+      action: "notification.webhook_failed",
+      details: buildFailureDetails(channel, webhookUrl, result),
+    });
+  }
+  return result.ok;
 }
 
 export async function sendSlackNotification({ merchantId, text, payload }) {
@@ -76,12 +100,10 @@ export async function sendSlackNotification({ merchantId, text, payload }) {
   const channels = await listNotificationChannels(merchantId);
   if (!channels.length) return false;
 
-  await Promise.all(
-    channels.map((channel) =>
-      sendToChannel(channel, text, payload),
-    ),
+  const results = await Promise.all(
+    channels.map((channel) => sendToChannel(channel, text, payload)),
   );
-  return true;
+  return results.some(Boolean);
 }
 
 export function listNotificationTypeOptions() {
@@ -117,15 +139,80 @@ function buildPayload(channel, text, customPayload) {
 
 export async function notifyWebhook({ url, payload }) {
   if (!url) return false;
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload ?? {}),
+  const normalizedUrl = url.trim();
+  const result = await postJsonWithRetry(normalizedUrl, payload ?? {});
+  if (!result.ok) {
+    console.error("Failed to notify webhook", {
+      url: normalizedUrl,
+      status: result.status,
+      error: result.error,
     });
-    return true;
-  } catch (error) {
-    console.error("Failed to notify webhook", error);
+  }
+  return result.ok;
+}
+
+function isAllowedWebhookUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
     return false;
   }
+  if (parsed.protocol !== "https:") {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (EXACT_ALLOWED_HOSTS.has(host)) {
+    return true;
+  }
+  return WILDCARD_HOST_SUFFIXES.some(
+    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
+  );
+}
+
+function shouldRetryStatus(status) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+async function postJsonWithRetry(url, payload) {
+  let lastError;
+  let lastStatus;
+  for (let attempt = 1; attempt <= WEBHOOK_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      if (response.ok) {
+        return { ok: true };
+      }
+      lastStatus = response.status;
+      if (!shouldRetryStatus(response.status) || attempt === WEBHOOK_MAX_ATTEMPTS) {
+        return { ok: false, status: response.status };
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === WEBHOOK_MAX_ATTEMPTS) {
+        return { ok: false, error: error?.message };
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  return {
+    ok: false,
+    status: lastStatus,
+    error: lastError?.message,
+  };
+}
+
+function buildFailureDetails(channel, webhookUrl, result) {
+  const base = `Failed webhook for channel ${channel.id} (${channel.type}) to ${webhookUrl}`;
+  const statusPart = result.status ? ` (status ${result.status})` : "";
+  const errorPart = result.error ? `: ${result.error}` : "";
+  return `${base}${statusPart}${errorPart}`;
 }
