@@ -1,6 +1,11 @@
 import prisma from "../db.server";
 import { getExchangeRate } from "./exchange-rates.server";
-import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import {
+  startOfDay,
+  shiftDays,
+  resolveTimezone,
+  formatDateKey,
+} from "../utils/dates.server.js";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 export async function getMerchantPerformanceSummary({
@@ -11,21 +16,6 @@ export async function getMerchantPerformanceSummary({
     return null;
   }
 
-  const now = new Date();
-  const end = startOfDay(now);
-  const start = shiftDays(end, -(Math.max(rangeDays ?? 30, 1) - 1));
-  const cacheKey = buildCacheKey(
-    "merchant-performance",
-    merchantId,
-    start.toISOString(),
-  );
-
-  return memoizeAsync(cacheKey, 60 * 1000, () =>
-    buildMerchantPerformanceSummary({ merchantId, rangeDays, range: { start, end } }),
-  );
-}
-
-async function buildMerchantPerformanceSummary({ merchantId, rangeDays, range }) {
   const merchant = await prisma.merchantAccount.findUnique({
     where: { id: merchantId },
     include: { stores: true },
@@ -34,6 +24,38 @@ async function buildMerchantPerformanceSummary({ merchantId, rangeDays, range })
     return null;
   }
 
+  const timezone = resolveTimezone({
+    merchant,
+    defaultTimezone: merchant.stores?.[0]?.timezone,
+  });
+
+  const now = new Date();
+  const end = startOfDay(now, { timezone });
+  const start = shiftDays(end, -(Math.max(rangeDays ?? 30, 1) - 1), {
+    timezone,
+  });
+  const cacheKey = buildCacheKey(
+    "merchant-performance",
+    merchantId,
+    `${timezone}|${start.toISOString()}`,
+  );
+
+  return memoizeAsync(cacheKey, 60 * 1000, () =>
+    buildMerchantPerformanceSummary({
+      merchant,
+      rangeDays,
+      range: { start, end },
+      timezone,
+    }),
+  );
+}
+
+async function buildMerchantPerformanceSummary({
+  merchant,
+  rangeDays,
+  range,
+  timezone,
+}) {
   const stores = merchant.stores ?? [];
   const masterCurrency = merchant.primaryCurrency ?? "USD";
   const rangeStart = range.start;
@@ -113,6 +135,10 @@ async function buildMerchantPerformanceSummary({ merchantId, rangeDays, range })
       refunds,
       refundRate,
     },
+    timezone,
+    rangeLabel: `${formatDateKey(rangeStart, { timezone })} – ${formatDateKey(rangeEnd, {
+      timezone,
+    })}`,
   };
 }
 

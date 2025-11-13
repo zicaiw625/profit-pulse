@@ -1,7 +1,12 @@
 import prisma from "../db.server";
 import { getFixedCostTotal } from "./fixed-costs.server";
 import { getExchangeRate } from "./exchange-rates.server";
-import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import {
+  startOfDay,
+  shiftDays,
+  resolveTimezone,
+  formatDateKey,
+} from "../utils/dates.server.js";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
 
 const DEFAULT_RANGE_DAYS = 30;
@@ -64,21 +69,24 @@ export async function getReportingOverview({
     throw new Error("storeId is required for reporting overview");
   }
 
+  const context = await loadStoreContext(storeId);
   const { start, end, resolvedDays } = resolveRange({
     rangeDays,
     rangeStart,
     rangeEnd,
+    timezone: context.timezone,
   });
   const cacheKey = buildCacheKey(
     "reporting-overview",
     storeId,
-    `${start.toISOString()}|${end.toISOString()}`,
+    `${context.timezone}|${start.toISOString()}|${end.toISOString()}`,
   );
   return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
     buildReportingOverview({
       storeId,
       rangeDays: resolvedDays,
       range: { start, end },
+      context,
     }),
   );
 }
@@ -101,19 +109,15 @@ export async function getCustomReportData({
     : "channel";
   const dimensionDef = DIMENSION_DEFINITIONS[normalizedDimension];
 
-  const today = startOfDay(new Date());
-  const rangeEnd = end ? startOfDay(new Date(end)) : today;
+  const context = await loadStoreContext(storeId);
+  const timezone = context.timezone;
+  const today = startOfDay(new Date(), { timezone });
+  const rangeEnd = end ? startOfDay(new Date(end), { timezone }) : today;
   const rangeStart = start
-    ? startOfDay(new Date(start))
-    : shiftDays(rangeEnd, -Math.max(rangeDays, 1) + 1);
+    ? startOfDay(new Date(start), { timezone })
+    : shiftDays(rangeEnd, -Math.max(rangeDays, 1) + 1, { timezone });
 
-  const storeRecord = await prisma.store.findUnique({
-    where: { id: storeId },
-    include: { merchant: true },
-  });
-  const storeCurrency = storeRecord?.currency ?? "USD";
-  const masterCurrency =
-    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
+  const { storeCurrency, masterCurrency } = context;
   const conversionRate = await getExchangeRate({
     base: storeCurrency,
     quote: masterCurrency,
@@ -208,6 +212,14 @@ export async function getCustomReportData({
     })),
     rows,
     currency: masterCurrency,
+    timezone,
+    rangeLabel: `${formatDateKey(rangeStart, { timezone })} – ${formatDateKey(rangeEnd, {
+      timezone,
+    })}`,
+    rangeInput: {
+      start: formatDateKey(rangeStart, { timezone }),
+      end: formatDateKey(rangeEnd, { timezone }),
+    },
   };
 }
 
@@ -455,8 +467,9 @@ function resolveBucketMetric(bucket, metricKey) {
   }
 }
 
-async function buildReportingOverview({ storeId, rangeDays, range }) {
-  const [channelRows, productRows, aggregateMetrics, storeRecord] =
+async function buildReportingOverview({ storeId, rangeDays, range, context }) {
+  const { store, storeCurrency, masterCurrency, timezone } = context;
+  const [channelRows, productRows, aggregateMetrics] =
     await Promise.all([
       prisma.dailyMetric.groupBy({
         by: ["channel"],
@@ -510,23 +523,16 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
           paymentFees: true,
         },
       }),
-      prisma.store.findUnique({
-        where: { id: storeId },
-        include: { merchant: true },
-      }),
     ]);
 
-  const storeCurrency = storeRecord?.currency ?? "USD";
-  const masterCurrency =
-    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
   const conversionRate = await getExchangeRate({
     base: storeCurrency,
     quote: masterCurrency,
   });
 
-  const fixedCostTotalStore = storeRecord?.merchantId
+  const fixedCostTotalStore = store?.merchantId
     ? await getFixedCostTotal({
-        merchantId: storeRecord.merchantId,
+        merchantId: store.merchantId,
         rangeDays,
         rangeStart: range.start,
         rangeEnd: range.end,
@@ -615,10 +621,18 @@ async function buildReportingOverview({ storeId, rangeDays, range }) {
 
   return {
     range,
+    rangeLabel: `${formatDateKey(range.start, { timezone })} – ${formatDateKey(range.end, {
+      timezone,
+    })}`,
+    rangeInput: {
+      start: formatDateKey(range.start, { timezone }),
+      end: formatDateKey(range.end, { timezone }),
+    },
     summary,
     channels,
     products,
     currency: masterCurrency,
+    timezone,
   };
 }
 export async function getNetProfitVsSpendSeries({
@@ -631,15 +645,14 @@ export async function getNetProfitVsSpendSeries({
     throw new Error("storeId is required for performance timeseries");
   }
 
-  const { start, end } = resolveRange({ rangeDays, rangeStart, rangeEnd });
-
-  const storeRecord = await prisma.store.findUnique({
-    where: { id: storeId },
-    include: { merchant: true },
+  const context = await loadStoreContext(storeId);
+  const { timezone, storeCurrency, masterCurrency } = context;
+  const { start, end } = resolveRange({
+    rangeDays,
+    rangeStart,
+    rangeEnd,
+    timezone,
   });
-  const storeCurrency = storeRecord?.currency ?? "USD";
-  const masterCurrency =
-    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
   const conversionRate = await getExchangeRate({
     base: storeCurrency,
     quote: masterCurrency,
@@ -657,7 +670,7 @@ export async function getNetProfitVsSpendSeries({
 
   const map = new Map();
   rows.forEach((row) => {
-    const key = row.date.toISOString().slice(0, 10);
+    const key = formatDateKey(row.date, { timezone });
     map.set(key, {
       date: key,
       revenue: Number(row.revenue || 0) * conversionRate,
@@ -668,8 +681,8 @@ export async function getNetProfitVsSpendSeries({
 
   const series = [];
   for (let i = 0; i < rangeDays; i += 1) {
-    const date = shiftDays(start, i);
-    const key = date.toISOString().slice(0, 10);
+    const date = shiftDays(start, i, { timezone });
+    const key = formatDateKey(date, { timezone });
     series.push(
       map.get(key) ?? {
         date: key,
@@ -684,6 +697,7 @@ export async function getNetProfitVsSpendSeries({
     range: { start, end },
     points: series,
     currency: masterCurrency,
+    timezone,
   };
 }
 
@@ -697,9 +711,16 @@ export async function getAdPerformanceBreakdown({
     throw new Error("storeId is required for ad performance report");
   }
 
-  const { start, end } = resolveRange({ rangeDays, rangeStart, rangeEnd });
+  const context = await loadStoreContext(storeId);
+  const { timezone, storeCurrency, masterCurrency, store } = context;
+  const { start, end } = resolveRange({
+    rangeDays,
+    rangeStart,
+    rangeEnd,
+    timezone,
+  });
 
-  const [adSpendRows, channelMetrics, storeRecord] = await Promise.all([
+  const [adSpendRows, channelMetrics] = await Promise.all([
     prisma.adSpendRecord.findMany({
       where: {
         storeId,
@@ -714,15 +735,8 @@ export async function getAdPerformanceBreakdown({
         date: { gte: start, lte: end },
       },
     }),
-    prisma.store.findUnique({
-      where: { id: storeId },
-      include: { merchant: true },
-    }),
   ]);
 
-  const storeCurrency = storeRecord?.currency ?? "USD";
-  const masterCurrency =
-    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
   const conversionRate = await getExchangeRate({
     base: storeCurrency,
     quote: masterCurrency,
@@ -827,9 +841,10 @@ export async function getAdPerformanceBreakdown({
 
   return {
     range: { start, end },
-    merchantId: storeRecord?.merchantId ?? null,
+    merchantId: store?.merchantId ?? null,
     providers,
     currency: masterCurrency,
+    timezone,
   };
 }
 
@@ -844,12 +859,19 @@ function formatProvider(provider) {
   }
 }
 
-function resolveRange({ rangeStart, rangeEnd, rangeDays = DEFAULT_RANGE_DAYS }) {
-  const today = startOfDay(new Date());
-  const computedEnd = rangeEnd ? startOfDay(rangeEnd) : today;
+function resolveRange({
+  rangeStart,
+  rangeEnd,
+  rangeDays = DEFAULT_RANGE_DAYS,
+  timezone = "UTC",
+}) {
+  const today = startOfDay(new Date(), { timezone });
+  const computedEnd = rangeEnd
+    ? startOfDay(rangeEnd, { timezone })
+    : today;
   let computedStart = rangeStart
-    ? startOfDay(rangeStart)
-    : shiftDays(computedEnd, -(rangeDays - 1));
+    ? startOfDay(rangeStart, { timezone })
+    : shiftDays(computedEnd, -(rangeDays - 1), { timezone });
   if (computedStart > computedEnd) {
     const tmp = computedStart;
     computedStart = computedEnd;
@@ -860,4 +882,23 @@ function resolveRange({ rangeStart, rangeEnd, rangeDays = DEFAULT_RANGE_DAYS }) 
     Math.round((computedEnd - computedStart) / DAY_MS) + 1,
   );
   return { start: computedStart, end: computedEnd, resolvedDays };
+}
+
+async function loadStoreContext(storeId) {
+  const store = await prisma.store.findUnique({
+    where: { id: storeId },
+    include: { merchant: true },
+  });
+  if (!store) {
+    throw new Error("Store not found");
+  }
+  const timezone = resolveTimezone({ store });
+  const storeCurrency = store.currency ?? "USD";
+  const masterCurrency = store.merchant?.primaryCurrency ?? storeCurrency;
+  return {
+    store,
+    timezone,
+    storeCurrency,
+    masterCurrency,
+  };
 }

@@ -1,6 +1,6 @@
 import prisma from "../db.server";
 import { getExchangeRate } from "./exchange-rates.server";
-import { startOfDay, shiftDays } from "../utils/dates.server.js";
+import { startOfDay, shiftDays, resolveTimezone } from "../utils/dates.server.js";
 
 export async function getAccountingMonthlySummary({
   storeId,
@@ -18,12 +18,14 @@ export async function getAccountingMonthlySummary({
     throw new Error("Store not found");
   }
 
+  const timezone = resolveTimezone({ store });
   const masterCurrency = store.merchant?.primaryCurrency ?? store.currency ?? "USD";
   const storeCurrency = store.currency ?? masterCurrency;
-  const end = startOfDay(new Date());
-  const start = new Date(end);
-  start.setUTCDate(1);
-  start.setUTCMonth(start.getUTCMonth() - Math.max(months, 1) + 1);
+  const end = startOfDay(new Date(), { timezone });
+  const startCursor = new Date(end);
+  startCursor.setUTCDate(1);
+  startCursor.setUTCMonth(startCursor.getUTCMonth() - Math.max(months, 1) + 1);
+  const start = startOfDay(startCursor, { timezone });
 
   const metrics = await prisma.dailyMetric.findMany({
     where: {
@@ -74,6 +76,7 @@ export async function getAccountingMonthlySummary({
     rows,
     currency: masterCurrency,
     range: { start, end },
+    timezone,
   };
 }
 
@@ -94,14 +97,15 @@ export async function getAccountingDetailRows({
     throw new Error("Store not found");
   }
 
+  const timezone = resolveTimezone({ store });
   const storeCurrency = store.currency ?? "USD";
   const masterCurrency = store.merchant?.primaryCurrency ?? storeCurrency;
   const endDate = end
-    ? startOfDay(new Date(end))
-    : startOfDay(new Date());
+    ? startOfDay(new Date(end), { timezone })
+    : startOfDay(new Date(), { timezone });
   let startDate = start
-    ? startOfDay(new Date(start))
-    : shiftDays(endDate, -Math.max(1, 30) + 1);
+    ? startOfDay(new Date(start), { timezone })
+    : shiftDays(endDate, -Math.max(1, 30) + 1, { timezone });
   if (startDate > endDate) {
     [startDate, endDate] = [endDate, startDate];
   }
@@ -140,6 +144,7 @@ export async function getAccountingDetailRows({
     range: { start: startDate, end: endDate },
     rows,
     currency: masterCurrency,
+    timezone,
   };
 }
 

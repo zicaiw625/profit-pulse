@@ -88,21 +88,24 @@ export default function ReportsPage() {
   };
 
   const currency = report.currency ?? "USD";
-  const rangeLabel = `${formatDateShort(report.range.start)} – ${formatDateShort(
-    report.range.end,
-  )}`;
+  const rangeLabel =
+    report.rangeLabel ??
+    `${formatDateShort(report.range.start, report.timezone)} – ${formatDateShort(
+      report.range.end,
+      report.timezone,
+    )}`;
   const baseReportsUrl = buildAppUrl(
     selectedLang ? `/app/reports?lang=${selectedLang}` : "/app/reports",
   );
 
   const builderFetcher = useFetcher();
-  const initialStart = report.range?.start ? new Date(report.range.start) : new Date();
-  const initialEnd = report.range?.end ? new Date(report.range.end) : new Date();
+  const initialStart = report.rangeInput?.start ?? "";
+  const initialEnd = report.rangeInput?.end ?? "";
   const [builderValues, setBuilderValues] = useState(() => ({
     dimension: "channel",
     metrics: ["revenue", "netProfit"],
-    start: initialStart.toISOString().slice(0, 10),
-    end: initialEnd.toISOString().slice(0, 10),
+    start: initialStart,
+    end: initialEnd,
   }));
   const buildCustomUrl = (values = builderValues, overrides = {}) => {
     const params = new URLSearchParams();
