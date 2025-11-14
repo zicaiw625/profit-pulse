@@ -8,6 +8,7 @@ import {
   useRouteError,
   useSearchParams,
 } from "react-router";
+import { HttpResponseError } from "@shopify/shopify-api";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -443,21 +444,45 @@ export function permissionDescription(intent) {
 
 export const loader = async ({ request }) => {
   const { session, billing } = await authenticate.admin(request);
-  const store = await ensureMerchantAndStore(session.shop, session.email);
-  await syncSubscriptionFromShopify({
-    merchantId: store.merchantId,
-    session,
-    billing,
-  });
-  const settings = await getAccountSettings({ store });
-  const currentRole = await resolveSessionRole({
-    merchantId: store.merchantId,
-    email: session.email,
-  });
-  const requestedLang =
-    (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
-  const lang = SUPPORTED_LANGUAGES.includes(requestedLang) ? requestedLang : "en";
-  return { settings, storeId: store.id, currentRole, lang };
+
+  try {
+    const store = await ensureMerchantAndStore(session.shop, session.email);
+    await syncSubscriptionFromShopify({
+      merchantId: store.merchantId,
+      session,
+      billing,
+    });
+    const settings = await getAccountSettings({ store });
+    const currentRole = await resolveSessionRole({
+      merchantId: store.merchantId,
+      email: session.email,
+    });
+    const requestedLang =
+      (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
+    const lang = SUPPORTED_LANGUAGES.includes(requestedLang)
+      ? requestedLang
+      : "en";
+    return { settings, storeId: store.id, currentRole, lang };
+  } catch (error) {
+    if (error instanceof Response) {
+      throw error;
+    }
+
+    if (error instanceof HttpResponseError && error.response?.code === 401) {
+      throw new Response(
+        JSON.stringify(error.response.body ?? {}),
+        {
+          status: error.response.code,
+          headers: {
+            "Content-Type":
+              error.response.headers?.["Content-Type"] ?? "application/json",
+          },
+        },
+      );
+    }
+
+    throw error;
+  }
 };
 
 export const action = async ({ request }) => {
