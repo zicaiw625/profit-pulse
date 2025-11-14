@@ -24,9 +24,21 @@ api_version = "2025-10"
   topics = [ "app_subscriptions/update" ]
   uri = "/webhooks/app_subscriptions/update"
 
+  [[webhooks.subscriptions]]
+  topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  [[webhooks.subscriptions]]
+  topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  [[webhooks.subscriptions]]
+  topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_orders,read_refunds,read_customers,read_products,read_inventory,write_products"
+scopes = "read_orders,read_refunds,read_customers,read_products,read_inventory"
 
 [auth]
 redirect_urls = [
