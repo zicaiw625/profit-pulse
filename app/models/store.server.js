@@ -91,10 +91,7 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
     });
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      const existing = await prisma.store.findUnique({
-        where: { shopDomain },
-        include: { merchant: true },
-      });
+      const existing = await findExistingStoreWithRetry(shopDomain);
       if (existing) {
         return existing;
       }
@@ -156,4 +153,24 @@ function isUniqueConstraintError(error) {
     return error.code === "P2002";
   }
   return error.code === "P2002";
+}
+
+async function findExistingStoreWithRetry(shopDomain, attempts = 5) {
+  const delayMs = 50;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const existing = await prisma.store.findUnique({
+      where: { shopDomain },
+      include: { merchant: true },
+    });
+    if (existing) {
+      return existing;
+    }
+
+    if (attempt < attempts - 1) {
+      const waitTime = delayMs * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
+  }
+
+  return null;
 }
