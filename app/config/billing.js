@@ -46,6 +46,22 @@ export const PLAN_DEFINITIONS = {
       orders: 5000,
       adAccounts: 2,
     },
+    overages: {
+      terms: "Usage-based overages for additional stores and order volume.",
+      cappedAmount: 500,
+      orders: {
+        blockSize: 1000,
+        price: 15,
+        currency: "USD",
+        description: "Additional order volume (per 1,000 orders)",
+      },
+      stores: {
+        blockSize: 1,
+        price: 39,
+        currency: "USD",
+        description: "Additional Shopify store seat",
+      },
+    },
     features: [
       ...baseFeatures,
       "COGS templates & SKU costs",
@@ -67,6 +83,22 @@ export const PLAN_DEFINITIONS = {
       orders: 20000,
       adAccounts: 8,
     },
+    overages: {
+      terms: "Usage-based billing for additional stores and order volume.",
+      cappedAmount: 1500,
+      orders: {
+        blockSize: 5000,
+        price: 45,
+        currency: "USD",
+        description: "Additional order volume (per 5,000 orders)",
+      },
+      stores: {
+        blockSize: 1,
+        price: 59,
+        currency: "USD",
+        description: "Additional Shopify store seat",
+      },
+    },
     features: [
       ...baseFeatures,
       "Fixed cost allocation",
@@ -83,6 +115,17 @@ export const BILLABLE_PLANS = Object.values(PLAN_DEFINITIONS).filter(
 
 export const BILLING_CONFIG = BILLABLE_PLANS.reduce(
   (config, plan) => {
+    const usageLineItems = plan.overages
+      ? [
+          {
+            amount: plan.overages.cappedAmount,
+            currencyCode: plan.currency,
+            interval: BillingInterval.Usage,
+            terms: plan.overages.terms,
+          },
+        ]
+      : [];
+
     config[plan.billingKey] = {
       trialDays: plan.trialDays,
       lineItems: [
@@ -91,6 +134,7 @@ export const BILLING_CONFIG = BILLABLE_PLANS.reduce(
           currencyCode: plan.currency,
           interval: plan.interval,
         },
+        ...usageLineItems,
       ],
     };
     return config;

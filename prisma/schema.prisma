@@ -19,6 +19,12 @@ enum PlanTier {
   PRO
 }
 
+enum PlanOverageStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 enum StoreStatus {
   ACTIVE
   DISCONNECTED
@@ -121,6 +127,7 @@ model MerchantAccount {
   attributionRules AttributionRule[]
   monthlyOrderUsage MonthlyOrderUsage[]
   auditLogs       AuditLog[]
+  planOverageRecords PlanOverageRecord[]
 }
 
 model Store {
@@ -197,6 +204,29 @@ model Subscription {
   storeLimit       Int             @default(1)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+model PlanOverageRecord {
+  id             String             @id @default(cuid())
+  merchant       MerchantAccount    @relation(fields: [merchantId], references: [id])
+  merchantId     String
+  metric         String
+  year           Int
+  month          Int
+  units          Int
+  unitAmount     Decimal
+  currency       String
+  description    String?
+  status         PlanOverageStatus  @default(PENDING)
+  idempotencyKey String             @unique
+  shopDomain     String?
+  usageRecordId  String?
+  createdAt      DateTime           @default(now())
+  chargedAt      DateTime?
+  failedAt       DateTime?
+  failureReason  String?
+
+  @@index([merchantId, year, month, metric])
 }
 
 model MonthlyOrderUsage {
