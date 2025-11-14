@@ -114,6 +114,8 @@ export default function ReportsPage() {
     metrics: ["revenue", "netProfit"],
     start: initialStart,
     end: initialEnd,
+    formulaLabel: "",
+    formula: "",
   }));
   const buildCustomUrl = (values = builderValues, overrides = {}) => {
     const params = new URLSearchParams();
@@ -121,6 +123,8 @@ export default function ReportsPage() {
     params.set("metrics", values.metrics.join(","));
     if (values.start) params.set("start", values.start);
     if (values.end) params.set("end", values.end);
+    if (values.formula) params.set("formula", values.formula);
+    if (values.formulaLabel) params.set("formulaLabel", values.formulaLabel);
     params.set("limit", String(overrides.limit ?? DEFAULT_BUILDER_LIMIT));
     return `/app/reports/custom?${params.toString()}`;
   };
@@ -575,6 +579,36 @@ export default function ReportsPage() {
                   )}
                 </div>
               </s-stack>
+              <s-stack direction="block" gap="tight">
+                <s-heading level="5">
+                  {translate(TRANSLATION_KEYS.REPORTS_FORMULA_HEADING, selectedLang)}
+                </s-heading>
+                <s-text variation="subdued">
+                  {translate(TRANSLATION_KEYS.REPORTS_FORMULA_HELP, selectedLang)}
+                </s-text>
+                <s-stack direction="inline" gap="base" wrap>
+                  <label>
+                    {translate(TRANSLATION_KEYS.REPORTS_FORMULA_LABEL, selectedLang)}
+                    <input
+                      type="text"
+                      name="formulaLabel"
+                      value={builderValues.formulaLabel}
+                      onChange={handleBuilderFieldChange("formulaLabel")}
+                      placeholder="Custom metric"
+                    />
+                  </label>
+                  <label>
+                    {translate(TRANSLATION_KEYS.REPORTS_FORMULA_EXPRESSION, selectedLang)}
+                    <input
+                      type="text"
+                      name="formula"
+                      value={builderValues.formula}
+                      onChange={handleBuilderFieldChange("formula")}
+                      placeholder="(revenue - adSpend) / orders"
+                    />
+                  </label>
+                </s-stack>
+              </s-stack>
               <s-stack direction="inline" gap="base">
                 <s-button type="submit" variant="primary">
                   {translate(TRANSLATION_KEYS.REPORTS_RUN_REPORT, selectedLang)}
@@ -621,6 +655,11 @@ export default function ReportsPage() {
                   </tbody>
                 </table>
               </s-data-table>
+            )}
+            {builderData?.customFormula?.expression && (
+              <s-text variation="subdued">
+                {`${builderData.customFormula.label ?? "Custom"} = ${builderData.customFormula.expression}`}
+              </s-text>
             )}
           </s-stack>
         </s-card>

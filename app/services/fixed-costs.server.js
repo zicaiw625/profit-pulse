@@ -65,13 +65,45 @@ export async function deleteFixedCost({ merchantId, fixedCostId }) {
   });
 }
 
-export async function getFixedCostTotal({
+export async function getFixedCostTotal(options) {
+  const summary = await loadFixedCostSummary(options);
+  return summary.total;
+}
+
+export async function getFixedCostBreakdown({
   merchantId,
   rangeDays,
   rangeStart,
   rangeEnd,
+  channelStats = {},
 }) {
-  if (!merchantId) return 0;
+  if (!merchantId) {
+    return { total: 0, allocations: { perChannel: {}, unassigned: 0 }, items: [] };
+  }
+  const summary = await loadFixedCostSummary({
+    merchantId,
+    rangeDays,
+    rangeStart,
+    rangeEnd,
+  });
+  const allocations = distributeFixedCosts(summary.items, channelStats);
+  return {
+    total: summary.total,
+    allocations,
+    items: summary.items,
+  };
+}
+
+function isActiveDuringRange(cost, rangeStart, rangeEnd) {
+  const start = cost.startedAt ?? rangeStart;
+  const end = cost.endedAt ?? rangeEnd;
+  return start <= rangeEnd && end >= rangeStart;
+}
+
+async function loadFixedCostSummary({ merchantId, rangeDays, rangeStart, rangeEnd }) {
+  if (!merchantId) {
+    return { total: 0, items: [] };
+  }
   const now = rangeEnd ?? new Date();
   const start = rangeStart ?? shiftDays(now, -(Math.max(rangeDays ?? 30, 1) - 1));
   const costs = await prisma.fixedCost.findMany({
@@ -81,22 +113,67 @@ export async function getFixedCostTotal({
       OR: [{ endedAt: null }, { endedAt: { gte: start } }],
     },
   });
-
   const days = rangeDays ?? Math.ceil((now - start) / (1000 * 60 * 60 * 24)) + 1;
 
-  return costs.reduce((sum, cost) => {
+  const items = [];
+  let total = 0;
+  for (const cost of costs) {
     if (!isActiveDuringRange(cost, start, now)) {
-      return sum;
+      continue;
     }
     const amount = Number(cost.amount || 0);
     const cadenceDays = CADENCE_IN_DAYS[cost.cadence] ?? CADENCE_IN_DAYS.MONTHLY;
     const prorated = amount * (days / cadenceDays);
-    return sum + prorated;
-  }, 0);
+    total += prorated;
+    items.push({ cost, amount: prorated });
+  }
+
+  return { total, items };
 }
 
-function isActiveDuringRange(cost, rangeStart, rangeEnd) {
-  const start = cost.startedAt ?? rangeStart;
-  const end = cost.endedAt ?? rangeEnd;
-  return start <= rangeEnd && end >= rangeStart;
+function distributeFixedCosts(entries, channelStats = {}) {
+  const perChannel = {};
+  let unassigned = 0;
+  const totals = Object.values(channelStats).reduce(
+    (acc, stats) => {
+      acc.revenue += Number(stats.revenue || 0);
+      acc.orders += Number(stats.orders || 0);
+      return acc;
+    },
+    { revenue: 0, orders: 0 },
+  );
+
+  entries.forEach((entry) => {
+    const rule = (entry.cost.allocation || "REVENUE").toUpperCase();
+    if (rule.startsWith("CHANNEL:")) {
+      const channel = rule.split(":")[1] || "CHANNEL";
+      perChannel[channel] = (perChannel[channel] ?? 0) + entry.amount;
+      return;
+    }
+
+    const basis = rule === "ORDERS" ? totals.orders : totals.revenue;
+    if (!basis || basis <= 0) {
+      unassigned += entry.amount;
+      return;
+    }
+    let allocated = 0;
+    Object.entries(channelStats).forEach(([channel, stats]) => {
+      const numerator = rule === "ORDERS" ? Number(stats.orders || 0) : Number(stats.revenue || 0);
+      if (!numerator) {
+        return;
+      }
+      const share = (entry.amount * numerator) / basis;
+      if (!Number.isFinite(share) || share <= 0) {
+        return;
+      }
+      perChannel[channel] = (perChannel[channel] ?? 0) + share;
+      allocated += share;
+    });
+    const remainder = entry.amount - allocated;
+    if (remainder > 0) {
+      unassigned += remainder;
+    }
+  });
+
+  return { perChannel, unassigned };
 }

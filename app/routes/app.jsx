@@ -4,6 +4,8 @@ import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { authenticate } from "../shopify.server";
 import { LinkWithQuery } from "../components/LinkWithQuery";
 import { ShopifyFetchProvider } from "../components/ShopifyFetchProvider";
+import { useLocale } from "../hooks/useLocale";
+import { TRANSLATION_KEYS } from "../constants/translations";
 
 // 让所有 /app/* 子路由在进入时完成 Admin 侧认证
 export const loader = async ({ request }) => {
@@ -21,17 +23,30 @@ export const loader = async ({ request }) => {
 
 export default function App() {
   const { apiKey } = useLoaderData();
+  const { t } = useLocale();
 
   return (
     <AppProvider embedded apiKey={apiKey}>
       <ShopifyFetchProvider>
         <s-app-nav>
-          <LinkWithQuery to="/app">Dashboard</LinkWithQuery>
-          <LinkWithQuery to="/app/reports">Reports</LinkWithQuery>
-          <LinkWithQuery to="/app/refunds">Refunds</LinkWithQuery>
-          <LinkWithQuery to="/app/reconciliation">Reconciliation</LinkWithQuery>
-          <LinkWithQuery to="/app/settings">Settings</LinkWithQuery>
-          <LinkWithQuery to="/app/help">Help</LinkWithQuery>
+          <LinkWithQuery to="/app">
+            {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
+          </LinkWithQuery>
+          <LinkWithQuery to="/app/reports">
+            {t(TRANSLATION_KEYS.NAV_REPORTS)}
+          </LinkWithQuery>
+          <LinkWithQuery to="/app/refunds">
+            {t(TRANSLATION_KEYS.NAV_REFUNDS)}
+          </LinkWithQuery>
+          <LinkWithQuery to="/app/reconciliation">
+            {t(TRANSLATION_KEYS.NAV_RECONCILIATION)}
+          </LinkWithQuery>
+          <LinkWithQuery to="/app/settings">
+            {t(TRANSLATION_KEYS.NAV_SETTINGS)}
+          </LinkWithQuery>
+          <LinkWithQuery to="/app/help">
+            {t(TRANSLATION_KEYS.NAV_HELP)}
+          </LinkWithQuery>
         </s-app-nav>
         <Outlet />
       </ShopifyFetchProvider>

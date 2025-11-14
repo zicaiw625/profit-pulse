@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getFixedCostTotal } from "./fixed-costs.server";
+import { getFixedCostBreakdown } from "./fixed-costs.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import {
   startOfDay,
@@ -99,6 +99,8 @@ export async function getCustomReportData({
   end,
   rangeDays = DEFAULT_RANGE_DAYS,
   limit = 25,
+  formula,
+  formulaLabel,
 }) {
   if (!storeId) {
     throw new Error("storeId is required for custom reports");
@@ -199,17 +201,59 @@ export async function getCustomReportData({
     });
   }
 
+  const normalizedFormula = typeof formula === "string" ? formula.trim() : "";
+  const customFormula = normalizedFormula
+    ? {
+        label: (formulaLabel ?? "Custom").toString().trim() || "Custom",
+        expression: normalizedFormula,
+      }
+    : null;
+
+  if (customFormula) {
+    rows = rows.map((row) => {
+      const valueMap = row.metrics.reduce((acc, metric) => {
+        acc[metric.key] = metric.value;
+        return acc;
+      }, {});
+      const computed = evaluateFormulaExpression(customFormula.expression, valueMap);
+      if (computed === null) {
+        return row;
+      }
+      return {
+        ...row,
+        metrics: [
+          ...row.metrics,
+          {
+            key: `custom_${customFormula.label.replace(/\s+/g, "_").toLowerCase()}`,
+            label: customFormula.label,
+            value: computed,
+            isCurrency: false,
+          },
+        ],
+      };
+    });
+  }
+
+  const responseMetrics = metricsToUse.map((metric) => ({
+    key: metric,
+    label: METRIC_COLUMNS[metric].label,
+    isCurrency: METRIC_COLUMNS[metric].isCurrency,
+  }));
+  if (customFormula) {
+    responseMetrics.push({
+      key: `custom_${customFormula.label.replace(/\s+/g, "_").toLowerCase()}`,
+      label: customFormula.label,
+      isCurrency: false,
+    });
+  }
+
   return {
     range: { start: rangeStart, end: rangeEnd },
     dimension: {
       key: normalizedDimension,
       label: dimensionDef.label,
     },
-    metrics: metricsToUse.map((metric) => ({
-      key: metric,
-      label: METRIC_COLUMNS[metric].label,
-      isCurrency: METRIC_COLUMNS[metric].isCurrency,
-    })),
+    metrics: responseMetrics,
     rows,
     currency: masterCurrency,
     timezone,
@@ -220,6 +264,7 @@ export async function getCustomReportData({
       start: formatDateKey(rangeStart, { timezone }),
       end: formatDateKey(rangeEnd, { timezone }),
     },
+    customFormula,
   };
 }
 
@@ -467,6 +512,27 @@ function resolveBucketMetric(bucket, metricKey) {
   }
 }
 
+function evaluateFormulaExpression(expression, values = {}) {
+  const sanitized = expression.replace(/[^0-9a-zA-Z_+\-*/().\s]/g, "");
+  if (!sanitized.trim()) {
+    return null;
+  }
+  const substituted = sanitized.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (token) => {
+    if (Object.prototype.hasOwnProperty.call(values, token)) {
+      const numeric = Number(values[token] ?? 0);
+      return Number.isFinite(numeric) ? String(numeric) : "0";
+    }
+    return "0";
+  });
+  try {
+    const result = Function(`"use strict"; return (${substituted});`)();
+    return Number.isFinite(result) ? Number(result) : null;
+  } catch (error) {
+    console.error("Failed to evaluate custom report formula", error);
+    return null;
+  }
+}
+
 async function buildReportingOverview({ storeId, rangeDays, range, context }) {
   const { store, storeCurrency, masterCurrency, timezone } = context;
   const [channelRows, productRows, aggregateMetrics] =
@@ -530,15 +596,31 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
     quote: masterCurrency,
   });
 
-  const fixedCostTotalStore = store?.merchantId
-    ? await getFixedCostTotal({
+  const channelStats = channelRows.reduce((acc, row) => {
+    acc[row.channel] = {
+      revenue: Number(row._sum.revenue || 0),
+      orders: Number(row._sum.orders || 0),
+    };
+    return acc;
+  }, {});
+  const fixedCostStore = store?.merchantId
+    ? await getFixedCostBreakdown({
         merchantId: store.merchantId,
         rangeDays,
         rangeStart: range.start,
         rangeEnd: range.end,
+        channelStats,
       })
-    : 0;
-  const fixedCostTotal = fixedCostTotalStore * conversionRate;
+    : { total: 0, allocations: { perChannel: {}, unassigned: 0 }, items: [] };
+  const fixedCostTotal = fixedCostStore.total * conversionRate;
+  const fixedCostPerChannel = Object.entries(
+    fixedCostStore.allocations?.perChannel ?? {},
+  ).reduce((acc, [channel, value]) => {
+    acc[channel] = Number(value || 0) * conversionRate;
+    return acc;
+  }, {});
+  const fixedCostUnassigned =
+    Number(fixedCostStore.allocations?.unassigned || 0) * conversionRate;
 
   const channels = channelRows
     .map((row) => {
@@ -549,16 +631,20 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
       const margin = revenue > 0 ? netProfit / revenue : 0;
       const mer = adSpend > 0 ? revenue / adSpend : null;
       const npas = adSpend > 0 ? netProfit / adSpend : null;
+      const fixedShare = fixedCostPerChannel[row.channel] ?? 0;
+      const netAfterFixed = netProfit - fixedShare;
       return {
         channel: row.channel,
         revenue,
         adSpend,
         netProfit,
+        netProfitAfterFixed: netAfterFixed,
         orders,
         mer,
         npas,
         margin,
         breakEvenRoas: margin > 0 ? 1 / margin : null,
+        fixedCosts: fixedShare,
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
@@ -633,6 +719,10 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
     products,
     currency: masterCurrency,
     timezone,
+    fixedCostAllocations: {
+      perChannel: fixedCostPerChannel,
+      unassigned: fixedCostUnassigned,
+    },
   };
 }
 export async function getNetProfitVsSpendSeries({

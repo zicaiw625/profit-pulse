@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useLocation } from "react-router";
 
-const PRESERVED_PARAMS = ["host", "shop"];
+const PRESERVED_PARAMS = ["host", "shop", "lang"];
 
 export function useAppUrlBuilder() {
   const { search } = useLocation();

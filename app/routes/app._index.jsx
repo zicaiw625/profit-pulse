@@ -6,6 +6,8 @@ import { ensureMerchantAndStore } from "../models/store.server";
 import { getDashboardOverview } from "../services/dashboard.server";
 import { formatCurrency, formatPercent, formatDateShort } from "../utils/formatting";
 import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
+import { useLocale } from "../hooks/useLocale";
+import { TRANSLATION_KEYS } from "../constants/translations";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -40,6 +42,7 @@ export default function DashboardIndex() {
   const { overview, filters } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
+  const { t } = useLocale();
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
   const merchantSummary = overview.merchantSummary ?? null;
@@ -56,16 +59,22 @@ export default function DashboardIndex() {
         )}`
       : null);
   const planStatus = overview.planStatus ?? null;
-  const planWarning = planStatus ? buildPlanWarning(planStatus) : null;
-  const netRevenueCard = overview.summaryCards.find(
+  const planWarning = planStatus ? buildPlanWarning(planStatus, t) : null;
+  const localizedCards = overview.summaryCards.map((card) => ({
+    ...card,
+    label: CARD_LABEL_MAP[card.key]
+      ? t(CARD_LABEL_MAP[card.key])
+      : card.label,
+  }));
+  const netRevenueCard = localizedCards.find(
     (card) => card.key === "netRevenue",
   );
   const revenueBasis = Number(netRevenueCard?.value ?? 0);
 
   return (
     <s-page
-      heading="Profit Pulse overview"
-      subtitle={`Connected store: ${overview.shopDomain}`}
+      heading={t(TRANSLATION_KEYS.DASHBOARD_HEADING)}
+      subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)}: ${overview.shopDomain}`}
     >
       {planWarning && (
         <s-section>
@@ -79,7 +88,7 @@ export default function DashboardIndex() {
           </s-banner>
         </s-section>
       )}
-      <s-section heading="Date filters">
+      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_DATE_FILTERS)}>
         <Form method="get">
           {hostParam && <input type="hidden" name="host" value={hostParam} />}
           {shopParam && <input type="hidden" name="shop" value={shopParam} />}
@@ -114,23 +123,32 @@ export default function DashboardIndex() {
           </s-stack>
         </Form>
       </s-section>
-      <s-section heading={`Performance (${overview.rangeLabel})`}>
+      <s-section heading={`${t(TRANSLATION_KEYS.DASHBOARD_PERFORMANCE)} (${overview.rangeLabel})`}>
         <s-stack direction="inline" gap="base" wrap>
-          {overview.summaryCards.map((card) => (
+          {localizedCards.map((card) => (
             <MetricCard key={card.label} card={card} currency={overview.currency} />
           ))}
         </s-stack>
       </s-section>
 
-      <s-section heading="Revenue, ad spend & profit">
+      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_REVENUE_SECTION)}>
         <s-stack direction="block" gap="base">
-          <TrendPreview label="Revenue" data={overview.timeseries.revenue} />
-          <TrendPreview label="Ad spend" data={overview.timeseries.adSpend} />
-          <TrendPreview label="Net profit" data={overview.timeseries.netProfit} />
+          <TrendPreview
+            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE)}
+            data={overview.timeseries.revenue}
+          />
+          <TrendPreview
+            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND)}
+            data={overview.timeseries.adSpend}
+          />
+          <TrendPreview
+            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT)}
+            data={overview.timeseries.netProfit}
+          />
         </s-stack>
       </s-section>
 
-      <s-section heading="Cost composition">
+      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_COST_SECTION)}>
         <CostCompositionChart
           slices={overview.costBreakdown}
           revenue={revenueBasis}
@@ -138,7 +156,7 @@ export default function DashboardIndex() {
         />
       </s-section>
 
-      <s-section heading="Top products by net profit">
+      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_TOP_PRODUCTS)}>
         <s-data-table>
           <table>
             <thead>
@@ -169,7 +187,7 @@ export default function DashboardIndex() {
         </s-data-table>
       </s-section>
 
-      <s-section slot="aside" heading="Live alerts">
+      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_LIVE_ALERTS)}>
         {overview.alerts.map((alert) => (
           <s-card key={alert.title} padding="base" subdued>
             <s-heading>{alert.title}</s-heading>
@@ -178,7 +196,7 @@ export default function DashboardIndex() {
         ))}
       </s-section>
 
-      <s-section slot="aside" heading="Next actions">
+      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_NEXT_ACTIONS)}>
         <s-unordered-list>
           <s-list-item>Connect Google Ads for blended ROAS</s-list-item>
           <s-list-item>Upload COGS CSV for Winter SKUs</s-list-item>
@@ -186,7 +204,7 @@ export default function DashboardIndex() {
         </s-unordered-list>
       </s-section>
 
-      <s-section slot="aside" heading="Multi-store snapshot">
+      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_MULTI_STORE)}>
         {merchantSummary ? (
           <>
             <s-stack direction="inline" gap="base" wrap>
@@ -226,7 +244,7 @@ export default function DashboardIndex() {
   );
 }
 
-function buildPlanWarning(planStatus) {
+function buildPlanWarning(planStatus, translate) {
   if (!planStatus) return null;
   const orderUsage = `${formatOrderCount(planStatus.orderCount)} / ${formatOrderCount(
     planStatus.orderLimit,
@@ -235,21 +253,24 @@ function buildPlanWarning(planStatus) {
     return {
       tone: "critical",
       title: "Order ingestion paused",
-      message: `You've used ${orderUsage} of your monthly order allowance. Upgrade or adjust usage to resume syncing.`,
+      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_DANGER).replace("{usage}", orderUsage),
     };
   }
   if (planStatus.orderStatus === "warning") {
     return {
       tone: "warning",
       title: "Order allowance approaching limit",
-      message: `Current order usage is ${orderUsage}. Upgrade to avoid interrupted ingestion.`,
+      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_ORDER).replace("{usage}", orderUsage),
     };
   }
   if (planStatus.planStatus && planStatus.planStatus !== "ACTIVE") {
     return {
       tone: "critical",
       title: "Billing action required",
-      message: `${planStatus.planName ?? "Profit Pulse"} billing status is ${planStatus.planStatus}. Resolve it in Shopify to keep data flowing.`,
+      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_BILLING).replace(
+        "{status}",
+        planStatus.planStatus,
+      ),
     };
   }
   return null;
@@ -392,6 +413,17 @@ function CostCompositionChart({ slices, revenue, currency }) {
     </s-card>
   );
 }
+
+const CARD_LABEL_MAP = {
+  netRevenue: TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE,
+  adSpend: TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND,
+  netProfit: TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT,
+  profitOnAdSpend: TRANSLATION_KEYS.DASHBOARD_CARD_POAS,
+  fixedCosts: TRANSLATION_KEYS.DASHBOARD_CARD_FIXED,
+  netProfitAfterFixed: TRANSLATION_KEYS.DASHBOARD_CARD_NET_AFTER_FIXED,
+  refundRate: TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_RATE,
+  refundImpact: TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_IMPACT,
+};
 
 function MetricCard({ card, currency }) {
   const trendEmoji = card.trend === "up" ? "↗︎" : "↘︎";

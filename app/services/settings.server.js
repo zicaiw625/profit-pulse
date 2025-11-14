@@ -94,6 +94,10 @@ export async function getAccountSettings({ store }) {
     store.merchantId != null
       ? await getMerchantPerformanceSummary({ merchantId: store.merchantId })
       : null;
+  const accountingSync = {
+    quickbooksEnabled: Boolean(process.env.QUICKBOOKS_SYNC_URL),
+    xeroEnabled: Boolean(process.env.XERO_SYNC_URL),
+  };
 
   return {
     plan,
@@ -132,6 +136,7 @@ export async function getAccountSettings({ store }) {
     shopifyData,
     merchantSummary,
     auditLogs,
+    accountingSync,
   };
 }
 

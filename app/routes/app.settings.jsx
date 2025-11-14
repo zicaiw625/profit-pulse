@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { useState } from "react";
 import {
   Form,
   useActionData,
@@ -25,6 +26,7 @@ import {
   syncShopifyPayments,
   syncPaypalPayments,
   syncStripePayments,
+  syncKlarnaPayments,
 } from "../services/sync/payment-payouts.server";
 import { syncShopifyOrders } from "../services/sync/shopify-orders.server";
 import {
@@ -72,6 +74,7 @@ import { importTaxRatesFromCsv } from "../services/tax-rates.server";
 import { syncErpCosts } from "../services/erp-costs.server";
 import { syncInventoryAndCosts } from "../services/inventory.server";
 import { queueGdprRequest, processGdprRequest } from "../services/privacy.server";
+import { syncAccountingProvider } from "../services/accounting-sync.server";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -83,6 +86,12 @@ const FIXED_COST_CADENCE_OPTIONS = [
   { value: "MONTHLY", label: "Monthly" },
   { value: "QUARTERLY", label: "Quarterly" },
   { value: "YEARLY", label: "Yearly" },
+];
+
+const FIXED_COST_ALLOCATION_OPTIONS = [
+  { value: "REVENUE", label: "Revenue share" },
+  { value: "ORDERS", label: "Order share" },
+  { value: "CHANNEL", label: "Specific channel" },
 ];
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -320,6 +329,7 @@ const ROLE_PERMISSIONS = {
   "sync-payments": ["OWNER", "FINANCE"],
   "sync-paypal-payments": ["OWNER", "FINANCE"],
   "sync-stripe-payments": ["OWNER", "FINANCE"],
+  "sync-klarna-payments": ["OWNER", "FINANCE"],
   "sync-inventory": ["OWNER", "FINANCE"],
   "import-cogs": ["OWNER", "FINANCE"],
   "invite-member": ["OWNER"],
@@ -337,6 +347,8 @@ const ROLE_PERMISSIONS = {
   "connect-logistics-credential": ["OWNER", "FINANCE"],
   "disconnect-logistics-credential": ["OWNER", "FINANCE"],
   "sync-logistics-provider": ["OWNER", "FINANCE"],
+  "sync-quickbooks": ["OWNER", "FINANCE"],
+  "sync-xero": ["OWNER", "FINANCE"],
   "queue-gdpr-export": ["OWNER", "FINANCE"],
   "queue-gdpr-deletion": ["OWNER"],
   "process-gdpr-request": ["OWNER"],
@@ -357,6 +369,7 @@ const INTENT_LABELS = {
   "sync-payments": "Pull payout summary",
   "sync-paypal-payments": "Sync PayPal payouts",
   "sync-stripe-payments": "Sync Stripe payouts",
+  "sync-klarna-payments": "Sync Klarna payouts",
   "import-cogs": "Import COGS CSV",
   "sync-inventory": "Sync Shopify inventory",
   "invite-member": "Invite teammate",
@@ -374,6 +387,8 @@ const INTENT_LABELS = {
   "connect-logistics-credential": "Connect logistics provider",
   "disconnect-logistics-credential": "Disconnect logistics provider",
   "sync-logistics-provider": "Sync logistics rates",
+  "sync-quickbooks": "Sync QuickBooks",
+  "sync-xero": "Sync Xero",
   "queue-gdpr-export": "Queue GDPR export",
   "queue-gdpr-deletion": "Queue GDPR deletion",
   "process-gdpr-request": "Process GDPR request",
@@ -832,6 +847,24 @@ export const action = async ({ request }) => {
     }
   }
 
+  if (intent === "sync-klarna-payments") {
+    try {
+      const result = await syncKlarnaPayments({ store, days: 30 });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_klarna_payments",
+        details: `Fetched ${result.processed} Klarna payouts`,
+      });
+      return { message: `Klarna payouts synced (${result.processed} records).` };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "Failed to sync Klarna payouts. Check API credentials.",
+      };
+    }
+  }
+
   if (intent === "sync-inventory") {
     try {
       const summary = await syncInventoryAndCosts({ store, session });
@@ -965,10 +998,23 @@ export const action = async ({ request }) => {
     const amountValue = Number(formData.get("fixedCostAmount"));
     const currency = formData.get("fixedCostCurrency") || store.currency || "USD";
     const cadence = formData.get("fixedCostCadence") || "MONTHLY";
+    const allocationType =
+      formData.get("fixedCostAllocationType")?.toString()?.toUpperCase() ?? "REVENUE";
+    const allocationChannel = formData.get("fixedCostAllocationChannel")?.toString().trim();
     const notes = formData.get("fixedCostNotes")?.toString().trim();
 
     if (!label || !Number.isFinite(amountValue) || amountValue <= 0) {
       return { message: "请输入有效的固定成本名称与金额。" };
+    }
+
+    let allocation = allocationType;
+    if (allocationType === "CHANNEL") {
+      if (!allocationChannel) {
+        return { message: "请输入用于分摊的渠道代码。" };
+      }
+      allocation = `CHANNEL:${allocationChannel.toUpperCase()}`;
+    } else if (!["REVENUE", "ORDERS"].includes(allocationType)) {
+      allocation = "REVENUE";
     }
 
     await createFixedCost({
@@ -977,7 +1023,7 @@ export const action = async ({ request }) => {
       amount: amountValue,
       currency,
       cadence,
-      allocation: "REVENUE",
+      allocation,
       appliesTo: "ALL",
       notes,
     });
@@ -1180,6 +1226,27 @@ export const action = async ({ request }) => {
     }
   }
 
+  if (intent === "sync-quickbooks" || intent === "sync-xero") {
+    const provider = intent === "sync-quickbooks" ? "QUICKBOOKS" : "XERO";
+    try {
+      const result = await syncAccountingProvider({ store, provider });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: `sync_${provider.toLowerCase()}`,
+        details: `Synced ${result.count} rows to ${provider}`,
+      });
+      return {
+        message: `${provider} sync dispatched (${result.count} rows).`,
+      };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? `Failed to sync ${provider}.` ,
+      };
+    }
+  }
+
   if (intent === "queue-gdpr-export" || intent === "queue-gdpr-deletion") {
     const subjectEmail = formData.get("subjectEmail")?.toString().trim();
     if (!subjectEmail) {
@@ -1302,8 +1369,10 @@ export default function SettingsPage() {
   const targetPlanTier = navigation.formData?.get("planTier");
   const targetProvider = navigation.formData?.get("provider");
   const pendingMemberId = navigation.formData?.get("memberId");
+  const [fixedCostAllocationType, setFixedCostAllocationType] = useState("REVENUE");
 
   const auditLogs = settings.auditLogs ?? [];
+  const accountingSync = settings.accountingSync ?? {};
 
   const usage = settings.planUsage;
   const orderStatus = usage?.orders?.status;
@@ -1399,6 +1468,8 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "sync-paypal-payments";
   const syncingStripeApi =
     isSubmitting && currentIntent === "sync-stripe-payments";
+  const syncingKlarnaApi =
+    isSubmitting && currentIntent === "sync-klarna-payments";
   const syncingInventory =
     isSubmitting && currentIntent === "sync-inventory";
   const importingCogs =
@@ -1441,6 +1512,10 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "sync-logistics-provider"
       ? navigation.formData?.get("provider")
       : null;
+  const syncingQuickbooks =
+    isSubmitting && currentIntent === "sync-quickbooks";
+  const syncingXero =
+    isSubmitting && currentIntent === "sync-xero";
   const deletingChannelId =
     isSubmitting && currentIntent === "delete-notification-channel"
       ? navigation.formData?.get("channelId")
@@ -1471,6 +1546,7 @@ export default function SettingsPage() {
     syncPayments: canPerformIntent("sync-payments", currentRole),
     syncPaypalPayments: canPerformIntent("sync-paypal-payments", currentRole),
     syncStripePayments: canPerformIntent("sync-stripe-payments", currentRole),
+    syncKlarnaPayments: canPerformIntent("sync-klarna-payments", currentRole),
     syncInventory: canPerformIntent("sync-inventory", currentRole),
     deleteNotificationChannel: canPerformIntent("delete-notification-channel", currentRole),
     connectSlackWebhook: canPerformIntent("connect-slack-webhook", currentRole),
@@ -1500,6 +1576,8 @@ export default function SettingsPage() {
       currentRole,
     ),
     syncLogisticsProvider: canPerformIntent("sync-logistics-provider", currentRole),
+    syncQuickbooks: canPerformIntent("sync-quickbooks", currentRole),
+    syncXero: canPerformIntent("sync-xero", currentRole),
     queueGdprExport: canPerformIntent("queue-gdpr-export", currentRole),
     queueGdprDeletion: canPerformIntent("queue-gdpr-deletion", currentRole),
     processGdprRequest: canPerformIntent("process-gdpr-request", currentRole),
@@ -1944,21 +2022,28 @@ export default function SettingsPage() {
               {settings.integrations.payments.map((integration) => {
                 const isPaypal = integration.id === "PAYPAL";
                 const isStripe = integration.id === "STRIPE";
+                const isKlarna = integration.id === "KLARNA";
                 const apiIntent = isPaypal
                   ? "sync-paypal-payments"
                   : isStripe
                     ? "sync-stripe-payments"
-                    : "sync-payments";
+                    : isKlarna
+                      ? "sync-klarna-payments"
+                      : "sync-payments";
                 const apiLoading = isPaypal
                   ? syncingPaypalApi
                   : isStripe
                     ? syncingStripeApi
-                    : syncingPayments && targetProvider === integration.id;
+                    : isKlarna
+                      ? syncingKlarnaApi
+                      : syncingPayments && targetProvider === integration.id;
                 const apiAllowed = isPaypal
                   ? intentAccess.syncPaypalPayments
                   : isStripe
                     ? intentAccess.syncStripePayments
-                    : intentAccess.syncPayments;
+                    : isKlarna
+                      ? intentAccess.syncKlarnaPayments
+                      : intentAccess.syncPayments;
 
                 return (
                   <s-card key={integration.id} padding="base">
@@ -2028,6 +2113,57 @@ export default function SettingsPage() {
         </div>
       </s-stack>
     </s-section>
+
+      <s-section heading="Accounting sync">
+        <s-stack direction="inline" gap="base" wrap>
+          <s-card padding="base">
+            <s-heading level="3">QuickBooks</s-heading>
+            <s-text variation="subdued">
+              {accountingSync.quickbooksEnabled
+                ? "Push the latest accounting detail rows directly to your QuickBooks webhook."
+                : "Configure QUICKBOOKS_SYNC_URL to enable QuickBooks syncing."}
+            </s-text>
+            <Form method="post">
+              <input type="hidden" name="intent" value="sync-quickbooks" />
+              <s-button
+                type="submit"
+                variant="secondary"
+                disabled={
+                  !accountingSync.quickbooksEnabled || !intentAccess.syncQuickbooks
+                }
+                {...(syncingQuickbooks ? { loading: true } : {})}
+              >
+                Sync QuickBooks
+              </s-button>
+              {!intentAccess.syncQuickbooks && (
+                <s-text variation="subdued">{permissionHint("sync-quickbooks")}</s-text>
+              )}
+            </Form>
+          </s-card>
+          <s-card padding="base">
+            <s-heading level="3">Xero</s-heading>
+            <s-text variation="subdued">
+              {accountingSync.xeroEnabled
+                ? "Send daily accounting exports to the configured Xero endpoint."
+                : "Configure XERO_SYNC_URL to enable Xero syncing."}
+            </s-text>
+            <Form method="post">
+              <input type="hidden" name="intent" value="sync-xero" />
+              <s-button
+                type="submit"
+                variant="secondary"
+                disabled={!accountingSync.xeroEnabled || !intentAccess.syncXero}
+                {...(syncingXero ? { loading: true } : {})}
+              >
+                Sync Xero
+              </s-button>
+              {!intentAccess.syncXero && (
+                <s-text variation="subdued">{permissionHint("sync-xero")}</s-text>
+              )}
+            </Form>
+          </s-card>
+        </s-stack>
+      </s-section>
 
       <s-section heading="Ad attribution rules">
         <s-stack direction="block" gap="base">
@@ -2935,6 +3071,7 @@ export default function SettingsPage() {
                 <th align="left">Label</th>
                 <th align="left">Cadence</th>
                 <th align="left">Amount</th>
+                <th align="left">Allocation</th>
                 <th align="left">Notes</th>
                 <th align="left">Actions</th>
               </tr>
@@ -2942,7 +3079,7 @@ export default function SettingsPage() {
             <tbody>
               {fixedCosts.length === 0 && (
                 <tr>
-                  <td colSpan="5">
+                  <td colSpan="6">
                     <s-text variation="subdued">
                       No fixed costs yet. Add rent, payroll, or software expenses
                       below to distribute them across performance reports.
@@ -2955,6 +3092,7 @@ export default function SettingsPage() {
                   <td>{cost.label}</td>
                   <td>{formatCadence(cost.cadence)}</td>
                   <td>{formatCurrency(cost.amount, cost.currency)}</td>
+                  <td>{formatAllocationRule(cost.allocation)}</td>
                   <td>{cost.notes ?? "—"}</td>
                   <td>
                     <Form method="post">
@@ -3017,6 +3155,30 @@ export default function SettingsPage() {
                   ))}
                 </select>
               </label>
+              <label>
+                Allocation
+                <select
+                  name="fixedCostAllocationType"
+                  value={fixedCostAllocationType}
+                  onChange={(event) => setFixedCostAllocationType(event.target.value)}
+                >
+                  {FIXED_COST_ALLOCATION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {fixedCostAllocationType === "CHANNEL" && (
+                <label>
+                  Channel code
+                  <input
+                    type="text"
+                    name="fixedCostAllocationChannel"
+                    placeholder="e.g. GOOGLE_ADS"
+                  />
+                </label>
+              )}
             </s-stack>
             <s-stack direction="block" gap="base" style={{ marginTop: "1rem" }}>
               <s-text-field
@@ -3271,6 +3433,20 @@ function formatCadence(code) {
     default:
       return "Monthly";
   }
+}
+
+function formatAllocationRule(value) {
+  if (!value || value === "REVENUE") {
+    return "Revenue share";
+  }
+  if (value === "ORDERS") {
+    return "Order share";
+  }
+  if (value.startsWith("CHANNEL:")) {
+    const channel = value.split(":")[1] || "";
+    return channel ? `Channel ${channel}` : "Channel allocation";
+  }
+  return value;
 }
 
 function renderAdCredentialFields(providerId) {

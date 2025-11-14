@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getFixedCostTotal } from "./fixed-costs.server";
+import { getFixedCostBreakdown } from "./fixed-costs.server";
 import { checkNetProfitAlert, checkRefundSpikeAlert } from "./alerts.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import { getPlanUsage } from "./plan-limits.server";
@@ -99,15 +99,28 @@ async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
     base: storeCurrency,
     quote: masterCurrency,
   });
-  const fixedCostTotalStore = merchantId
-    ? await getFixedCostTotal({
+  const channelStats = summarizeChannelStats(currentMetrics);
+  const fixedCostBreakdownStore = merchantId
+    ? await getFixedCostBreakdown({
         merchantId,
         rangeDays,
         rangeStart: range.start,
         rangeEnd: range.end,
+        channelStats,
       })
-    : 0;
-  const fixedCostTotal = fixedCostTotalStore * conversionRate;
+    : { total: 0, allocations: { perChannel: {}, unassigned: 0 }, items: [] };
+  const fixedCostTotal = fixedCostBreakdownStore.total * conversionRate;
+  const fixedCostAllocations = {
+    perChannel: Object.entries(
+      fixedCostBreakdownStore.allocations?.perChannel ?? {},
+    ).reduce((acc, [channel, value]) => {
+      acc[channel] = Number(value || 0) * conversionRate;
+      return acc;
+    }, {}),
+    unassigned:
+      Number(fixedCostBreakdownStore.allocations?.unassigned || 0) *
+      conversionRate,
+  };
 
   const summary = buildSummary(
     currentMetrics,
@@ -178,6 +191,7 @@ async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
     topProducts,
     alerts,
     fixedCosts: fixedCostTotal,
+    fixedCostAllocations,
     currency: masterCurrency,
     merchantSummary,
     planStatus: buildPlanStatus(planUsageResult),
@@ -397,6 +411,23 @@ async function loadTopProducts(storeId, rangeStart, rangeEnd, conversionRate = 1
       refunds: revenue > 0 ? refundAmount / revenue : 0,
     };
   });
+}
+
+function summarizeChannelStats(metrics = []) {
+  const stats = {};
+  metrics.forEach((metric) => {
+    if (!metric) return;
+    if (metric.productSku) return;
+    if (!metric.channel || metric.channel === "TOTAL" || metric.channel === "PRODUCT") {
+      return;
+    }
+    const channel = metric.channel;
+    const entry = stats[channel] || { revenue: 0, orders: 0 };
+    entry.revenue += Number(metric.revenue || 0);
+    entry.orders += Number(metric.orders || 0);
+    stats[channel] = entry;
+  });
+  return stats;
 }
 
 function issueToAlert(issue) {

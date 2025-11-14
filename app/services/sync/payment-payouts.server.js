@@ -4,6 +4,7 @@ import shopify from "../../shopify.server";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
 import { fetchPaypalPayouts } from "../payments/paypal.server";
 import { fetchStripePayouts } from "../payments/stripe.server";
+import { fetchKlarnaPayouts } from "../payments/klarna.server";
 
 const { CredentialProvider, SyncJobType } = pkg;
 
@@ -105,6 +106,35 @@ export async function syncStripePayments({ store, days = 7 }) {
     await Promise.all(
       payouts.map((payout) =>
         persistExternalPayout(store.id, CredentialProvider.STRIPE, payout),
+      ),
+    );
+    await finishSyncJob(job.id, {
+      processedCount: payouts.length,
+    });
+    return { processed: payouts.length };
+  } catch (error) {
+    await failSyncJob(job.id, error);
+    throw error;
+  }
+}
+
+export async function syncKlarnaPayments({ store, days = 7 }) {
+  if (!store?.id) {
+    throw new Error("Store is required for Klarna sync");
+  }
+
+  const job = await startSyncJob({
+    storeId: store.id,
+    jobType: SyncJobType.PAYMENT_PAYOUT,
+    provider: CredentialProvider.KLARNA,
+    metadata: { days },
+  });
+
+  try {
+    const payouts = await fetchKlarnaPayouts({ days });
+    await Promise.all(
+      payouts.map((payout) =>
+        persistExternalPayout(store.id, CredentialProvider.KLARNA, payout),
       ),
     );
     await finishSyncJob(job.id, {

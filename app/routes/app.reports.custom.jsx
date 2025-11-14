@@ -10,6 +10,8 @@ export const loader = async ({ request }) => {
   const metricList = metricsParam
     ? metricsParam.split(",").map((item) => item.trim()).filter(Boolean)
     : null;
+  const formula = url.searchParams.get("formula") ?? undefined;
+  const formulaLabel = url.searchParams.get("formulaLabel") ?? undefined;
 
   const limit = Number(url.searchParams.get("limit")) || 25;
   const payload = await getCustomReportData({
@@ -19,6 +21,8 @@ export const loader = async ({ request }) => {
     start: url.searchParams.get("start") ?? undefined,
     end: url.searchParams.get("end") ?? undefined,
     limit,
+    formula,
+    formulaLabel,
   });
 
   return new Response(JSON.stringify(payload), {
