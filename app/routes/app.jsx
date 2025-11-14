@@ -15,6 +15,12 @@ export const loader = async ({ request }) => {
   try {
     await admin.graphql(`{ shop { name } }`);
   } catch (error) {
+    // If Shopify needs us to restart authentication it will throw a Response
+    // object. Re-throw it so the platform can handle the redirect correctly.
+    if (error instanceof Response) {
+      throw error;
+    }
+
     console.debug("Admin session prewarm failed", error);
   }
   // eslint-disable-next-line no-undef
