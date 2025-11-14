@@ -30,7 +30,14 @@ const METRIC_OPTIONS = [
   { value: "netProfit", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT },
   { value: "adSpend", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND },
   { value: "orders", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_ORDERS },
+  { value: "ltv", labelKey: TRANSLATION_KEYS.REPORTS_METRIC_LTV },
+  {
+    value: "repeatOrders",
+    labelKey: TRANSLATION_KEYS.REPORTS_METRIC_REPEAT_ORDERS,
+  },
 ];
+
+const CUSTOMER_ONLY_METRICS = new Set(["ltv", "repeatOrders"]);
 
 const DEFAULT_BUILDER_LIMIT = 50;
 const SUPPORTED_LANGUAGES = ["en", "zh"];
@@ -203,8 +210,19 @@ export default function ReportsPage() {
     setDraggingItem(null);
   };
 
+  const isMetricAllowed = (metricKey, dimension) => {
+    if (CUSTOMER_ONLY_METRICS.has(metricKey)) {
+      return dimension === "customer";
+    }
+    return true;
+  };
+
   const handleDimensionSelect = (value) => {
-    setBuilderValues((prev) => ({ ...prev, dimension: value }));
+    setBuilderValues((prev) => ({
+      ...prev,
+      dimension: value,
+      metrics: prev.metrics.filter((metric) => isMetricAllowed(metric, value)),
+    }));
   };
 
   const handleDimensionDrop = (event) => {
@@ -236,16 +254,21 @@ export default function ReportsPage() {
   const builderCurrency = builderData?.currency ?? currency;
   const builderLoading =
     builderFetcher.state === "loading" || builderFetcher.state === "submitting";
-  const availableMetrics = METRIC_OPTIONS.filter(
+  const metricsPalette = METRIC_OPTIONS.filter((metric) =>
+    isMetricAllowed(metric.value, builderValues.dimension),
+  );
+  const availableMetrics = metricsPalette.filter(
     (metric) => !builderValues.metrics.includes(metric.value),
   );
-  const selectedMetricObjects = builderValues.metrics.map(
-    (value) =>
-      METRIC_OPTIONS.find((metric) => metric.value === value) ?? {
-        value,
-        labelKey: value,
-      },
-  );
+  const selectedMetricObjects = builderValues.metrics
+    .filter((metric) => isMetricAllowed(metric, builderValues.dimension))
+    .map(
+      (value) =>
+        METRIC_OPTIONS.find((metric) => metric.value === value) ?? {
+          value,
+          labelKey: value,
+        },
+    );
   const selectedDimensionOption = DIMENSION_OPTIONS.find(
     (option) => option.value === builderValues.dimension,
   );
