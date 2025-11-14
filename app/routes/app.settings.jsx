@@ -51,7 +51,10 @@ import {
 } from "../services/notifications.server";
 import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes";
 import { importPaymentPayoutCsv } from "../services/imports/payment-payouts.server";
-import { refreshExchangeRates } from "../services/exchange-rates.server";
+import {
+  refreshExchangeRates,
+  setCustomExchangeRate,
+} from "../services/exchange-rates.server";
 import {
   createReportSchedule,
   deleteReportSchedule,
@@ -321,6 +324,7 @@ const ROLE_PERMISSIONS = {
   "delete-notification-channel": ["OWNER", "FINANCE", "MARKETING"],
   "test-slack-notification": ["OWNER", "FINANCE", "MARKETING"],
   "refresh-exchange-rates": ["OWNER", "FINANCE"],
+  "set-exchange-rate": ["OWNER", "FINANCE"],
   "import-paypal-csv": ["OWNER", "FINANCE"],
   "sync-orders": ["OWNER", "FINANCE"],
   "sync-payments": ["OWNER", "FINANCE"],
@@ -728,6 +732,39 @@ export const action = async ({ request }) => {
     return {
       message: success ? "测试通知已发送。" : "未检测到可用 Slack Webhook，请先配置。",
     };
+  }
+
+  if (intent === "set-exchange-rate") {
+    const baseCurrency = formData.get("baseCurrency")?.toString().trim().toUpperCase();
+    const quoteCurrency = formData.get("quoteCurrency")?.toString().trim().toUpperCase();
+    const rateValueRaw = formData.get("manualRate");
+    const rateValue = Number(rateValueRaw);
+    if (!baseCurrency || !quoteCurrency) {
+      return { message: "请输入基础币种与目标币种。" };
+    }
+    if (baseCurrency === quoteCurrency) {
+      return { message: "基础币种与目标币种不能相同。" };
+    }
+    if (!Number.isFinite(rateValue) || rateValue <= 0) {
+      return { message: "汇率必须为大于 0 的数字。" };
+    }
+    try {
+      await setCustomExchangeRate({
+        base: baseCurrency,
+        quote: quoteCurrency,
+        rate: rateValue,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "set_manual_exchange_rate",
+        details: `Manual FX ${baseCurrency}->${quoteCurrency} = ${rateValue}`,
+      });
+      return { message: `已保存 ${baseCurrency} → ${quoteCurrency} 汇率。` };
+    } catch (error) {
+      console.error(error);
+      return { message: error.message ?? "保存汇率失败，请稍后再试。" };
+    }
   }
 
   if (intent === "refresh-exchange-rates") {
@@ -1520,6 +1557,8 @@ export default function SettingsPage() {
   const connectingSlack = currentIntent === "connect-slack-webhook" && isSubmitting;
   const testingSlack = currentIntent === "test-slack-notification" && isSubmitting;
   const importingPaypal = currentIntent === "import-paypal-csv" && isSubmitting;
+  const settingCustomExchangeRate =
+    currentIntent === "set-exchange-rate" && isSubmitting;
   const updatingAttributionRules =
     currentIntent === "update-attribution-rules" && isSubmitting;
   const queueingGdprExport = currentIntent === "queue-gdpr-export" && isSubmitting;
@@ -1549,6 +1588,7 @@ export default function SettingsPage() {
     connectSlackWebhook: canPerformIntent("connect-slack-webhook", currentRole),
     testSlackNotification: canPerformIntent("test-slack-notification", currentRole),
     refreshExchangeRates: canPerformIntent("refresh-exchange-rates", currentRole),
+    setExchangeRate: canPerformIntent("set-exchange-rate", currentRole),
     changePlan: canPerformIntent("change-plan", currentRole),
     importCogs: canPerformIntent("import-cogs", currentRole),
     seedCosts: canPerformIntent("seed-costs", currentRole),
@@ -2473,26 +2513,72 @@ export default function SettingsPage() {
 
       <s-section heading="Currency & exchange rates">
         <s-card padding="base">
-          <s-heading level="3">Master currency</s-heading>
-          <s-text variation="subdued">
-            Merchant base currency: {masterCurrency}. Store currency: {primaryStore?.currency ?? masterCurrency}.
-          </s-text>
-          <s-text variation="subdued">
-            Last rate snapshot: {exchangeRates?.asOf ? new Date(exchangeRates.asOf).toLocaleString() : "—"}
-          </s-text>
-          <Form method="post">
-            <input type="hidden" name="intent" value="refresh-exchange-rates" />
-            <s-button
-              type="submit"
-              variant="secondary"
-              disabled={!intentAccess.refreshExchangeRates}
-            >
-              Refresh exchange rates
-            </s-button>
-            {!intentAccess.refreshExchangeRates && (
-              <s-text variation="subdued">{permissionHint("refresh-exchange-rates")}</s-text>
-            )}
-          </Form>
+          <s-stack direction="block" gap="base">
+            <div>
+              <s-heading level="3">Master currency</s-heading>
+              <s-text variation="subdued">
+                Merchant base currency: {masterCurrency}. Store currency:{" "}
+                {primaryStore?.currency ?? masterCurrency}.
+              </s-text>
+              <s-text variation="subdued">
+                Last rate snapshot:{" "}
+                {exchangeRates?.asOf ? new Date(exchangeRates.asOf).toLocaleString() : "—"}
+              </s-text>
+              <Form method="post">
+                <input type="hidden" name="intent" value="refresh-exchange-rates" />
+                <s-button
+                  type="submit"
+                  variant="secondary"
+                  disabled={!intentAccess.refreshExchangeRates}
+                >
+                  Refresh exchange rates
+                </s-button>
+                {!intentAccess.refreshExchangeRates && (
+                  <s-text variation="subdued">{permissionHint("refresh-exchange-rates")}</s-text>
+                )}
+              </Form>
+            </div>
+            <div>
+              <s-heading level="3">Manual override</s-heading>
+              <s-text variation="subdued">
+                Override the automatically fetched FX rate when a known contractual rate applies.
+              </s-text>
+              <Form method="post">
+                <input type="hidden" name="intent" value="set-exchange-rate" />
+                <s-stack direction="inline" gap="base" wrap>
+                  <s-text-field
+                    name="baseCurrency"
+                    label="Base currency"
+                    defaultValue={masterCurrency}
+                  ></s-text-field>
+                  <s-text-field
+                    name="quoteCurrency"
+                    label="Quote currency"
+                    defaultValue={primaryStore?.currency ?? masterCurrency}
+                  ></s-text-field>
+                  <s-text-field
+                    name="manualRate"
+                    label="Exchange rate"
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    placeholder="1.00"
+                  ></s-text-field>
+                  <s-button
+                    type="submit"
+                    variant="primary"
+                    disabled={!intentAccess.setExchangeRate}
+                    {...(settingCustomExchangeRate ? { loading: true } : {})}
+                  >
+                    Save rate
+                  </s-button>
+                </s-stack>
+                {!intentAccess.setExchangeRate && (
+                  <s-text variation="subdued">{permissionHint("set-exchange-rate")}</s-text>
+                )}
+              </Form>
+            </div>
+          </s-stack>
         </s-card>
       </s-section>
 

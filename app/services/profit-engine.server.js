@@ -816,15 +816,14 @@ function summarizeRefundLineItems(lineItems = []) {
   for (const entry of lineItems) {
     const sku = entry?.line_item?.sku ?? entry?.line_item?.variant_id ?? null;
     if (!sku) continue;
-    const rawAmount = toNumber(
+    const amount = toNumber(
       entry.subtotal_set?.shop_money?.amount ??
         entry.total_set?.shop_money?.amount ??
         entry.subtotal ??
         entry.amount ??
         0,
     );
-    const amount = Math.abs(rawAmount);
-    if (amount === 0) continue;
+    if (amount <= 0) continue;
     map.set(sku, (map.get(sku) ?? 0) + amount);
   }
   return map;
