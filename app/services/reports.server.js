@@ -59,6 +59,10 @@ const METRIC_COLUMNS = {
   repeatOrders: { label: "Repeat purchases", isCurrency: false },
 };
 
+const METRIC_KEY_LOOKUP = new Map(
+  Object.keys(METRIC_COLUMNS).map((key) => [key.toLowerCase(), key]),
+);
+
 const DEFAULT_CUSTOM_METRICS = ["revenue", "netProfit"];
 
 export async function getReportingOverview({
@@ -130,8 +134,13 @@ export async function getCustomReportData({
   const selectedMetrics = Array.from(
     new Set(
       (Array.isArray(metrics) ? metrics : [metrics])
-        .map((name) => name?.toString().trim().toLowerCase())
-        .filter((name) => METRIC_COLUMNS[name]),
+        .map((name) => {
+          const trimmed = name?.toString().trim();
+          if (!trimmed) return null;
+          const lookupKey = trimmed.toLowerCase();
+          return METRIC_KEY_LOOKUP.get(lookupKey) ?? trimmed;
+        })
+        .filter((name) => name && METRIC_COLUMNS[name]),
     ),
   );
   const metricsToUse =
