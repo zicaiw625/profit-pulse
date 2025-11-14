@@ -21,14 +21,14 @@
 - 🚩 Amazon Ads / Snapchat Ads：新增 `app/services/connectors/amazon-ads.server.js:1` 与 `snapchat-ads.server.js:1` 连接器，和 UI/计划支持在 Settings 里登记 credential（`app/routes/app.settings.jsx:1661`）。
 - ⭐ 广告扩展准备：TikTok/Bing provider 已有真实 connector（`app/services/connectors/tiktok-ads.server.js:1`, `bing-ads.server.js:1`），只要提供访问令牌/开发者令牌，即可向对应 API 获取 Campaign/Ad Set/Ad 级 spend 与转化数据，Settings 页也继续支持凭证输入。
 - 🚩 支付与手续费：`app/services/sync/payment-payouts.server.js:1` 同步 Shopify Payments，`app/services/imports/payment-payouts.server.js:1` 支持 PayPal/Stripe CSV；`app/services/notifications.server.js:1` 支持 Slack 通知提醒。
-- ⭐ 支付扩展：`importPaymentPayoutCsv` 接收 provider 参数，可导入 Stripe 及 Klarna 结算数据，Settings 中的上传表单也包含对应选项。
+- ⭐ 支付扩展：除 CSV 导入外，新增 Klarna API 同步（`app/services/payments/klarna.server.js` + `syncKlarnaPayments`），Settings > Payment processors 按钮可触发 PayPal/Stripe/Klarna 各自的对账拉取。
 - ⭐ 集成状态与凭证管理：`app/services/credentials.server.js:1` 和 `app/services/integrations.server.js:1` 汇总已连接的广告/支付来源与上次同步时间。
 - ⭐ 第三方物流 API：`app/services/logistics-integrations.server.js:1` 对接 EasyPost/ShipStation 费率，`app/routes/app.settings.jsx:1760` 提供凭证录入、手动同步及自动写入 `LogisticsRule`。
 
 ## 4. 成本配置
 - 🚩 SKU 级成本 + 模板：`app/services/costs.server.js:6` 查看/更新 SKU 成本，`seedDemoCostConfiguration` 生成示例模板，`importSkuCostsFromCsv` 支持批量导入（`app/routes/app.settings.jsx:300` 提供上传入口）。
 - 🚩 可变成本模板：`processShopifyOrder` 在 `app/services/profit-engine.server.js:1` 调用 `getVariableCostTemplates`，按渠道/支付方式加成，并用 `orderCost` 记录（`app/services/profit-engine.server.js:130`）。
-- ⭐ 固定成本：`app/services/fixed-costs.server.js:1` 提供 CRUD 和区间分摊，`app/services/dashboard.server.js:1`、`reports.server.js:1` 在汇总卡中使用 `getFixedCostTotal`。
+- ⭐ 固定成本：`app/services/fixed-costs.server.js` 现支持营收/订单/指定渠道分摊，Dashboard & Reports 通过 `getFixedCostBreakdown` 将分摊结果计入渠道净利与成本构成，Settings 页面也能选择 Allocation 规则。
 
 ## 5. 利润计算引擎
 - 🚩 实时订单分析：`processShopifyOrder` 聚合 revenue/COGS/fees/ad spend/退款，生成 `dailyMetric` 聚合（`app/services/profit-engine.server.js:1`）。
@@ -43,8 +43,8 @@
 - 🚩 多维报表及导出：`app/routes/app.reports.jsx:1` 展示渠道/产品/广告，`app/routes/app.reports.export.$type.jsx:1` 支持 Channels/Products/Net profit/Ads CSV 输出，`app/services/reports.server.js:1` 计算 MER/NPAS/产品排行。
 - 🚩 退款分析：`app/routes/app.refunds.jsx:1` + `app/services/refunds.server.js:1` 提供退款趋势、产品/理由细分、详细导出。
 - ⭐ Dashboard alerts：`app/services/alerts.server.js:1` 每日检测净利/退款异常，并通过 Slack 告警（`app/services/notifications.server.js:1`）。
-- ⭐ 高级报表构建器：`app/routes/app.reports.jsx:1` 新增拖拽式指标排序与维度选择，支持中/英/西/法/德语言切换；`app/routes/app.reports.custom.jsx:1` 提供定制数据、`app/services/reports.server.js:1` 支持 channel/product/date 维度及多指标，结果可导出到 `app/routes/app.reports.export.$type.jsx:1` 的 custom CSV。
-- ⭐ 会计明细与税率模板导出：`app/routes/app.reports.export.$type.jsx:1` 新增 `accounting-detailed` 与 `tax-template` 类型，`app/services/accounting.server.js:1` 提供每日账目，`app/services/tax-rates.server.js:1` 提供模板数据。
+- ⭐ 高级报表构建器：`app/routes/app.reports.jsx:1` 新增拖拽式指标排序与维度选择，支持中/英/西/法/德语言切换，并允许填入自定义公式字段；`app/routes/app.reports.custom.jsx:1` 提供定制数据、`app/services/reports.server.js:1` 支持 channel/product/date 维度、公式计算及多指标，结果可导出到 `app/routes/app.reports.export.$type.jsx:1` 的 custom CSV。
+- ⭐ 会计明细与税率模板导出：`app/routes/app.reports.export.$type.jsx:1` 新增 `accounting-detailed` 与 `tax-template` 类型，`app/services/accounting.server.js:1` 提供每日账目，`app/services/tax-rates.server.js:1` 提供模板数据，另有 `app/services/accounting-sync.server.js` + Settings “Accounting sync” 将结果推送到 QuickBooks/Xero Webhook，实现自动同步。
 
 ## 7. 对账与异常检测
 - 🚩 Shopify vs 支付/广告对账：`app/services/reconciliation.server.js:1` 每次访问时执行差异检测并写入 `ReconciliationIssue`，`app/routes/app.reconciliation.jsx:1` 展示问题摘要与细节。
