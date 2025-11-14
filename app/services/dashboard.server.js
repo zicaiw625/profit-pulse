@@ -1,5 +1,5 @@
 import prisma from "../db.server";
-import { getFixedCostBreakdown } from "./fixed-costs.server";
+import { getFixedCostBreakdown, getFixedCostTotal } from "./fixed-costs.server";
 import { checkNetProfitAlert, checkRefundSpikeAlert } from "./alerts.server";
 import { getExchangeRate } from "./exchange-rates.server";
 import { getPlanUsage } from "./plan-limits.server";
@@ -60,6 +60,7 @@ export async function getDashboardOverview({
 
 async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
   const previousStart = shiftDays(range.start, -rangeDays, { timezone });
+  const previousEnd = shiftDays(range.start, -1, { timezone });
 
   const [currentMetrics, previousMetrics, openIssues, storeRecord] =
     await Promise.all([
@@ -100,16 +101,33 @@ async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
     quote: masterCurrency,
   });
   const channelStats = summarizeChannelStats(currentMetrics);
-  const fixedCostBreakdownStore = merchantId
-    ? await getFixedCostBreakdown({
+  let fixedCostBreakdownStore = {
+    total: 0,
+    allocations: { perChannel: {}, unassigned: 0 },
+    items: [],
+  };
+  let previousFixedCostTotalRaw = 0;
+
+  if (merchantId) {
+    [fixedCostBreakdownStore, previousFixedCostTotalRaw] = await Promise.all([
+      getFixedCostBreakdown({
         merchantId,
         rangeDays,
         rangeStart: range.start,
         rangeEnd: range.end,
         channelStats,
-      })
-    : { total: 0, allocations: { perChannel: {}, unassigned: 0 }, items: [] };
-  const fixedCostTotal = fixedCostBreakdownStore.total * conversionRate;
+      }),
+      getFixedCostTotal({
+        merchantId,
+        rangeDays,
+        rangeStart: previousStart,
+        rangeEnd: previousEnd,
+      }),
+    ]);
+  }
+
+  const fixedCostTotal = Number(fixedCostBreakdownStore.total || 0) * conversionRate;
+  const previousFixedCostTotal = Number(previousFixedCostTotalRaw || 0) * conversionRate;
   const fixedCostAllocations = {
     perChannel: Object.entries(
       fixedCostBreakdownStore.allocations?.perChannel ?? {},
@@ -127,6 +145,7 @@ async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
     previousMetrics,
     fixedCostTotal,
     conversionRate,
+    previousFixedCostTotal,
   );
   const netProfitAfterFixedCard = summary.find(
     (card) => card.key === "netProfitAfterFixed",
@@ -204,6 +223,7 @@ function buildSummary(
   previousMetrics,
   fixedCostTotal = 0,
   conversionRate = 1,
+  previousFixedCostTotal = fixedCostTotal,
 ) {
   const netRevenue = sumField(currentMetrics, "revenue") * conversionRate;
   const adSpend = sumField(currentMetrics, "adSpend") * conversionRate;
@@ -220,6 +240,7 @@ function buildSummary(
   const prevProfitOnAdSpend =
     prevAdSpend > 0 ? prevNetProfit / prevAdSpend : 0;
   const netProfitAfterFixed = netProfit - fixedCostTotal;
+  const prevNetProfitAfterFixed = prevNetProfit - previousFixedCostTotal;
   const currentOrders = sumField(currentMetrics, "orders");
   const previousOrders = sumField(previousMetrics, "orders");
   const refundRate = currentOrders > 0 ? refunds / currentOrders : 0;
@@ -271,8 +292,14 @@ function buildSummary(
       key: "netProfitAfterFixed",
       label: "Net profit after fixed",
       value: netProfitAfterFixed,
-      deltaPercentage: percentChange(netProfitAfterFixed, prevNetProfit),
-      trend: trendDirection(netProfitAfterFixed, prevNetProfit),
+      deltaPercentage: percentChange(
+        netProfitAfterFixed,
+        prevNetProfitAfterFixed,
+      ),
+      trend: trendDirection(
+        netProfitAfterFixed,
+        prevNetProfitAfterFixed,
+      ),
     },
     {
       key: "refundRate",
