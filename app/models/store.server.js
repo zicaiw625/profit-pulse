@@ -7,7 +7,7 @@ import {
   schedulePlanOverageRecord,
 } from "../services/overages.server";
 
-const { PlanTier } = pkg;
+const { PlanTier, Prisma } = pkg;
 const defaultPlan = PLAN_DEFINITIONS.FREE;
 
 export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
@@ -78,15 +78,30 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
     });
   }
 
-  const store = await prisma.store.create({
-    data: {
-      merchantId: merchant.id,
-      shopDomain,
-      currency: merchant.primaryCurrency,
-      timezone: merchant.primaryTimezone,
-    },
-    include: { merchant: true },
-  });
+  let store = null;
+  try {
+    store = await prisma.store.create({
+      data: {
+        merchantId: merchant.id,
+        shopDomain,
+        currency: merchant.primaryCurrency,
+        timezone: merchant.primaryTimezone,
+      },
+      include: { merchant: true },
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      const existing = await prisma.store.findUnique({
+        where: { shopDomain },
+        include: { merchant: true },
+      });
+      if (existing) {
+        return existing;
+      }
+    }
+
+    throw error;
+  }
 
   if (nextStoreCount > storeLimit && storeOverageConfig) {
     const now = new Date();
@@ -133,4 +148,12 @@ function resolvePlanDefinition(planTier) {
     Object.values(PLAN_DEFINITIONS).find((plan) => plan.tier === planTier) ||
     defaultPlan
   );
+}
+
+function isUniqueConstraintError(error) {
+  if (!error) return false;
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2002";
+  }
+  return error.code === "P2002";
 }
