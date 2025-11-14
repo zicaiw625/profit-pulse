@@ -44,8 +44,17 @@ export async function processShopifyOrder({ store, payload }) {
       Date.now(),
   );
   const currency = payload.currency || store.currency || "USD";
+  const subtotalIncludesDiscount =
+    payload.current_subtotal_price != null ||
+    payload.current_subtotal_price_set?.shop_money?.amount != null;
   const subtotal = toNumber(
-    payload.current_subtotal_price ?? payload.subtotal_price ?? 0,
+    subtotalIncludesDiscount
+      ? payload.current_subtotal_price ??
+          payload.current_subtotal_price_set?.shop_money?.amount ??
+          0
+      : payload.subtotal_price ??
+          payload.subtotal_price_set?.shop_money?.amount ??
+          0,
   );
   const shippingLines = payload.shipping_lines ?? [];
   const shippingRevenue = sumArray(shippingLines, (line) => toNumber(line.price));
@@ -87,7 +96,11 @@ export async function processShopifyOrder({ store, payload }) {
 
   const totalUnits = lineRecords.reduce((sum, line) => sum + line.quantity, 0);
   const cogsTotal = lineRecords.reduce((sum, line) => sum + line.cogs, 0);
-  const revenue = subtotal - discount + shippingRevenue + tax;
+  const revenue =
+    subtotal -
+    (subtotalIncludesDiscount ? 0 : discount) +
+    shippingRevenue +
+    tax;
 
   const templates = await getVariableCostTemplates(store.id);
   const variableCosts = evaluateTemplates(templates, {

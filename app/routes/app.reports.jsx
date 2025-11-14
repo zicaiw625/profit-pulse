@@ -33,13 +33,10 @@ const METRIC_OPTIONS = [
 ];
 
 const DEFAULT_BUILDER_LIMIT = 50;
-const SUPPORTED_LANGUAGES = ["en", "zh", "es", "fr", "de"];
+const SUPPORTED_LANGUAGES = ["en", "zh"];
 const LANGUAGE_LABELS = {
   en: "English",
   zh: "简体中文",
-  es: "Español",
-  fr: "Français",
-  de: "Deutsch",
 };
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);

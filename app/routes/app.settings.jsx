@@ -99,9 +99,6 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 const LANGUAGE_OPTIONS = [
   { value: "en", label: "English" },
   { value: "zh", label: "简体中文" },
-  { value: "es", label: "Español" },
-  { value: "fr", label: "Français" },
-  { value: "de", label: "Deutsch" },
 ];
 
 const SUPPORTED_LANGUAGES = LANGUAGE_OPTIONS.map((option) => option.value);
