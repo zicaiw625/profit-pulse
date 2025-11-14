@@ -33,6 +33,14 @@ const METRIC_OPTIONS = [
 ];
 
 const DEFAULT_BUILDER_LIMIT = 50;
+const SUPPORTED_LANGUAGES = ["en", "zh", "es", "fr", "de"];
+const LANGUAGE_LABELS = {
+  en: "English",
+  zh: "简体中文",
+  es: "Español",
+  fr: "Français",
+  de: "Deutsch",
+};
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const store = await ensureMerchantAndStore(session.shop, session.email);
@@ -50,7 +58,7 @@ export const loader = async ({ request }) => {
     getAdPerformanceBreakdown({ storeId: store.id, ...rangeArgs }),
   ]);
   const langParam = (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
-  const lang = ["en", "zh"].includes(langParam) ? langParam : "en";
+  const lang = SUPPORTED_LANGUAGES.includes(langParam) ? langParam : "en";
   return {
     report,
     adPerformance,
@@ -126,15 +134,89 @@ export default function ReportsPage() {
     builderFetcher.load(buildCustomUrl());
   };
 
-  const toggleMetric = (key) => {
+  const [draggingItem, setDraggingItem] = useState(null);
+
+  const parseDragData = (event) => {
+    try {
+      const raw = event.dataTransfer.getData("application/json");
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const allowDrop = (event) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDragStart = (payload) => (event) => {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    setDraggingItem(payload);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingItem(null);
+  };
+
+  const addMetric = (metricKey) => {
     setBuilderValues((prev) => {
-      const exists = prev.metrics.includes(key);
-      const nextMetrics = exists
-        ? prev.metrics.filter((item) => item !== key)
-        : [...prev.metrics, key];
-      return { ...prev, metrics: nextMetrics };
+      if (prev.metrics.includes(metricKey)) {
+        return prev;
+      }
+      return { ...prev, metrics: [...prev.metrics, metricKey] };
     });
   };
+
+  const removeMetric = (metricKey) => {
+    setBuilderValues((prev) => ({
+      ...prev,
+      metrics: prev.metrics.filter((metric) => metric !== metricKey),
+    }));
+  };
+
+  const handleMetricInsert = (index) => (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const data = parseDragData(event);
+    if (!data || data.type !== "metric") return;
+    setBuilderValues((prev) => {
+      const without = prev.metrics.filter((metric) => metric !== data.value);
+      const insertIndex =
+        typeof index === "number" && index >= 0 && index <= without.length
+          ? index
+          : without.length;
+      without.splice(insertIndex, 0, data.value);
+      return { ...prev, metrics: without };
+    });
+    setDraggingItem(null);
+  };
+
+  const handleMetricRemoveDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const data = parseDragData(event);
+    if (!data || data.type !== "metric") return;
+    removeMetric(data.value);
+    setDraggingItem(null);
+  };
+
+  const handleDimensionSelect = (value) => {
+    setBuilderValues((prev) => ({ ...prev, dimension: value }));
+  };
+
+  const handleDimensionDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const data = parseDragData(event);
+    if (!data || data.type !== "dimension") return;
+    handleDimensionSelect(data.value);
+    setDraggingItem(null);
+  };
+
+  const isDraggingMetric = draggingItem?.type === "metric";
+  const isDraggingDimension = draggingItem?.type === "dimension";
 
   const handleBuilderFieldChange = (field) => (event) => {
     setBuilderValues((prev) => ({
@@ -153,19 +235,69 @@ export default function ReportsPage() {
   const builderCurrency = builderData?.currency ?? currency;
   const builderLoading =
     builderFetcher.state === "loading" || builderFetcher.state === "submitting";
+  const availableMetrics = METRIC_OPTIONS.filter(
+    (metric) => !builderValues.metrics.includes(metric.value),
+  );
+  const selectedMetricObjects = builderValues.metrics.map(
+    (value) =>
+      METRIC_OPTIONS.find((metric) => metric.value === value) ?? {
+        value,
+        labelKey: value,
+      },
+  );
+  const selectedDimensionOption = DIMENSION_OPTIONS.find(
+    (option) => option.value === builderValues.dimension,
+  );
+  const selectedDimensionLabel = selectedDimensionOption
+    ? translate(selectedDimensionOption.labelKey, selectedLang)
+    : builderValues.dimension;
+  const dimensionDropStyles = {
+    border: `1px dashed ${isDraggingDimension ? "#6366f1" : "#d1d5db"}`,
+    background: isDraggingDimension ? "#eef2ff" : "#f9fafb",
+    padding: "0.75rem",
+    borderRadius: "0.5rem",
+    minWidth: "220px",
+  };
+  const metricChipStyle = (active) => ({
+    padding: "0.4rem 0.75rem",
+    borderRadius: "999px",
+    border: `1px solid ${active ? "#6366f1" : "#d1d5db"}`,
+    background: active ? "#eef2ff" : "#fff",
+    cursor: "grab",
+    userSelect: "none",
+  });
+  const metricsDropZoneStyle = {
+    border: `1px dashed ${isDraggingMetric ? "#6366f1" : "#d1d5db"}`,
+    background: isDraggingMetric ? "#eef2ff" : "#f9fafb",
+    padding: "0.75rem",
+    borderRadius: "0.5rem",
+    minHeight: "64px",
+    flex: 1,
+  };
+  const availableMetricsStyle = {
+    border: "1px solid #e5e7eb",
+    background: "#fff",
+    padding: "0.75rem",
+    borderRadius: "0.5rem",
+    minWidth: "220px",
+    minHeight: "64px",
+  };
 
   return (
     <s-page heading="Performance reports" subtitle={rangeLabel}>
       <s-stack direction="block" gap="base" style={{ marginBottom: "1rem" }}>
-        <s-stack direction="inline" gap="tight" align="center">
-          <s-text variation="subdued">
-            {translate(TRANSLATION_KEYS.REPORTS_LANG_LABEL, selectedLang)}:
-          </s-text>
-          <select value={selectedLang} onChange={handleLanguageChange}>
-            <option value="en">English</option>
-            <option value="zh">简体中文</option>
-          </select>
-        </s-stack>
+          <s-stack direction="inline" gap="tight" align="center">
+            <s-text variation="subdued">
+              {translate(TRANSLATION_KEYS.REPORTS_LANG_LABEL, selectedLang)}:
+            </s-text>
+            <select value={selectedLang} onChange={handleLanguageChange}>
+              {SUPPORTED_LANGUAGES.map((code) => (
+                <option key={code} value={code}>
+                  {LANGUAGE_LABELS[code] ?? code}
+                </option>
+              ))}
+            </select>
+          </s-stack>
         <Form method="get">
           {hostParam && <input type="hidden" name="host" value={hostParam} />}
           {shopParam && <input type="hidden" name="shop" value={shopParam} />}
@@ -269,53 +401,179 @@ export default function ReportsPage() {
             }}
           >
             <s-stack direction="block" gap="base">
-              <s-stack direction="inline" gap="base" align="center">
-                <label>
-                  {translate(TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL, selectedLang)}
-                  <select
-                    value={builderValues.dimension}
-                    onChange={handleBuilderFieldChange("dimension")}
+              <s-stack direction="inline" gap="base" wrap align="stretch">
+                <div style={{ minWidth: "220px" }}>
+                  <s-text variation="subdued">
+                    {translate(TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL, selectedLang)}
+                  </s-text>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "0.5rem",
+                      flexWrap: "wrap",
+                      marginTop: "0.5rem",
+                    }}
                   >
-                    {DIMENSION_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {translate(option.labelKey, selectedLang)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {translate(TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL, selectedLang)}
-                  <input
-                    type="date"
-                    name="startDate"
-                    value={builderValues.start}
-                    onChange={handleBuilderFieldChange("start")}
-                  />
-                </label>
-                <label>
-                  <input
-                    type="date"
-                    name="endDate"
-                    value={builderValues.end}
-                    onChange={handleBuilderFieldChange("end")}
-                  />
-                </label>
-              </s-stack>
-              <s-stack direction="inline" gap="base" align="baseline">
-                <s-text variation="subdued">
-                  {translate(TRANSLATION_KEYS.REPORTS_METRICS_LABEL, selectedLang)}
-                  :
-                </s-text>
-                {METRIC_OPTIONS.map((metric) => (
-                  <label key={metric.value}>
+                    {DIMENSION_OPTIONS.map((option) => {
+                      const active = builderValues.dimension === option.value;
+                      return (
+                        <div
+                          key={option.value}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              handleDimensionSelect(option.value);
+                            }
+                          }}
+                          onClick={() => handleDimensionSelect(option.value)}
+                          draggable
+                          onDragStart={handleDragStart({
+                            type: "dimension",
+                            value: option.value,
+                          })}
+                          onDragEnd={handleDragEnd}
+                          style={metricChipStyle(active)}
+                        >
+                          {translate(option.labelKey, selectedLang)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div
+                  onDragOver={allowDrop}
+                  onDrop={handleDimensionDrop}
+                  style={dimensionDropStyles}
+                >
+                  <s-text variation="subdued">Selected dimension</s-text>
+                  <div style={{ marginTop: "0.5rem", fontWeight: 600 }}>
+                    {selectedDimensionLabel}
+                  </div>
+                </div>
+                <s-stack direction="inline" gap="base" align="center" wrap>
+                  <label>
+                    {translate(TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL, selectedLang)}
                     <input
-                      type="checkbox"
-                      checked={builderValues.metrics.includes(metric.value)}
-                      onChange={() => toggleMetric(metric.value)}
+                      type="date"
+                      name="startDate"
+                      value={builderValues.start ?? ""}
+                      onChange={handleBuilderFieldChange("start")}
                     />
-                    {translate(metric.labelKey, selectedLang)}
                   </label>
-                ))}
+                  <label>
+                    <input
+                      type="date"
+                      name="endDate"
+                      value={builderValues.end ?? ""}
+                      onChange={handleBuilderFieldChange("end")}
+                    />
+                  </label>
+                </s-stack>
+              </s-stack>
+              <s-stack direction="inline" gap="base" wrap align="start">
+                <div
+                  style={availableMetricsStyle}
+                  onDragOver={allowDrop}
+                  onDrop={handleMetricRemoveDrop}
+                >
+                  <s-text variation="subdued" style={{ display: "block", marginBottom: "0.5rem" }}>
+                    {translate(TRANSLATION_KEYS.REPORTS_METRICS_LABEL, selectedLang)}
+                  </s-text>
+                  <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    {availableMetrics.length > 0 ? (
+                      availableMetrics.map((metric) => (
+                        <div
+                          key={metric.value}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              addMetric(metric.value);
+                            }
+                          }}
+                          onClick={() => addMetric(metric.value)}
+                          draggable
+                          onDragStart={handleDragStart({
+                            type: "metric",
+                            value: metric.value,
+                          })}
+                          onDragEnd={handleDragEnd}
+                          style={metricChipStyle(false)}
+                        >
+                          {translate(metric.labelKey, selectedLang)}
+                        </div>
+                      ))
+                    ) : (
+                      <s-text variation="subdued">All metrics selected</s-text>
+                    )}
+                  </div>
+                  <s-text variation="subdued" style={{ display: "block", marginTop: "0.5rem" }}>
+                    Drag here to remove
+                  </s-text>
+                </div>
+                <div
+                  style={{
+                    ...metricsDropZoneStyle,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.5rem",
+                  }}
+                  onDragOver={allowDrop}
+                  onDrop={handleMetricInsert(selectedMetricObjects.length)}
+                >
+                  {selectedMetricObjects.length === 0 ? (
+                    <s-text variation="subdued">
+                      Drag metrics here to build your report
+                    </s-text>
+                  ) : (
+                    selectedMetricObjects.map((metric, index) => (
+                      <div
+                        key={metric.value}
+                        onDragOver={allowDrop}
+                        onDrop={handleMetricInsert(index)}
+                      >
+                        <div
+                          draggable
+                          onDragStart={handleDragStart({
+                            type: "metric",
+                            value: metric.value,
+                          })}
+                          onDragEnd={handleDragEnd}
+                          style={{
+                            ...metricChipStyle(true),
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <span>{translate(metric.labelKey, selectedLang)}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeMetric(metric.value)}
+                            style={{
+                              marginLeft: "0.75rem",
+                              background: "transparent",
+                              border: "none",
+                              color: "#ef4444",
+                              cursor: "pointer",
+                              fontSize: "1rem",
+                              lineHeight: 1,
+                            }}
+                            aria-label={`Remove ${metric.value}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  {selectedMetricObjects.length > 0 && (
+                    <s-text variation="subdued">Drop at the end to append</s-text>
+                  )}
+                </div>
               </s-stack>
               <s-stack direction="inline" gap="base">
                 <s-button type="submit" variant="primary">

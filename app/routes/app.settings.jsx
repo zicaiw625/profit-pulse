@@ -63,9 +63,15 @@ import { upsertAttributionRule } from "../services/attribution.server";
 import { logAuditEvent } from "../services/audit.server";
 import pkg from "@prisma/client";
 import { importLogisticsRatesFromCsv } from "../services/logistics.server";
+import {
+  upsertLogisticsCredential,
+  deleteLogisticsCredential,
+} from "../services/logistics-credentials.server";
+import { syncLogisticsProvider } from "../services/logistics-integrations.server";
 import { importTaxRatesFromCsv } from "../services/tax-rates.server";
 import { syncErpCosts } from "../services/erp-costs.server";
 import { syncInventoryAndCosts } from "../services/inventory.server";
+import { queueGdprRequest, processGdprRequest } from "../services/privacy.server";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -84,7 +90,12 @@ const DAY_MS = 1000 * 60 * 60 * 24;
 const LANGUAGE_OPTIONS = [
   { value: "en", label: "English" },
   { value: "zh", label: "简体中文" },
+  { value: "es", label: "Español" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
 ];
+
+const SUPPORTED_LANGUAGES = LANGUAGE_OPTIONS.map((option) => option.value);
 
 const LOCALIZED_TEXT = {
   en: {
@@ -227,7 +238,7 @@ const REPORT_CHANNEL_OPTIONS = [
 ];
 
 const FREE_PLAN_TIER = "FREE";
-const { CredentialProvider, AttributionRuleType } = pkg;
+const { CredentialProvider, AttributionRuleType, GdprRequestType, GdprRequestStatus } = pkg;
 
 const NOTIFICATION_TYPE_OPTIONS = [
   { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
@@ -251,6 +262,16 @@ const ATTRIBUTION_PROVIDER_OPTIONS = [
   { value: CredentialProvider.AMAZON_ADS, label: "Amazon Ads" },
   { value: CredentialProvider.SNAPCHAT_ADS, label: "Snapchat Ads" },
 ];
+const LOGISTICS_PROVIDER_OPTIONS = [
+  { value: CredentialProvider.EASYPOST_LOGISTICS, label: "EasyPost" },
+  { value: CredentialProvider.SHIPSTATION_LOGISTICS, label: "ShipStation" },
+];
+const GDPR_STATUS_LABELS = {
+  [GdprRequestStatus.PENDING]: "Pending",
+  [GdprRequestStatus.PROCESSING]: "Processing",
+  [GdprRequestStatus.COMPLETED]: "Completed",
+  [GdprRequestStatus.FAILED]: "Failed",
+};
 const ATTRIBUTION_RULE_TYPES = [
   AttributionRuleType.LAST_TOUCH,
   AttributionRuleType.FIRST_TOUCH,
@@ -313,6 +334,12 @@ const ROLE_PERMISSIONS = {
   "import-logistics": ["OWNER", "FINANCE"],
   "import-tax-rates": ["OWNER", "FINANCE"],
   "sync-erp-costs": ["OWNER", "FINANCE"],
+  "connect-logistics-credential": ["OWNER", "FINANCE"],
+  "disconnect-logistics-credential": ["OWNER", "FINANCE"],
+  "sync-logistics-provider": ["OWNER", "FINANCE"],
+  "queue-gdpr-export": ["OWNER", "FINANCE"],
+  "queue-gdpr-deletion": ["OWNER"],
+  "process-gdpr-request": ["OWNER"],
 };
 
 const INTENT_LABELS = {
@@ -344,6 +371,12 @@ const INTENT_LABELS = {
   "import-logistics": "Import logistics rates",
   "import-tax-rates": "Import tax templates",
   "sync-erp-costs": "Sync ERP SKU costs",
+  "connect-logistics-credential": "Connect logistics provider",
+  "disconnect-logistics-credential": "Disconnect logistics provider",
+  "sync-logistics-provider": "Sync logistics rates",
+  "queue-gdpr-export": "Queue GDPR export",
+  "queue-gdpr-deletion": "Queue GDPR deletion",
+  "process-gdpr-request": "Process GDPR request",
 };
 
 function normalizeRole(role) {
@@ -407,7 +440,7 @@ export const loader = async ({ request }) => {
   });
   const requestedLang =
     (new URL(request.url).searchParams.get("lang") ?? "en").toLowerCase();
-  const lang = ["en", "zh"].includes(requestedLang) ? requestedLang : "en";
+  const lang = SUPPORTED_LANGUAGES.includes(requestedLang) ? requestedLang : "en";
   return { settings, storeId: store.id, currentRole, lang };
 };
 
@@ -539,6 +572,99 @@ export const action = async ({ request }) => {
     });
 
     return { message: "广告账号已断开连接。" };
+  }
+
+  if (intent === "connect-logistics-credential") {
+    const provider = formData.get("provider")?.toString();
+    const accountId = formData.get("accountId")?.toString().trim() || null;
+    const accountName = formData.get("accountName")?.toString().trim() || null;
+    const apiKey = formData.get("apiKey")?.toString().trim();
+    const apiSecret = formData.get("apiSecret")?.toString().trim();
+    const baseUrl = formData.get("baseUrl")?.toString().trim() || undefined;
+    const carrierAccountsRaw = formData.get("carrierAccounts")?.toString() ?? "";
+    const carrierAccounts = carrierAccountsRaw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (!provider || !apiKey) {
+      return { message: "请输入物流服务 API Key。" };
+    }
+
+    const secret = {
+      apiKey,
+      ...(apiSecret ? { apiSecret } : {}),
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(carrierAccounts.length ? { carrierAccounts } : {}),
+    };
+
+    await upsertLogisticsCredential({
+      merchantId: store.merchantId,
+      storeId: store.id,
+      provider,
+      accountId,
+      accountName,
+      secret,
+    });
+
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "connect_logistics_credential",
+      details: `Connected logistics provider ${provider}${accountId ? ` (${accountId})` : ""}`,
+    });
+
+    return { message: "物流服务已连接。" };
+  }
+
+  if (intent === "disconnect-logistics-credential") {
+    const provider = formData.get("provider")?.toString();
+    if (!provider) {
+      return { message: "缺少需要断开的物流服务。" };
+    }
+
+    await deleteLogisticsCredential({
+      merchantId: store.merchantId,
+      storeId: store.id,
+      provider,
+    });
+
+    await logAuditEvent({
+      merchantId: store.merchantId,
+      userEmail: session.email,
+      action: "disconnect_logistics_credential",
+      details: `Disconnected logistics provider ${provider}`,
+    });
+
+    return { message: "物流服务已断开连接。" };
+  }
+
+  if (intent === "sync-logistics-provider") {
+    const provider = formData.get("provider")?.toString();
+    if (!provider) {
+      return { message: "请选择需要同步的物流服务。" };
+    }
+    try {
+      const result = await syncLogisticsProvider({
+        storeId: store.id,
+        provider,
+        defaultCurrency: store.currency ?? "USD",
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "sync_logistics_provider",
+        details: `Synced logistics provider ${provider} (${result.processed} rules)`,
+      });
+      return {
+        message: `已同步 ${provider} 的物流费率（${result.processed} 条规则）。`,
+      };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "同步物流费率失败，请检查凭证。",
+      };
+    }
   }
 
   if (intent === "connect-slack-webhook") {
@@ -1054,6 +1180,71 @@ export const action = async ({ request }) => {
     }
   }
 
+  if (intent === "queue-gdpr-export" || intent === "queue-gdpr-deletion") {
+    const subjectEmail = formData.get("subjectEmail")?.toString().trim();
+    if (!subjectEmail) {
+      return { message: "请提供客户邮箱。" };
+    }
+    const type =
+      intent === "queue-gdpr-export"
+        ? GdprRequestType.EXPORT
+        : GdprRequestType.DELETE;
+    try {
+      const record = await queueGdprRequest({
+        merchantId: store.merchantId,
+        storeId: store.id,
+        type,
+        subjectEmail,
+        requestedBy: session.email,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: intent,
+        details: `${type} request queued for ${subjectEmail} (${record.id})`,
+      });
+      const summaryLabel =
+        type === GdprRequestType.EXPORT
+          ? `已排队导出 ${subjectEmail} 的数据。`
+          : `已排队删除 ${subjectEmail} 的个人数据。`;
+      return { message: summaryLabel };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "GDPR 请求排队失败，请稍后重试。",
+      };
+    }
+  }
+
+  if (intent === "process-gdpr-request") {
+    const requestId = formData.get("requestId")?.toString();
+    if (!requestId) {
+      return { message: "请选择要处理的 GDPR 请求。" };
+    }
+    try {
+      const processed = await processGdprRequest({
+        requestId,
+        merchantId: store.merchantId,
+      });
+      await logAuditEvent({
+        merchantId: store.merchantId,
+        userEmail: session.email,
+        action: "process_gdpr_request",
+        details: `Processed GDPR request ${requestId} (${processed.type})`,
+      });
+      const successMessage =
+        processed.type === GdprRequestType.EXPORT
+          ? "GDPR 导出已生成，点击下载查看详情。"
+          : "GDPR 删除请求已处理并匿名化客户数据。";
+      return { message: successMessage };
+    } catch (error) {
+      console.error(error);
+      return {
+        message: error.message ?? "处理 GDPR 请求失败，请稍后重试。",
+      };
+    }
+  }
+
   return { message: "No action performed." };
 };
 
@@ -1197,6 +1388,7 @@ export default function SettingsPage() {
   const reportSchedules = settings.reportSchedules ?? [];
   const logisticsRules = settings.logisticsRules ?? [];
   const taxRates = settings.taxRates ?? [];
+  const gdprRequests = settings.gdprRequests ?? [];
   const attributionRules = settings.attributionRules ?? [];
   const defaultCurrency = primaryStore?.currency ?? "USD";
   const syncingOrders =
@@ -1237,6 +1429,18 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "disconnect-ad-credential"
       ? navigation.formData?.get("provider")
       : null;
+  const connectingLogisticsProvider =
+    isSubmitting && currentIntent === "connect-logistics-credential"
+      ? navigation.formData?.get("provider")
+      : null;
+  const disconnectingLogisticsProvider =
+    isSubmitting && currentIntent === "disconnect-logistics-credential"
+      ? navigation.formData?.get("provider")
+      : null;
+  const syncingLogisticsProvider =
+    isSubmitting && currentIntent === "sync-logistics-provider"
+      ? navigation.formData?.get("provider")
+      : null;
   const deletingChannelId =
     isSubmitting && currentIntent === "delete-notification-channel"
       ? navigation.formData?.get("channelId")
@@ -1246,6 +1450,12 @@ export default function SettingsPage() {
   const importingPaypal = currentIntent === "import-paypal-csv" && isSubmitting;
   const updatingAttributionRules =
     currentIntent === "update-attribution-rules" && isSubmitting;
+  const queueingGdprExport = currentIntent === "queue-gdpr-export" && isSubmitting;
+  const queueingGdprDeletion = currentIntent === "queue-gdpr-deletion" && isSubmitting;
+  const processingGdprRequestId =
+    isSubmitting && currentIntent === "process-gdpr-request"
+      ? navigation.formData?.get("requestId")
+      : null;
 
   const userRoleLabel = ROLE_LABELS[normalizeRole(currentRole)] ?? "Owner";
   const permissionHint = (intent) => {
@@ -1281,7 +1491,21 @@ export default function SettingsPage() {
     importLogistics: canPerformIntent("import-logistics", currentRole),
     importTaxRates: canPerformIntent("import-tax-rates", currentRole),
     syncErpCosts: canPerformIntent("sync-erp-costs", currentRole),
+    connectLogisticsCredential: canPerformIntent(
+      "connect-logistics-credential",
+      currentRole,
+    ),
+    disconnectLogisticsCredential: canPerformIntent(
+      "disconnect-logistics-credential",
+      currentRole,
+    ),
+    syncLogisticsProvider: canPerformIntent("sync-logistics-provider", currentRole),
+    queueGdprExport: canPerformIntent("queue-gdpr-export", currentRole),
+    queueGdprDeletion: canPerformIntent("queue-gdpr-deletion", currentRole),
+    processGdprRequest: canPerformIntent("process-gdpr-request", currentRole),
   };
+
+  const logisticIntegrations = settings.integrations?.logistics ?? [];
 
   const allowedActions = Object.keys(ROLE_PERMISSIONS)
     .filter((intent) => canPerformIntent(intent, currentRole))
@@ -1626,8 +1850,96 @@ export default function SettingsPage() {
           </s-stack>
         </div>
 
-          <div>
-            <s-heading level="3">Payment processors</s-heading>
+        <div>
+          <s-heading level="3">Logistics providers</s-heading>
+          <s-stack direction="inline" gap="base" wrap>
+            {logisticIntegrations.map((integration) => {
+              const connected = integration.status === "Connected";
+              const connectingThis = connectingLogisticsProvider === integration.id;
+              const disconnectingThis = disconnectingLogisticsProvider === integration.id;
+              const syncingThis = syncingLogisticsProvider === integration.id;
+              return (
+                <s-card key={integration.id} padding="base">
+                  <s-heading>{integration.label}</s-heading>
+                  <s-text variation="subdued">
+                    {integration.status}
+                    {integration.accountName
+                      ? ` · ${integration.accountName}`
+                      : integration.accountId
+                        ? ` · ${integration.accountId}`
+                        : ""}
+                  </s-text>
+                  {connected ? (
+                    <>
+                      <s-text variation="subdued">
+                        Last sync:{" "}
+                        {integration.lastSyncedAt
+                          ? formatDateTime(integration.lastSyncedAt)
+                          : "Never"}
+                      </s-text>
+                      <s-stack direction="inline" gap="base" wrap>
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="sync-logistics-provider" />
+                          <input type="hidden" name="provider" value={integration.id} />
+                          <s-button
+                            type="submit"
+                            variant="secondary"
+                            disabled={!intentAccess.syncLogisticsProvider}
+                            {...(syncingThis ? { loading: true } : {})}
+                          >
+                            Sync rates
+                          </s-button>
+                          {!intentAccess.syncLogisticsProvider && (
+                            <s-text variation="subdued">{permissionHint("sync-logistics-provider")}</s-text>
+                          )}
+                        </Form>
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="disconnect-logistics-credential" />
+                          <input type="hidden" name="provider" value={integration.id} />
+                          <s-button
+                            type="submit"
+                            variant="destructive"
+                            disabled={!intentAccess.disconnectLogisticsCredential}
+                            {...(disconnectingThis ? { loading: true } : {})}
+                          >
+                            Disconnect
+                          </s-button>
+                          {!intentAccess.disconnectLogisticsCredential && (
+                            <s-text variation="subdued">{permissionHint("disconnect-logistics-credential")}</s-text>
+                          )}
+                        </Form>
+                      </s-stack>
+                    </>
+                  ) : (
+                    <Form method="post">
+                      <input type="hidden" name="intent" value="connect-logistics-credential" />
+                      <input type="hidden" name="provider" value={integration.id} />
+                      <s-stack direction="block" gap="base">
+                        {renderLogisticsCredentialFields(integration.id)}
+                        <s-button
+                          type="submit"
+                          variant="primary"
+                          disabled={!intentAccess.connectLogisticsCredential}
+                          {...(connectingThis ? { loading: true } : {})}
+                        >
+                          Connect {integration.label}
+                        </s-button>
+                        {!intentAccess.connectLogisticsCredential && (
+                          <s-text variation="subdued">
+                            {permissionHint("connect-logistics-credential")}
+                          </s-text>
+                        )}
+                      </s-stack>
+                    </Form>
+                  )}
+                </s-card>
+              );
+            })}
+          </s-stack>
+        </div>
+
+        <div>
+          <s-heading level="3">Payment processors</s-heading>
             <s-stack direction="inline" gap="base" wrap>
               {settings.integrations.payments.map((integration) => {
                 const isPaypal = integration.id === "PAYPAL";
@@ -2049,6 +2361,150 @@ export default function SettingsPage() {
             )}
           </Form>
         </s-card>
+      </s-section>
+
+      <s-section heading="Privacy & compliance">
+        <s-stack direction="block" gap="base">
+          <s-card padding="base">
+            <s-heading level="3">GDPR data subject tools</s-heading>
+            <s-text variation="subdued">
+              Queue exports or deletion requests for individual customers. Exports compile
+              orders, refunds, and attribution data into a downloadable JSON file. Deletions anonymize
+              matching orders across all connected stores.
+            </s-text>
+            <s-stack direction="inline" gap="base" wrap style={{ marginTop: "1rem" }}>
+              <Form method="post">
+                <input type="hidden" name="intent" value="queue-gdpr-export" />
+                <s-stack direction="block" gap="base">
+                  <s-text-field
+                    name="subjectEmail"
+                    type="email"
+                    label="Customer email"
+                    placeholder="customer@example.com"
+                    required
+                  ></s-text-field>
+                  <s-button
+                    type="submit"
+                    variant="primary"
+                    disabled={!intentAccess.queueGdprExport}
+                    {...(queueingGdprExport ? { loading: true } : {})}
+                  >
+                    Queue export
+                  </s-button>
+                  {!intentAccess.queueGdprExport && (
+                    <s-text variation="subdued">{permissionHint("queue-gdpr-export")}</s-text>
+                  )}
+                </s-stack>
+              </Form>
+              <Form method="post">
+                <input type="hidden" name="intent" value="queue-gdpr-deletion" />
+                <s-stack direction="block" gap="base">
+                  <s-text-field
+                    name="subjectEmail"
+                    type="email"
+                    label="Customer email"
+                    placeholder="customer@example.com"
+                    required
+                  ></s-text-field>
+                  <s-button
+                    type="submit"
+                    variant="secondary"
+                    tone="critical"
+                    disabled={!intentAccess.queueGdprDeletion}
+                    {...(queueingGdprDeletion ? { loading: true } : {})}
+                  >
+                    Queue deletion
+                  </s-button>
+                  {!intentAccess.queueGdprDeletion && (
+                    <s-text variation="subdued">{permissionHint("queue-gdpr-deletion")}</s-text>
+                  )}
+                </s-stack>
+              </Form>
+            </s-stack>
+          </s-card>
+
+          <s-card padding="base">
+            <s-heading level="3">Recent GDPR requests</s-heading>
+            {gdprRequests.length === 0 ? (
+              <s-text variation="subdued">No GDPR requests have been queued yet.</s-text>
+            ) : (
+              <s-data-table>
+                <table>
+                  <thead>
+                    <tr>
+                      <th align="left">Type</th>
+                      <th align="left">Email</th>
+                      <th align="left">Status</th>
+                      <th align="left">Requested at</th>
+                      <th align="left">Processed at</th>
+                      <th align="left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gdprRequests.map((request) => {
+                      const statusLabel =
+                        GDPR_STATUS_LABELS[request.status] ?? request.status;
+                      const isProcessing =
+                        processingGdprRequestId && processingGdprRequestId === request.id;
+                      const canProcess =
+                        intentAccess.processGdprRequest &&
+                        (request.status === GdprRequestStatus.PENDING ||
+                          request.status === GdprRequestStatus.FAILED);
+                      const canDownload =
+                        request.type === GdprRequestType.EXPORT &&
+                        request.status === GdprRequestStatus.COMPLETED &&
+                        request.exportPayload;
+                      return (
+                        <tr key={request.id}>
+                          <td>{request.type === GdprRequestType.EXPORT ? "Export" : "Deletion"}</td>
+                          <td>{request.subjectEmail}</td>
+                          <td>{statusLabel}</td>
+                          <td>{formatDateTime(request.createdAt)}</td>
+                          <td>
+                            {request.processedAt ? formatDateTime(request.processedAt) : "—"}
+                          </td>
+                          <td>
+                            <s-stack direction="inline" gap="tight" wrap>
+                              {canProcess && (
+                                <Form method="post">
+                                  <input type="hidden" name="intent" value="process-gdpr-request" />
+                                  <input type="hidden" name="requestId" value={request.id} />
+                                  <s-button
+                                    type="submit"
+                                    variant="secondary"
+                                    disabled={!intentAccess.processGdprRequest}
+                                    {...(isProcessing ? { loading: true } : {})}
+                                  >
+                                    Process
+                                  </s-button>
+                                </Form>
+                              )}
+                              {canDownload && (
+                                <s-link
+                                  href={`/app/settings/gdpr/${request.id}`}
+                                  target="_blank"
+                                  tone="primary"
+                                >
+                                  Download export
+                                </s-link>
+                              )}
+                              {request.notes && (
+                                <s-text variation="subdued">{request.notes}</s-text>
+                              )}
+                              {!canProcess && !canDownload && !request.notes && (
+                                <s-text variation="subdued">—</s-text>
+                              )}
+                            </s-stack>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </s-data-table>
+            )}
+          </s-card>
+        </s-stack>
       </s-section>
 
       <s-section heading="Plans & pricing">
@@ -2941,6 +3397,81 @@ function renderAdCredentialFields(providerId) {
     <s-text variation="subdued">
       Enter the required credentials to connect this provider.
     </s-text>
+  );
+}
+
+function renderLogisticsCredentialFields(providerId) {
+  if (providerId === "EASYPOST_LOGISTICS") {
+    return (
+      <>
+        <s-text-field
+          name="accountName"
+          label="Account label"
+          placeholder="EasyPost account"
+        ></s-text-field>
+        <s-text-field
+          name="accountId"
+          label="Carrier account ID"
+          placeholder="ca_123"
+        ></s-text-field>
+        <s-text-field
+          name="apiKey"
+          label="API key"
+          placeholder="EZTK..."
+          required
+        ></s-text-field>
+        <s-text-field
+          name="carrierAccounts"
+          label="Carrier accounts (comma separated)"
+          placeholder="ups,usps"
+        ></s-text-field>
+        <s-text-field
+          name="baseUrl"
+          label="API base URL"
+          placeholder="https://api.easypost.com"
+        ></s-text-field>
+      </>
+    );
+  }
+
+  if (providerId === "SHIPSTATION_LOGISTICS") {
+    return (
+      <>
+        <s-text-field
+          name="accountName"
+          label="Account label"
+          placeholder="ShipStation connection"
+        ></s-text-field>
+        <s-text-field
+          name="accountId"
+          label="Store ID"
+          placeholder="12345"
+        ></s-text-field>
+        <s-text-field
+          name="apiKey"
+          label="API key"
+          required
+        ></s-text-field>
+        <s-text-field
+          name="apiSecret"
+          label="API secret"
+          type="password"
+          required
+        ></s-text-field>
+        <s-text-field
+          name="baseUrl"
+          label="API base URL"
+          placeholder="https://ssapi.shipstation.com"
+        ></s-text-field>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <s-text-field name="accountName" label="Account label"></s-text-field>
+      <s-text-field name="apiKey" label="API key" required></s-text-field>
+    </>
   );
 }
 

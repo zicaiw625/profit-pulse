@@ -19,6 +19,12 @@ enum PlanTier {
   PRO
 }
 
+enum PlanOverageStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
 enum StoreStatus {
   ACTIVE
   DISCONNECTED
@@ -41,6 +47,8 @@ enum CredentialProvider {
   KLARNA
   AMAZON_ADS
   SNAPCHAT_ADS
+  EASYPOST_LOGISTICS
+  SHIPSTATION_LOGISTICS
 }
 
 enum CostType {
@@ -70,6 +78,19 @@ enum ReportFrequency {
 enum SyncJobType {
   AD_SPEND
   PAYMENT_PAYOUT
+  LOGISTICS_RATE
+}
+
+enum GdprRequestType {
+  EXPORT
+  DELETE
+}
+
+enum GdprRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
 }
 
 enum SyncJobStatus {
@@ -121,6 +142,9 @@ model MerchantAccount {
   attributionRules AttributionRule[]
   monthlyOrderUsage MonthlyOrderUsage[]
   auditLogs       AuditLog[]
+  planOverageRecords PlanOverageRecord[]
+  logisticsCredentials LogisticsCredential[]
+  gdprRequests   GdprRequest[]
 }
 
 model Store {
@@ -153,6 +177,8 @@ model Store {
   logisticsRules       LogisticsRule[]
   taxRates             TaxRate[]
   inventoryLevels      InventoryLevel[]
+  logisticsCredentials LogisticsCredential[]
+  gdprRequests        GdprRequest[]
 
   @@index([merchantId])
 }
@@ -197,6 +223,29 @@ model Subscription {
   storeLimit       Int             @default(1)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+model PlanOverageRecord {
+  id             String             @id @default(cuid())
+  merchant       MerchantAccount    @relation(fields: [merchantId], references: [id])
+  merchantId     String
+  metric         String
+  year           Int
+  month          Int
+  units          Int
+  unitAmount     Decimal
+  currency       String
+  description    String?
+  status         PlanOverageStatus  @default(PENDING)
+  idempotencyKey String             @unique
+  shopDomain     String?
+  usageRecordId  String?
+  createdAt      DateTime           @default(now())
+  chargedAt      DateTime?
+  failedAt       DateTime?
+  failureReason  String?
+
+  @@index([merchantId, year, month, metric])
 }
 
 model MonthlyOrderUsage {
@@ -542,6 +591,44 @@ model LogisticsRule {
 
   @@index([storeId, provider])
   @@index([storeId, country, region])
+}
+
+model LogisticsCredential {
+  id              String             @id @default(cuid())
+  merchant        MerchantAccount    @relation(fields: [merchantId], references: [id])
+  merchantId      String
+  store           Store?             @relation(fields: [storeId], references: [id])
+  storeId         String?
+  provider        CredentialProvider
+  accountName     String?
+  accountId       String?
+  encryptedSecret String
+  lastSyncedAt    DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([merchantId])
+  @@index([storeId, provider])
+}
+
+model GdprRequest {
+  id            String             @id @default(cuid())
+  merchant      MerchantAccount    @relation(fields: [merchantId], references: [id])
+  merchantId    String
+  store         Store?             @relation(fields: [storeId], references: [id])
+  storeId       String?
+  type          GdprRequestType
+  status        GdprRequestStatus  @default(PENDING)
+  subjectEmail  String
+  requestedBy   String?
+  exportPayload Json?
+  notes         String?
+  processedAt   DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@index([merchantId, status])
+  @@index([storeId, status])
 }
 
 model TaxRate {
