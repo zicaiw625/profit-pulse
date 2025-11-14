@@ -144,12 +144,12 @@ export default function ReportsPage() {
   };
 
   useEffect(() => {
-    builderFetcher.load(buildCustomUrl());
-  }, [builderFetcher]);
+    builderFetcher.load(buildAppUrl(buildCustomUrl()));
+  }, [buildAppUrl, builderFetcher]);
 
   const handleBuilderSubmit = (event) => {
     event.preventDefault();
-    builderFetcher.load(buildCustomUrl());
+    builderFetcher.load(buildAppUrl(buildCustomUrl()));
   };
 
   const [draggingItem, setDraggingItem] = useState(null);
@@ -254,7 +254,9 @@ export default function ReportsPage() {
     }));
   };
 
-  const exportCustomCsvLink = buildCustomExportUrl(builderValues, { limit: 200 });
+  const exportCustomCsvLink = buildAppUrl(
+    buildCustomExportUrl(builderValues, { limit: 200 }),
+  );
   const builderData = builderFetcher.data;
   const builderRows = builderData?.rows ?? [];
   const builderMetrics = builderData?.metrics ?? [];
