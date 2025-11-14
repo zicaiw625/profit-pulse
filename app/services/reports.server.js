@@ -55,7 +55,13 @@ const METRIC_COLUMNS = {
   paymentFees: { field: "paymentFees", label: "Payment fees", isCurrency: true },
   refundAmount: { field: "refundAmount", label: "Refund amount", isCurrency: true },
   orders: { field: "orders", label: "Orders", isCurrency: false },
+  ltv: { label: "Lifetime net profit", isCurrency: true },
+  repeatOrders: { label: "Repeat purchases", isCurrency: false },
 };
+
+const METRIC_KEY_LOOKUP = new Map(
+  Object.keys(METRIC_COLUMNS).map((key) => [key.toLowerCase(), key]),
+);
 
 const DEFAULT_CUSTOM_METRICS = ["revenue", "netProfit"];
 
@@ -128,8 +134,13 @@ export async function getCustomReportData({
   const selectedMetrics = Array.from(
     new Set(
       (Array.isArray(metrics) ? metrics : [metrics])
-        .map((name) => name?.toString().trim().toLowerCase())
-        .filter((name) => METRIC_COLUMNS[name]),
+        .map((name) => {
+          const trimmed = name?.toString().trim();
+          if (!trimmed) return null;
+          const lookupKey = trimmed.toLowerCase();
+          return METRIC_KEY_LOOKUP.get(lookupKey) ?? trimmed;
+        })
+        .filter((name) => name && METRIC_COLUMNS[name]),
     ),
   );
   const metricsToUse =
@@ -149,7 +160,7 @@ export async function getCustomReportData({
   } else {
     const sumSelect = metricsToUse.reduce((acc, metric) => {
       const column = METRIC_COLUMNS[metric];
-      if (column) {
+      if (column?.field) {
         acc[column.field] = true;
       }
       return acc;
@@ -167,7 +178,8 @@ export async function getCustomReportData({
       ...dimensionDef.where,
     };
 
-    const firstMetricField = METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
+    const firstMetricField =
+      METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
     const groupedRows = await prisma.dailyMetric.groupBy({
       by: [dimensionDef.field],
       where: whereClause,
@@ -345,9 +357,14 @@ async function buildOrderDimensionRows({
     const key = getOrderDimensionKey(order, dimension);
     if (!key) return null;
     if (!bucketMap.has(key)) {
+      const identifier =
+        dimension === "customer"
+          ? getOrderCustomerIdentifier(order)
+          : null;
       bucketMap.set(key, {
         key,
         label: getOrderDimensionLabel(order, dimension, key),
+        identifier,
         revenue: 0,
         netProfit: 0,
         adSpend: 0,
@@ -356,6 +373,9 @@ async function buildOrderDimensionRows({
         shippingCost: 0,
         paymentFees: 0,
         refundAmount: 0,
+        lifetimeNetProfit: 0,
+        lifetimeOrders: 0,
+        repeatOrders: 0,
       });
     }
     return bucketMap.get(key);
@@ -408,6 +428,15 @@ async function buildOrderDimensionRows({
     if (!bucket) return;
     bucket.adSpend += convertAmount(attribution.amount, attribution.currency, rateCache);
   });
+
+  if (dimension === "customer") {
+    await populateCustomerLifetimeMetrics({
+      bucketMap,
+      storeId,
+      masterCurrency,
+      rateCache,
+    });
+  }
 
   const metricRows = Array.from(bucketMap.values())
     .sort((a, b) => b.revenue - a.revenue)
@@ -507,9 +536,134 @@ function resolveBucketMetric(bucket, metricKey) {
       return bucket.refundAmount;
     case "orders":
       return bucket.orders;
+    case "ltv":
+      return bucket.lifetimeNetProfit ?? 0;
+    case "repeatOrders":
+      return bucket.repeatOrders ?? 0;
     default:
       return 0;
   }
+}
+
+function getOrderCustomerIdentifier(order) {
+  if (order.customerEmail) {
+    return { type: "email", value: order.customerEmail };
+  }
+  if (order.customerName) {
+    return { type: "name", value: order.customerName };
+  }
+  if (order.customerId) {
+    return { type: "id", value: order.customerId };
+  }
+  return { type: "guest", value: "Guest" };
+}
+
+function buildCustomerFilter(identifier) {
+  if (!identifier) return null;
+  switch (identifier.type) {
+    case "email":
+      return identifier.value ? { customerEmail: identifier.value } : null;
+    case "name":
+      return identifier.value ? { customerName: identifier.value } : null;
+    case "id":
+      return identifier.value ? { customerId: identifier.value } : null;
+    case "guest":
+      return { customerId: null, customerEmail: null };
+    default:
+      return null;
+  }
+}
+
+async function ensureRateCache(cache, currencies, masterCurrency) {
+  const missing = Array.from(currencies).filter(
+    (currency) => currency && !cache.has(currency),
+  );
+  for (const currency of missing) {
+    if (currency === masterCurrency) {
+      cache.set(currency, 1);
+      continue;
+    }
+    const rate = await getExchangeRate({ base: currency, quote: masterCurrency });
+    cache.set(currency, rate || 1);
+  }
+  if (!cache.has(masterCurrency)) {
+    cache.set(masterCurrency, 1);
+  }
+}
+
+async function populateCustomerLifetimeMetrics({
+  bucketMap,
+  storeId,
+  masterCurrency,
+  rateCache,
+}) {
+  if (!bucketMap?.size) return;
+
+  const identifiers = Array.from(bucketMap.values())
+    .map((bucket) => bucket.identifier)
+    .filter(Boolean);
+
+  if (!identifiers.length) {
+    return;
+  }
+
+  const seen = new Set();
+  const orFilters = [];
+  for (const identifier of identifiers) {
+    const key = `${identifier.type}:${identifier.value ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const filter = buildCustomerFilter(identifier);
+    if (filter) {
+      orFilters.push(filter);
+    }
+  }
+
+  if (!orFilters.length) {
+    return;
+  }
+
+  const lifetimeOrders = await prisma.order.findMany({
+    where: {
+      storeId,
+      OR: orFilters,
+    },
+    select: {
+      id: true,
+      netProfit: true,
+      currency: true,
+      customerEmail: true,
+      customerName: true,
+      customerId: true,
+    },
+  });
+
+  if (!lifetimeOrders.length) {
+    return;
+  }
+
+  const lifetimeCurrencies = new Set(
+    lifetimeOrders.map((order) => order.currency).filter(Boolean),
+  );
+  await ensureRateCache(rateCache, lifetimeCurrencies, masterCurrency);
+
+  const lifetimeMap = new Map();
+  lifetimeOrders.forEach((order) => {
+    const key = getOrderDimensionKey(order, "customer");
+    if (!key) return;
+    const entry = lifetimeMap.get(key) ?? { netProfit: 0, orders: 0 };
+    entry.netProfit += convertAmount(order.netProfit, order.currency, rateCache);
+    entry.orders += 1;
+    lifetimeMap.set(key, entry);
+  });
+
+  bucketMap.forEach((bucket, key) => {
+    const lifetime = lifetimeMap.get(key);
+    if (!lifetime) return;
+    bucket.lifetimeNetProfit = lifetime.netProfit;
+    bucket.lifetimeOrders = lifetime.orders;
+    bucket.repeatOrders = Math.max(0, lifetime.orders - 1);
+  });
 }
 
 function evaluateFormulaExpression(expression, values = {}) {

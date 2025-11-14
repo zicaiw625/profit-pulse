@@ -22,6 +22,8 @@ export const TRANSLATION_KEYS = {
   REPORTS_METRIC_NET_PROFIT: "reports.metric.netProfit",
   REPORTS_METRIC_AD_SPEND: "reports.metric.adSpend",
   REPORTS_METRIC_ORDERS: "reports.metric.orders",
+  REPORTS_METRIC_LTV: "reports.metric.ltv",
+  REPORTS_METRIC_REPEAT_ORDERS: "reports.metric.repeatOrders",
   REPORTS_ACCOUNTING_HEADING: "reports.accounting.heading",
   REPORTS_ACCOUNTING_DESC: "reports.accounting.description",
   REPORTS_ACCOUNTING_START: "reports.accounting.start",
@@ -95,6 +97,8 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT]: "Net profit",
     [TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND]: "Ad spend",
     [TRANSLATION_KEYS.REPORTS_METRIC_ORDERS]: "Orders",
+    [TRANSLATION_KEYS.REPORTS_METRIC_LTV]: "Lifetime net profit",
+    [TRANSLATION_KEYS.REPORTS_METRIC_REPEAT_ORDERS]: "Repeat purchases",
     [TRANSLATION_KEYS.REPORTS_ACCOUNTING_HEADING]:
       "Detailed accounting export",
     [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DESC]:
@@ -173,6 +177,8 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT]: "净利润",
     [TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND]: "广告花费",
     [TRANSLATION_KEYS.REPORTS_METRIC_ORDERS]: "订单",
+    [TRANSLATION_KEYS.REPORTS_METRIC_LTV]: "客户终身净利",
+    [TRANSLATION_KEYS.REPORTS_METRIC_REPEAT_ORDERS]: "复购次数",
     [TRANSLATION_KEYS.REPORTS_ACCOUNTING_HEADING]: "会计明细导出",
     [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DESC]:
       "选择日期范围，导出每日会计账目明细。",
