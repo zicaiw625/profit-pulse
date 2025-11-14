@@ -6,7 +6,7 @@ import {
 } from "./costs.server";
 import { getLogisticsCost } from "./logistics.server";
 import { ensureOrderCapacity } from "./plan-limits.server";
-import { notifyPlanOverage } from "./overages.server";
+import { notifyPlanOverage, processPlanOverageCharge } from "./overages.server";
 import { isPlanLimitError } from "../errors/plan-limit-error";
 import { getAttributionRules } from "./attribution.server";
 import { startOfDay } from "../utils/dates.server.js";
@@ -165,8 +165,10 @@ export async function processShopifyOrder({ store, payload }) {
     netProfit,
   };
 
+  const pendingOverageRecordIds = [];
+
   try {
-    return await prisma.$transaction(async (tx) => {
+    const transactionResult = await prisma.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { shopifyOrderId: orderPayload.shopifyOrderId },
         include: {
@@ -186,11 +188,15 @@ export async function processShopifyOrder({ store, payload }) {
 
       const isNewOrder = !existingOrder;
       if (isNewOrder && storeRecord?.merchantId) {
-        await ensureOrderCapacity({
+        const capacityResult = await ensureOrderCapacity({
           merchantId: storeRecord.merchantId,
           incomingOrders: 1,
           tx,
+          shopDomain: storeRecord.shopDomain,
         });
+        if (capacityResult?.overageRecord?.id) {
+          pendingOverageRecordIds.push(capacityResult.overageRecord.id);
+        }
       }
 
       const order = await tx.order.upsert({
@@ -271,6 +277,17 @@ export async function processShopifyOrder({ store, payload }) {
         refunds,
       };
     });
+    for (const overageId of pendingOverageRecordIds) {
+      try {
+        await processPlanOverageCharge(overageId);
+      } catch (billingError) {
+        console.error(
+          `Failed to process overage usage record ${overageId}:`,
+          billingError,
+        );
+      }
+    }
+    return transactionResult;
   } catch (error) {
     if (
       isPlanLimitError(error) &&

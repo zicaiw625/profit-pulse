@@ -1,6 +1,7 @@
 import prisma from "../db.server";
 import { getPlanDefinitionByTier } from "./billing.server";
 import { PlanLimitError } from "../errors/plan-limit-error";
+import { schedulePlanOverageRecord } from "./overages.server";
 
 const DEFAULT_ALLOWANCES = {
   stores: 1,
@@ -37,31 +38,57 @@ export async function getPlanUsage({ merchantId }) {
   return { usage, subscription, planDefinition };
 }
 
-export async function ensureOrderCapacity({ merchantId, incomingOrders = 1, tx } = {}) {
+export async function ensureOrderCapacity({
+  merchantId,
+  incomingOrders = 1,
+  tx,
+  shopDomain,
+} = {}) {
   if (!merchantId) {
     throw new Error("merchantId is required to ensure order capacity");
   }
   const db = tx ?? prisma;
-  const { limit } = await getPlanLimitInfo(merchantId, db);
-  if (!limit) return;
+  const { limit, planDefinition } = await getPlanLimitInfo(merchantId, db);
+  if (!limit) return { overageRecord: null };
 
   if (!tx) {
     const { year, month } = getCurrentMonthKey();
     const currentOrders =
       (await getMonthlyOrderUsage(merchantId, year, month)) ??
       (await countOrdersForCurrentMonth(merchantId));
-    if (currentOrders + incomingOrders > limit) {
-      throw new PlanLimitError({
-        code: "ORDER_LIMIT_REACHED",
-        message: "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
-        detail: {
-          limit,
-          usage: currentOrders,
-          incomingOrders,
-        },
+    const nextOrders = currentOrders + incomingOrders;
+    if (nextOrders > limit) {
+      const overageConfig = planDefinition?.overages?.orders ?? null;
+      if (!overageConfig) {
+        throw new PlanLimitError({
+          code: "ORDER_LIMIT_REACHED",
+          message:
+            "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
+          detail: {
+            limit,
+            usage: currentOrders,
+            incomingOrders,
+          },
+        });
+      }
+      const unitsRequired = calculateUnitsRequired({
+        overLimit: nextOrders - limit,
+        blockSize: overageConfig.blockSize,
+      });
+      await schedulePlanOverageRecord({
+        merchantId,
+        metric: "orders",
+        unitsRequired,
+        unitAmount: overageConfig.price,
+        currency: overageConfig.currency ?? planDefinition?.currency ?? "USD",
+        description:
+          overageConfig.description ?? "Additional order volume overage charge",
+        year,
+        month,
+        shopDomain,
       });
     }
-    return;
+    return { overageRecord: null };
   }
 
   const { year, month } = getCurrentMonthKey();
@@ -77,21 +104,45 @@ export async function ensureOrderCapacity({ merchantId, incomingOrders = 1, tx }
     FOR UPDATE
   `;
   const currentOrders = Number(row?.orders ?? 0);
-  if (currentOrders + incomingOrders > limit) {
-    throw new PlanLimitError({
-      code: "ORDER_LIMIT_REACHED",
-      message: "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
-      detail: {
-        limit,
-        usage: currentOrders,
-        incomingOrders,
-      },
+  const nextOrders = currentOrders + incomingOrders;
+  let overageRecord = null;
+  if (nextOrders > limit) {
+    const overageConfig = planDefinition?.overages?.orders ?? null;
+    if (!overageConfig) {
+      throw new PlanLimitError({
+        code: "ORDER_LIMIT_REACHED",
+        message:
+          "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
+        detail: {
+          limit,
+          usage: currentOrders,
+          incomingOrders,
+        },
+      });
+    }
+    const unitsRequired = calculateUnitsRequired({
+      overLimit: nextOrders - limit,
+      blockSize: overageConfig.blockSize,
+    });
+    overageRecord = await schedulePlanOverageRecord({
+      merchantId,
+      metric: "orders",
+      unitsRequired,
+      unitAmount: overageConfig.price,
+      currency: overageConfig.currency ?? planDefinition?.currency ?? "USD",
+      description:
+        overageConfig.description ?? "Additional order volume overage charge",
+      year,
+      month,
+      shopDomain,
+      tx,
     });
   }
   await tx.monthlyOrderUsage.update({
     where: { merchantId_year_month: { merchantId, year, month } },
     data: { orders: { increment: incomingOrders } },
   });
+  return { overageRecord };
 }
 
 function buildUsage(count, limit) {
@@ -152,4 +203,9 @@ function getCurrentMonthKey() {
     year: now.getUTCFullYear(),
     month: now.getUTCMonth() + 1,
   };
+}
+
+function calculateUnitsRequired({ overLimit, blockSize }) {
+  const normalizedBlock = blockSize && blockSize > 0 ? blockSize : 1;
+  return Math.ceil(overLimit / normalizedBlock);
 }

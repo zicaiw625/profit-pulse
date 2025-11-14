@@ -11,6 +11,7 @@
 
 ## 2. 订阅与计费
 - 🚩 免费层/Basic/Pro plan：`app/config/billing.js:1` 现在新增 FREE plan，并在 `store.server.js:8` 默认赋予免费计划；只有 Basic/Pro 在 `BILLING_CONFIG` 中有 billingKey 供 Shopify 计费（`plan-limits.server.js:1` 仍负责用量限制）。
+- ✅ 超额计费：Basic/Pro 计划在 `app/config/billing.js` 中加入 Usage line item 与 overage 费率，`plan-limits.server.js` 与 `store.server.js` 在超额时写入 `PlanOverageRecord` 并调用 Shopify Usage Record（`app/services/overages.server.js`）。
 - ⭐ Overage 通知：当 `PlanLimitError` 触发时，`app/services/profit-engine.server.js:12` 会调用 `overages.server.js:1` 通过 Slack 提醒团队，Settings 亦会在 free tier 下展示限额提示（`app/routes/app.settings.jsx:1013`）。
 
 ## 3. 数据源集成
@@ -67,6 +68,6 @@
 - 🚩 隐私 / 使用条款页面：`app/routes/app.privacy.jsx:1` 与 `app/routes/app.terms.jsx:1` 在 Help 页面新增 `法律与合规` 区块可访问。
 
 ## 待补充/下一步
-1. ⭐ 试用/免费层、超额计费：当前只能通过 `plan-limits` 抛错提醒，尚未实现试用限制 UI 或超额计费逻辑。
+1. ⭐ 试用/免费层：尚需补齐试用倒计时 UI 与免费层可用功能提示，当前仅在 Settings 文案中提及。
 2. ⭐ 广告与支付外延（TikTok/Bing/Klarna/Stripe 等）尚未接入；也缺少自定义权重的归因规则与多广告触达分配。
 3. ⭐ 高级报表构建器、会计导出（科目化）、多语言、税率模板、合规页（隐私政策）等仍在规划中。
