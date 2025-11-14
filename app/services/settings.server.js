@@ -16,6 +16,7 @@ import { listAttributionRules } from "./attribution.server";
 import { listAuditLogs } from "./audit.server";
 import { listLogisticsRules } from "./logistics.server";
 import { listTaxRates } from "./tax-rates.server";
+import { listGdprRequests } from "./privacy.server";
 
 export async function getAccountSettings({ store }) {
   const merchant = await prisma.merchantAccount.findUnique({
@@ -45,6 +46,7 @@ export async function getAccountSettings({ store }) {
     attributionRules,
     logisticsRules,
     taxRates,
+    gdprRequests,
   ] =
     await Promise.all([
       getCostConfiguration(store.id),
@@ -61,6 +63,7 @@ export async function getAccountSettings({ store }) {
       listAttributionRules(store.merchantId),
       listLogisticsRules(store.id),
       listTaxRates(store.id),
+      listGdprRequests({ merchantId: store.merchantId, storeId: store.id, limit: 20 }),
     ]);
   const subscription = merchant?.subscription;
   const planDefinition = getPlanDefinitionByTier(subscription?.plan);
@@ -112,6 +115,7 @@ export async function getAccountSettings({ store }) {
     attributionRules,
     logisticsRules,
     taxRates,
+    gdprRequests,
     exchangeRates: exchangeRateSummary,
     primaryCurrency,
     planUsage: planUsageResult.usage,

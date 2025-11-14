@@ -119,4 +119,130 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DOWNLOAD]: "下载税率模板",
     [TRANSLATION_KEYS.REPORTS_EXPORT_CUSTOM]: "下载自定义 CSV",
   },
+  es: {
+    [TRANSLATION_KEYS.ONBOARDING_TITLE]: "Guía de inicio rápido",
+    [TRANSLATION_KEYS.ONBOARDING_DESC]:
+      "Completa la configuración esencial para ver de inmediato métricas de rentabilidad en tiendas, anuncios y pagos.",
+    [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
+      "1. Conecta la tienda de Shopify y concede permisos para pedidos, reembolsos y clientes.",
+    [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
+      "2. Sube el CSV de costos por SKU o utiliza plantillas demo para obtener COGS y envíos precisos.",
+    [TRANSLATION_KEYS.STEP_LINK_ADS]:
+      "3. Vincula Meta/Google Ads para incorporar el gasto publicitario en la atribución y vigilar el ROAS.",
+    [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
+      "4. Añade un webhook de Slack/Teams y configura alertas y resúmenes programados para detectar anomalías.",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Constructor avanzado de informes",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
+      "Elige una dimensión y métricas para analizar ingresos, beneficios y gasto en distintos periodos.",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL]: "Dimensión",
+    [TRANSLATION_KEYS.REPORTS_METRICS_LABEL]: "Métricas",
+    [TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL]: "Rango de fechas",
+    [TRANSLATION_KEYS.REPORTS_RUN_REPORT]: "Generar informe",
+    [TRANSLATION_KEYS.REPORTS_NO_DATA]: "No hay datos para la configuración seleccionada.",
+    [TRANSLATION_KEYS.REPORTS_LANG_LABEL]: "Idioma de visualización",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL]: "Canal",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_PRODUCT]: "SKU del producto",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_DATE]: "Fecha",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_COUNTRY]: "País / Región",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CUSTOMER]: "Cliente",
+    [TRANSLATION_KEYS.REPORTS_METRIC_REVENUE]: "Ingresos",
+    [TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT]: "Beneficio neto",
+    [TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND]: "Gasto publicitario",
+    [TRANSLATION_KEYS.REPORTS_METRIC_ORDERS]: "Pedidos",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_HEADING]: "Exportación contable detallada",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DESC]:
+      "Selecciona un rango de fechas para exportar el detalle contable diario.",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_START]: "Fecha inicial",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_END]: "Fecha final",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD]: "Descargar CSV detallado",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE]: "Exportación de plantillas fiscales",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DESC]:
+      "Incluye tus plantillas de impuestos en CSV para contabilidad o asesores fiscales.",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DOWNLOAD]: "Descargar plantilla fiscal",
+    [TRANSLATION_KEYS.REPORTS_EXPORT_CUSTOM]: "Descargar CSV personalizado",
+  },
+  fr: {
+    [TRANSLATION_KEYS.ONBOARDING_TITLE]: "Guide de mise en route",
+    [TRANSLATION_KEYS.ONBOARDING_DESC]:
+      "Suivez les étapes clés pour visualiser immédiatement les indicateurs de rentabilité des boutiques, publicités et paiements.",
+    [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
+      "1. Connectez la boutique Shopify et autorisez l’accès aux commandes, remboursements et clients.",
+    [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
+      "2. Importez un CSV de coûts par SKU ou utilisez les modèles de démonstration pour fiabiliser COGS et frais d’expédition.",
+    [TRANSLATION_KEYS.STEP_LINK_ADS]:
+      "3. Connectez Meta/Google Ads afin d’injecter les dépenses dans l’attribution et suivre le ROAS.",
+    [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
+      "4. Ajoutez un webhook Slack/Teams et paramétrez alertes et rapports planifiés pour détecter les anomalies.",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Générateur de rapports avancé",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
+      "Choisissez une dimension et des métriques pour analyser revenus, profits et dépenses dans le temps.",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL]: "Dimension",
+    [TRANSLATION_KEYS.REPORTS_METRICS_LABEL]: "Métriques",
+    [TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL]: "Plage de dates",
+    [TRANSLATION_KEYS.REPORTS_RUN_REPORT]: "Générer le rapport",
+    [TRANSLATION_KEYS.REPORTS_NO_DATA]: "Aucune donnée ne correspond à la configuration sélectionnée.",
+    [TRANSLATION_KEYS.REPORTS_LANG_LABEL]: "Langue d’affichage",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL]: "Canal",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_PRODUCT]: "SKU produit",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_DATE]: "Date",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_COUNTRY]: "Pays / Région",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CUSTOMER]: "Client",
+    [TRANSLATION_KEYS.REPORTS_METRIC_REVENUE]: "Chiffre d’affaires",
+    [TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT]: "Profit net",
+    [TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND]: "Dépenses pubs",
+    [TRANSLATION_KEYS.REPORTS_METRIC_ORDERS]: "Commandes",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_HEADING]: "Export comptable détaillé",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DESC]:
+      "Sélectionnez une période pour exporter le détail comptable quotidien.",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_START]: "Date de début",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_END]: "Date de fin",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD]: "Télécharger le CSV détaillé",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE]: "Export des modèles fiscaux",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DESC]:
+      "Fournissez vos modèles de taxes au format CSV pour les comptables ou conseillers fiscaux.",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DOWNLOAD]: "Télécharger le modèle fiscal",
+    [TRANSLATION_KEYS.REPORTS_EXPORT_CUSTOM]: "Télécharger le CSV personnalisé",
+  },
+  de: {
+    [TRANSLATION_KEYS.ONBOARDING_TITLE]: "Schnellstart-Anleitung",
+    [TRANSLATION_KEYS.ONBOARDING_DESC]:
+      "Durchlaufen Sie die wichtigsten Schritte, um sofort Rentabilitätskennzahlen über Shops, Ads und Zahlungen zu sehen.",
+    [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
+      "1. Shopify-Store verbinden und Berechtigungen für Bestellungen, Rückerstattungen und Kunden erteilen.",
+    [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
+      "2. SKU-Kosten per CSV importieren oder Demo-Vorlagen nutzen, damit COGS und Versandkosten stimmen.",
+    [TRANSLATION_KEYS.STEP_LINK_ADS]:
+      "3. Meta/Google Ads verknüpfen, um Werbeausgaben in die Attribution einzuspeisen und ROAS zu verfolgen.",
+    [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
+      "4. Slack/Teams-Webhook hinterlegen und Alarme sowie geplante Berichte für Anomalien einrichten.",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Erweiterter Report-Builder",
+    [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
+      "Wählen Sie Dimension und Kennzahlen, um Umsatz, Profit und Ausgaben zeitlich auszuwerten.",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_LABEL]: "Dimension",
+    [TRANSLATION_KEYS.REPORTS_METRICS_LABEL]: "Kennzahlen",
+    [TRANSLATION_KEYS.REPORTS_DATE_RANGE_LABEL]: "Datumsbereich",
+    [TRANSLATION_KEYS.REPORTS_RUN_REPORT]: "Report ausführen",
+    [TRANSLATION_KEYS.REPORTS_NO_DATA]: "Keine Daten für die gewählte Konfiguration gefunden.",
+    [TRANSLATION_KEYS.REPORTS_LANG_LABEL]: "Anzeigesprache",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CHANNEL]: "Kanal",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_PRODUCT]: "Produkt-SKU",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_DATE]: "Datum",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_COUNTRY]: "Land / Region",
+    [TRANSLATION_KEYS.REPORTS_DIMENSION_CUSTOMER]: "Kunde",
+    [TRANSLATION_KEYS.REPORTS_METRIC_REVENUE]: "Umsatz",
+    [TRANSLATION_KEYS.REPORTS_METRIC_NET_PROFIT]: "Nettogewinn",
+    [TRANSLATION_KEYS.REPORTS_METRIC_AD_SPEND]: "Werbekosten",
+    [TRANSLATION_KEYS.REPORTS_METRIC_ORDERS]: "Bestellungen",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_HEADING]: "Detaillierter Buchhaltungs-Export",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DESC]:
+      "Wählen Sie einen Zeitraum, um tägliche Buchhaltungsdaten zu exportieren.",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_START]: "Startdatum",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_END]: "Enddatum",
+    [TRANSLATION_KEYS.REPORTS_ACCOUNTING_DOWNLOAD]: "Detail-CSV herunterladen",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE]: "Steuervorlagen-Export",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DESC]:
+      "Stellen Sie Ihre Steuervorlagen als CSV für Buchhaltung oder Steuerberater bereit.",
+    [TRANSLATION_KEYS.REPORTS_TAX_TEMPLATE_DOWNLOAD]: "Steuervorlage herunterladen",
+    [TRANSLATION_KEYS.REPORTS_EXPORT_CUSTOM]: "Individuelle CSV herunterladen",
+  },
 };

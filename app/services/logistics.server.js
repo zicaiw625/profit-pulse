@@ -200,3 +200,46 @@ export async function getLogisticsCost({
 
   return Number(rawCost * conversionRate);
 }
+
+export async function replaceLogisticsRulesFromRates({
+  storeId,
+  provider,
+  rates = [],
+  defaultCurrency = "USD",
+}) {
+  if (!storeId) {
+    throw new Error("storeId is required to replace logistics rules");
+  }
+
+  const sanitized = rates
+    .map((rate) => ({
+      storeId,
+      provider: provider ?? rate.provider ?? null,
+      country: rate.country ? rate.country.toUpperCase() : null,
+      region: rate.region ? rate.region.toUpperCase() : null,
+      weightMin: toNumber(rate.weightMin ?? rate.minWeight ?? 0),
+      weightMax:
+        rate.weightMax === null || rate.weightMax === undefined
+          ? null
+          : toNumber(rate.weightMax),
+      flatFee: toNumber(rate.flatFee ?? rate.baseRate ?? 0),
+      perKg: toNumber(rate.perKg ?? rate.variableRate ?? 0),
+      currency: rate.currency ?? defaultCurrency,
+      effectiveFrom: parseDate(rate.effectiveFrom),
+      effectiveTo: parseDate(rate.effectiveTo),
+    }))
+    .filter((entry) => entry.flatFee > 0 || entry.perKg > 0);
+
+  if (!sanitized.length) {
+    return 0;
+  }
+
+  await prisma.$transaction([
+    prisma.logisticsRule.deleteMany({
+      where: { storeId, provider: provider ?? null },
+    }),
+    prisma.logisticsRule.createMany({ data: sanitized }),
+  ]);
+
+  return sanitized.length;
+}
