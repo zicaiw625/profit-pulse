@@ -4,6 +4,10 @@ import {
   decryptSensitiveString,
   encryptSensitiveString,
 } from "../utils/security.server";
+import {
+  refreshGoogleAdsAccessToken,
+} from "./oauth/google-ads.server.js";
+import { extendMetaAccessToken, META_ADS_SCOPE } from "./oauth/meta-ads.server.js";
 
 const { CredentialProvider } = pkg;
 
@@ -95,4 +99,113 @@ export async function deleteAdCredential({ merchantId, storeId, provider }) {
   await prisma.adAccountCredential.deleteMany({
     where: { merchantId, storeId, provider },
   });
+}
+
+const PROVIDER_REFRESH_MARGIN = {
+  META_ADS: 1000 * 60 * 60 * 72, // 72 hours
+};
+
+function needsTokenRefresh(credential) {
+  const expiresAt = credential?.expiresAt ? new Date(credential.expiresAt) : null;
+  if (!expiresAt) {
+    return true;
+  }
+  const margin =
+    PROVIDER_REFRESH_MARGIN[credential.provider] ?? 1000 * 60 * 5; // 5 minutes
+  return expiresAt.getTime() - Date.now() <= margin;
+}
+
+const REFRESH_HANDLERS = {
+  [CredentialProvider.GOOGLE_ADS]: async ({ credential, secret }) => {
+    if (!secret.refreshToken) {
+      throw new Error("Google Ads credential is missing refresh token");
+    }
+    const refreshed = await refreshGoogleAdsAccessToken(secret.refreshToken);
+    return {
+      secret: {
+        ...secret,
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        tokenType: refreshed.tokenType ?? secret.tokenType,
+      },
+      expiresAt: refreshed.expiresAt ?? null,
+      scopes: refreshed.scope ?? credential.scopes,
+    };
+  },
+  [CredentialProvider.META_ADS]: async ({ secret, credential }) => {
+    const currentToken = secret.accessToken;
+    if (!currentToken) {
+      throw new Error("Meta Ads credential is missing access token");
+    }
+    const refreshed = await extendMetaAccessToken(currentToken);
+    return {
+      secret: {
+        ...secret,
+        accessToken: refreshed.accessToken,
+      },
+      expiresAt: refreshed.expiresAt ?? null,
+      scopes: META_ADS_SCOPE,
+    };
+  },
+};
+
+export async function ensureFreshAdAccessToken({ credential, secret }) {
+  if (!credential) {
+    return { credential: null, secret: secret ?? {} };
+  }
+
+  const parsedSecret = secret ?? parseCredentialSecret(credential.encryptedSecret);
+  if (!needsTokenRefresh(credential)) {
+    return { credential, secret: parsedSecret };
+  }
+
+  const handler = REFRESH_HANDLERS[credential.provider];
+  if (!handler) {
+    return { credential, secret: parsedSecret };
+  }
+
+  const refreshed = await handler({ credential, secret: parsedSecret });
+
+  const updated = await upsertAdCredential({
+    merchantId: credential.merchantId,
+    storeId: credential.storeId,
+    provider: credential.provider,
+    accountId: credential.accountId,
+    accountName: credential.accountName ?? undefined,
+    secret: refreshed.secret,
+    scopes: refreshed.scopes ?? credential.scopes,
+    expiresAt: refreshed.expiresAt ?? null,
+  });
+
+  return { credential: updated, secret: refreshed.secret };
+}
+
+export async function refreshExpiringAdCredentials({ marginMinutes = 60 } = {}) {
+  const marginMs = Math.max(0, Number(marginMinutes) || 0) * 60 * 1000;
+  const threshold = new Date(Date.now() + marginMs);
+
+  const candidates = await prisma.adAccountCredential.findMany({
+    where: {
+      provider: { in: [CredentialProvider.GOOGLE_ADS, CredentialProvider.META_ADS] },
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { lte: threshold } },
+      ],
+    },
+  });
+
+  let refreshedCount = 0;
+  for (const credential of candidates) {
+    try {
+      await ensureFreshAdAccessToken({ credential });
+      refreshedCount += 1;
+    } catch (error) {
+      console.error(
+        `Failed to refresh ${credential.provider} credential ${credential.id}:`,
+        error,
+      );
+    }
+  }
+
+  return refreshedCount;
 }

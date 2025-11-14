@@ -557,6 +557,10 @@ export const action = async ({ request }) => {
     const developerToken = formData.get("developerToken")?.toString().trim();
     const loginCustomerId = formData.get("loginCustomerId")?.toString().trim();
 
+    if (provider === "GOOGLE_ADS" || provider === "META_ADS") {
+      return { message: "请使用授权按钮连接该广告平台。" };
+    }
+
     if (!provider || !accountId || !accessToken) {
       return { message: "请输入完整的广告账号信息与 Access Token。" };
     }
@@ -1392,6 +1396,23 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedLang = (searchParams.get("lang") ?? lang ?? "en").toLowerCase();
   const localized = getLocalizedText(selectedLang);
+  const oauthProviderParam = searchParams.get("oauth");
+  const oauthStatusParam = searchParams.get("status");
+  const oauthMessageParam = searchParams.get("message");
+  const providerLabelMap = {
+    "google-ads": "Google Ads",
+    "meta-ads": "Meta Ads",
+  };
+  const oauthProviderLabel =
+    providerLabelMap[oauthProviderParam ?? ""] ||
+    (oauthProviderParam ? oauthProviderParam : "外部平台");
+  const showOauthBanner = oauthProviderParam && oauthStatusParam;
+  const oauthBannerTone = oauthStatusParam === "success" ? "success" : "critical";
+  const oauthBannerMessage =
+    oauthMessageParam ||
+    (oauthStatusParam === "success"
+      ? `${oauthProviderLabel} 已完成授权。`
+      : `${oauthProviderLabel} 授权失败，请重试。`);
   const handleLanguageChange = (event) => {
     const nextLang = event.target.value;
     const nextParams = new URLSearchParams(searchParams);
@@ -1404,6 +1425,7 @@ export default function SettingsPage() {
   };
   const currentIntent = navigation.formData?.get("intent");
   const isSubmitting = navigation.state === "submitting";
+  const navigationAction = navigation.formAction ?? "";
   const planTier = (settings.plan?.tier ?? "").toUpperCase();
   const isFreeTier = planTier === FREE_PLAN_TIER;
   const freeTierAllowances = {
@@ -1551,10 +1573,19 @@ export default function SettingsPage() {
     isSubmitting && currentIntent === "import-tax-rates";
   const syncingErpCosts =
     isSubmitting && currentIntent === "sync-erp-costs";
-  const connectingAdProvider =
-    isSubmitting && currentIntent === "connect-ad-credential"
-      ? navigation.formData?.get("provider")
+  const oauthSubmittingProvider =
+    navigation.state === "submitting" && navigationAction
+      ? navigationAction.startsWith("/auth/google-ads")
+        ? "GOOGLE_ADS"
+        : navigationAction.startsWith("/auth/meta-ads")
+          ? "META_ADS"
+          : null
       : null;
+  const connectingAdProvider =
+    oauthSubmittingProvider ??
+    (isSubmitting && currentIntent === "connect-ad-credential"
+      ? navigation.formData?.get("provider")
+      : null);
   const disconnectingAdProvider =
     isSubmitting && currentIntent === "disconnect-ad-credential"
       ? navigation.formData?.get("provider")
@@ -1663,6 +1694,9 @@ export default function SettingsPage() {
           ))}
         </s-unordered-list>
       </s-section>
+      {showOauthBanner && (
+        <s-banner tone={oauthBannerTone} title={oauthBannerMessage} />
+      )}
       {actionData?.message && (
         <s-banner tone="success" title={actionData.message} />
       )}
@@ -1963,26 +1997,99 @@ export default function SettingsPage() {
                       </s-stack>
                     </>
                   ) : (
-                    <Form method="post">
-                      <input type="hidden" name="intent" value="connect-ad-credential" />
-                      <input type="hidden" name="provider" value={integration.id} />
-                      <s-stack direction="block" gap="base">
-                        {renderAdCredentialFields(integration.id)}
-                        <s-button
-                          type="submit"
-                          variant="primary"
-                          disabled={!intentAccess.connectAdCredential}
-                          {...(connectingThis ? { loading: true } : {})}
-                        >
-                          Connect {integration.label}
-                        </s-button>
-                        {!intentAccess.connectAdCredential && (
-                          <s-text variation="subdued">
-                            {permissionHint("connect-ad-credential")}
-                          </s-text>
-                        )}
-                      </s-stack>
-                    </Form>
+                    <>
+                      {integration.id === "GOOGLE_ADS" ? (
+                        <Form method="post" action="/auth/google-ads/start">
+                          <s-stack direction="block" gap="base">
+                            <s-text-field
+                              name="accountId"
+                              label="Customer ID"
+                              placeholder="123-456-7890"
+                              required
+                            ></s-text-field>
+                            <s-text-field
+                              name="accountName"
+                              label="Nickname"
+                              placeholder="Google master account"
+                            ></s-text-field>
+                            <s-text-field
+                              name="loginCustomerId"
+                              label="Login customer ID (optional)"
+                              placeholder="Manager account ID"
+                            ></s-text-field>
+                            <s-text variation="subdued">
+                              授权流程会请求 Google Ads API scope 并保存刷新令牌，确保后续自动续期。
+                            </s-text>
+                            <s-button
+                              type="submit"
+                              variant="primary"
+                              disabled={!intentAccess.connectAdCredential}
+                              {...(connectingThis ? { loading: true } : {})}
+                            >
+                              Authorize Google Ads
+                            </s-button>
+                            {!intentAccess.connectAdCredential && (
+                              <s-text variation="subdued">
+                                {permissionHint("connect-ad-credential")}
+                              </s-text>
+                            )}
+                          </s-stack>
+                        </Form>
+                      ) : integration.id === "META_ADS" ? (
+                        <Form method="post" action="/auth/meta-ads/start">
+                          <s-stack direction="block" gap="base">
+                            <s-text-field
+                              name="accountId"
+                              label="Ad account ID"
+                              placeholder="act_123456789"
+                              required
+                            ></s-text-field>
+                            <s-text-field
+                              name="accountName"
+                              label="Nickname"
+                              placeholder="Meta main account"
+                            ></s-text-field>
+                            <s-text variation="subdued">
+                              Meta 将授予 ads_read 与 ads_management 权限，系统会自动管理长效访问令牌。
+                            </s-text>
+                            <s-button
+                              type="submit"
+                              variant="primary"
+                              disabled={!intentAccess.connectAdCredential}
+                              {...(connectingThis ? { loading: true } : {})}
+                            >
+                              Authorize Meta Ads
+                            </s-button>
+                            {!intentAccess.connectAdCredential && (
+                              <s-text variation="subdued">
+                                {permissionHint("connect-ad-credential")}
+                              </s-text>
+                            )}
+                          </s-stack>
+                        </Form>
+                      ) : (
+                        <Form method="post">
+                          <input type="hidden" name="intent" value="connect-ad-credential" />
+                          <input type="hidden" name="provider" value={integration.id} />
+                          <s-stack direction="block" gap="base">
+                            {renderAdCredentialFields(integration.id)}
+                            <s-button
+                              type="submit"
+                              variant="primary"
+                              disabled={!intentAccess.connectAdCredential}
+                              {...(connectingThis ? { loading: true } : {})}
+                            >
+                              Connect {integration.label}
+                            </s-button>
+                            {!intentAccess.connectAdCredential && (
+                              <s-text variation="subdued">
+                                {permissionHint("connect-ad-credential")}
+                              </s-text>
+                            )}
+                          </s-stack>
+                        </Form>
+                      )}
+                    </>
                   )}
                 </s-card>
               );
@@ -3560,66 +3667,17 @@ function formatAllocationRule(value) {
 function renderAdCredentialFields(providerId) {
   if (providerId === "META_ADS") {
     return (
-      <>
-        <s-text-field
-          name="accountId"
-          label="Ad account ID"
-          placeholder="act_123456789"
-          required
-        ></s-text-field>
-        <s-text-field
-          name="accountName"
-          label="Nickname"
-          placeholder="Brand main account"
-        ></s-text-field>
-        <s-text-field
-          name="accessToken"
-          label="System user access token"
-          type="password"
-          required
-        ></s-text-field>
-        <s-text variation="subdued">
-          Use a Meta Marketing API system user token with ads_read + ads_management scopes.
-        </s-text>
-      </>
+      <s-text variation="subdued">
+        请使用授权按钮完成 Meta Ads OAuth 连接。
+      </s-text>
     );
   }
 
   if (providerId === "GOOGLE_ADS") {
     return (
-      <>
-        <s-text-field
-          name="accountId"
-          label="Customer ID"
-          placeholder="123-456-7890"
-          required
-        ></s-text-field>
-        <s-text-field
-          name="accountName"
-          label="Nickname"
-          placeholder="Google master account"
-        ></s-text-field>
-        <s-text-field
-          name="accessToken"
-          label="OAuth access token"
-          type="password"
-          required
-        ></s-text-field>
-        <s-text-field
-          name="developerToken"
-          label="Developer token"
-          type="password"
-          required
-        ></s-text-field>
-        <s-text-field
-          name="loginCustomerId"
-          label="Login customer ID (optional)"
-          placeholder="Manager account ID"
-        ></s-text-field>
-        <s-text variation="subdued">
-          Provide a refreshable OAuth token with Google Ads API access and your developer token.
-        </s-text>
-      </>
+      <s-text variation="subdued">
+        Google Ads 已改为 OAuth 授权，请使用对应按钮完成连接。
+      </s-text>
     );
   }
 

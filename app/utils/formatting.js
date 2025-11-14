@@ -1,15 +1,53 @@
 const DEFAULT_CURRENCY = "USD";
+const CURRENCY_FORMATTER_CACHE = new Map();
 
 export function formatCurrency(
   value,
   currency = DEFAULT_CURRENCY,
   maximumFractionDigits = 2,
 ) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    maximumFractionDigits,
-  }).format(Number(value ?? 0));
+  const normalizedCurrency = normalizeCurrencyCode(currency);
+  const formatter = getCurrencyFormatter(normalizedCurrency, maximumFractionDigits);
+  return formatter.format(Number(value ?? 0));
+}
+
+function normalizeCurrencyCode(code) {
+  if (!code) {
+    return DEFAULT_CURRENCY;
+  }
+
+  const trimmed = code.toString().trim();
+  if (!trimmed) {
+    return DEFAULT_CURRENCY;
+  }
+
+  const upper = trimmed.toUpperCase();
+  // Currency codes should be three-letter ISO strings; fallback otherwise.
+  return upper.length === 3 ? upper : DEFAULT_CURRENCY;
+}
+
+function getCurrencyFormatter(currency, maximumFractionDigits) {
+  const key = `${currency}:${maximumFractionDigits}`;
+  const cached = CURRENCY_FORMATTER_CACHE.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const formatter = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits,
+    });
+    CURRENCY_FORMATTER_CACHE.set(key, formatter);
+    return formatter;
+  } catch (error) {
+    if (currency !== DEFAULT_CURRENCY) {
+      return getCurrencyFormatter(DEFAULT_CURRENCY, maximumFractionDigits);
+    }
+
+    throw error;
+  }
 }
 
 export function formatPercent(value, decimals = 1) {
