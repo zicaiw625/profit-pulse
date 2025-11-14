@@ -182,7 +182,7 @@ async function buildAdsCsv({ storeId }) {
 }
 
 async function buildAccountingCsv({ storeId }) {
-  const { rows, currency, range } = await getAccountingMonthlySummary({
+  const { rows, currency, range, timezone } = await getAccountingMonthlySummary({
     storeId,
     months: 6,
   });
@@ -210,7 +210,7 @@ async function buildAccountingCsv({ storeId }) {
   ]);
 
   return {
-    filename: `accounting-${dateStamp(range, report.timezone)}.csv`,
+    filename: `accounting-${dateStamp(range, timezone)}.csv`,
     content: buildCsv(headers, dataRows),
   };
 }
@@ -223,6 +223,8 @@ async function buildCustomCsv({ storeId, searchParams }) {
     : undefined;
   const rangeStart = searchParams.get("start") ?? undefined;
   const rangeEnd = searchParams.get("end") ?? undefined;
+  const formula = searchParams.get("formula") ?? undefined;
+  const formulaLabel = searchParams.get("formulaLabel") ?? undefined;
   const limit = Number(searchParams.get("limit")) || 25;
 
   const report = await getCustomReportData({
@@ -232,6 +234,8 @@ async function buildCustomCsv({ storeId, searchParams }) {
     start: rangeStart,
     end: rangeEnd,
     limit,
+    formula,
+    formulaLabel,
   });
 
   const headers = [

@@ -891,7 +891,7 @@ export async function getNetProfitVsSpendSeries({
 
   const context = await loadStoreContext(storeId);
   const { timezone, storeCurrency, masterCurrency } = context;
-  const { start, end } = resolveRange({
+  const { start, end, resolvedDays } = resolveRange({
     rangeDays,
     rangeStart,
     rangeEnd,
@@ -924,7 +924,7 @@ export async function getNetProfitVsSpendSeries({
   });
 
   const series = [];
-  for (let i = 0; i < rangeDays; i += 1) {
+  for (let i = 0; i < resolvedDays; i += 1) {
     const date = shiftDays(start, i, { timezone });
     const key = formatDateKey(date, { timezone });
     series.push(

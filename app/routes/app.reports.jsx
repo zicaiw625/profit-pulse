@@ -121,7 +121,7 @@ export default function ReportsPage() {
     formulaLabel: "",
     formula: "",
   }));
-  const buildCustomUrl = (values = builderValues, overrides = {}) => {
+  const buildCustomQuery = (values = builderValues, overrides = {}) => {
     const params = new URLSearchParams();
     params.set("dimension", values.dimension);
     params.set("metrics", values.metrics.join(","));
@@ -130,7 +130,17 @@ export default function ReportsPage() {
     if (values.formula) params.set("formula", values.formula);
     if (values.formulaLabel) params.set("formulaLabel", values.formulaLabel);
     params.set("limit", String(overrides.limit ?? DEFAULT_BUILDER_LIMIT));
+    return params;
+  };
+
+  const buildCustomUrl = (values = builderValues, overrides = {}) => {
+    const params = buildCustomQuery(values, overrides);
     return `/app/reports/custom?${params.toString()}`;
+  };
+
+  const buildCustomExportUrl = (values = builderValues, overrides = {}) => {
+    const params = buildCustomQuery(values, overrides);
+    return `/app/reports/export/custom?${params.toString()}`;
   };
 
   useEffect(() => {
@@ -244,7 +254,7 @@ export default function ReportsPage() {
     }));
   };
 
-  const exportCustomCsvLink = buildCustomUrl(builderValues, { limit: 200 });
+  const exportCustomCsvLink = buildCustomExportUrl(builderValues, { limit: 200 });
   const builderData = builderFetcher.data;
   const builderRows = builderData?.rows ?? [];
   const builderMetrics = builderData?.metrics ?? [];
