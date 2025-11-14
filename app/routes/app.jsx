@@ -1,6 +1,7 @@
 import { Outlet, useLoaderData, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { HttpResponseError } from "@shopify/shopify-api";
 import { authenticate } from "../shopify.server";
 import { LinkWithQuery } from "../components/LinkWithQuery";
 import { ShopifyFetchProvider } from "../components/ShopifyFetchProvider";
@@ -15,6 +16,25 @@ export const loader = async ({ request }) => {
   try {
     await admin.graphql(`{ shop { name } }`);
   } catch (error) {
+    // If Shopify needs us to restart authentication it will throw a Response
+    // object. Re-throw it so the platform can handle the redirect correctly.
+    if (error instanceof Response) {
+      throw error;
+    }
+
+    if (error instanceof HttpResponseError && error.response?.code === 401) {
+      throw new Response(
+        JSON.stringify(error.response.body ?? {}),
+        {
+          status: error.response.code,
+          headers: {
+            "Content-Type":
+              error.response.headers?.["Content-Type"] ?? "application/json",
+          },
+        },
+      );
+    }
+
     console.debug("Admin session prewarm failed", error);
   }
   // eslint-disable-next-line no-undef
