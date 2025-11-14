@@ -20,22 +20,56 @@ const ATTRIBUTION_CHANNELS = [
 ];
 
 export async function processShopifyOrder({ store, payload }) {
+  const storeRecord = await resolveStoreRecord(store);
+  const metrics = await computeOrderFinancials({ store: storeRecord, payload });
+
+  try {
+    const { transactionResult, overageRecordIds } =
+      await persistOrderWithTransaction({
+        store: storeRecord,
+        metrics,
+      });
+
+    await settlePlanOverages(overageRecordIds);
+    return transactionResult;
+  } catch (error) {
+    if (
+      isPlanLimitError(error) &&
+      storeRecord?.merchantId &&
+      error.detail?.limit !== undefined
+    ) {
+      await notifyPlanOverage({
+        merchantId: storeRecord.merchantId,
+        limit: error.detail.limit,
+        usage: error.detail.usage ?? 0,
+      });
+    }
+    throw error;
+  }
+}
+
+async function resolveStoreRecord(store) {
   if (!store?.id) {
     throw new Error("Store is required");
   }
 
-  const storeRecord =
-    store.merchantId && store.merchant
-      ? store
-      : await prisma.store.findUnique({
-          where: { id: store.id },
-          include: { merchant: true },
-        });
+  if (store.merchantId && store.merchant) {
+    return store;
+  }
+
+  const storeRecord = await prisma.store.findUnique({
+    where: { id: store.id },
+    include: { merchant: true },
+  });
 
   if (!storeRecord) {
     throw new Error("Store record not found");
   }
 
+  return storeRecord;
+}
+
+async function computeOrderFinancials({ store, payload }) {
   const orderDate = new Date(
     payload.processed_at ||
       payload.closed_at ||
@@ -178,142 +212,162 @@ export async function processShopifyOrder({ store, payload }) {
     netProfit,
   };
 
-  const pendingOverageRecordIds = [];
+  return {
+    orderDate,
+    currency,
+    subtotal,
+    shippingRevenue,
+    tax,
+    discount,
+    total,
+    sourceName,
+    channelKey,
+    customerCountry,
+    paymentGateway,
+    lineRecords,
+    totalUnits,
+    cogsTotal,
+    revenue,
+    variableCosts,
+    shippingTemplateCost,
+    logisticsCost,
+    shippingCost,
+    paymentFees,
+    platformFees,
+    customCosts,
+    grossProfit,
+    netProfit,
+    refunds,
+    orderPayload,
+  };
+}
 
-  try {
-    const transactionResult = await prisma.$transaction(async (tx) => {
-      const existingOrder = await tx.order.findUnique({
-        where: { shopifyOrderId: orderPayload.shopifyOrderId },
-        include: {
-          lineItems: true,
-          costs: true,
-          refunds: true,
-        },
-      });
+async function persistOrderWithTransaction({ store, metrics }) {
+  const overageRecordIds = [];
 
-      const previousSnapshot = buildSnapshotFromOrder(existingOrder);
-      if (previousSnapshot) {
-        await updateDailyMetrics(tx, previousSnapshot, {
-          direction: -1,
-          allowCreate: false,
-        });
-      }
-
-      const isNewOrder = !existingOrder;
-      if (isNewOrder && storeRecord?.merchantId) {
-        const capacityResult = await ensureOrderCapacity({
-          merchantId: storeRecord.merchantId,
-          incomingOrders: 1,
-          tx,
-          shopDomain: storeRecord.shopDomain,
-        });
-        if (capacityResult?.overageRecord?.id) {
-          pendingOverageRecordIds.push(capacityResult.overageRecord.id);
-        }
-      }
-
-      const order = await tx.order.upsert({
-        where: { shopifyOrderId: orderPayload.shopifyOrderId },
-        create: {
-          ...orderPayload,
-          lineItems: {
-            create: lineRecords,
-          },
-        },
-        update: {
-          ...orderPayload,
-          lineItems: {
-            deleteMany: {},
-            create: lineRecords,
-          },
-        },
-      });
-
-      await tx.orderCost.deleteMany({ where: { orderId: order.id } });
-      await tx.orderCost.createMany({
-        data: buildOrderCostRows({
-          orderId: order.id,
-          currency,
-          cogsTotal,
-          shippingTemplateCost,
-          logisticsCost,
-          paymentFees,
-          platformFees,
-          customCosts,
-        }),
-      });
-
-      const refundSummary = await syncRefundRecords(tx, {
-        storeId: store.id,
-        orderId: order.id,
-        shopifyOrderId: orderPayload.shopifyOrderId,
-        refunds,
-        currency,
-      });
-
-      await updateDailyMetrics(tx, {
-        storeId: store.id,
-        date: orderDate,
-        currency,
-        orderCount: 1,
-        units: totalUnits,
-        revenue,
-        cogs: cogsTotal,
-        shippingCost,
-        paymentFees,
-        platformFees,
-        customCosts,
-        netProfit,
-        grossProfit,
-        lineRecords,
-        refundAmount: refundSummary.amount,
-        refundCount: refundSummary.count,
-        refundBySku: refundSummary.bySku,
-        channel: channelKey,
-      });
-
-      await allocateAdSpendAttributions(tx, {
-        storeId: store.id,
-        merchantId: storeRecord.merchantId,
-        orderId: order.id,
-        date: orderDate,
-        revenue,
-        currency,
-      });
-
-      return {
-        revenue,
-        grossProfit,
-        netProfit,
-        cogsTotal,
-        variableCosts,
-        refunds,
-      };
+  const transactionResult = await prisma.$transaction(async (tx) => {
+    const existingOrder = await tx.order.findUnique({
+      where: { shopifyOrderId: metrics.orderPayload.shopifyOrderId },
+      include: {
+        lineItems: true,
+        costs: true,
+        refunds: true,
+      },
     });
-    for (const overageId of pendingOverageRecordIds) {
-      try {
-        await processPlanOverageCharge(overageId);
-      } catch (billingError) {
-        console.error(
-          `Failed to process overage usage record ${overageId}:`,
-          billingError,
-        );
-      }
-    }
-    return transactionResult;
-  } catch (error) {
-    if (
-      isPlanLimitError(error) &&
-      storeRecord?.merchantId &&
-      error.detail?.limit !== undefined
-    ) {
-      await notifyPlanOverage({
-        merchantId: storeRecord.merchantId,
-        limit: error.detail.limit,
-        usage: error.detail.usage ?? 0,
+
+    const previousSnapshot = buildSnapshotFromOrder(existingOrder);
+    if (previousSnapshot) {
+      await updateDailyMetrics(tx, previousSnapshot, {
+        direction: -1,
+        allowCreate: false,
       });
     }
-    throw error;
+
+    const isNewOrder = !existingOrder;
+    if (isNewOrder && store?.merchantId) {
+      const capacityResult = await ensureOrderCapacity({
+        merchantId: store.merchantId,
+        incomingOrders: 1,
+        tx,
+        shopDomain: store.shopDomain,
+      });
+      if (capacityResult?.overageRecord?.id) {
+        overageRecordIds.push(capacityResult.overageRecord.id);
+      }
+    }
+
+    const order = await tx.order.upsert({
+      where: { shopifyOrderId: metrics.orderPayload.shopifyOrderId },
+      create: {
+        ...metrics.orderPayload,
+        lineItems: {
+          create: metrics.lineRecords,
+        },
+      },
+      update: {
+        ...metrics.orderPayload,
+        lineItems: {
+          deleteMany: {},
+          create: metrics.lineRecords,
+        },
+      },
+    });
+
+    await tx.orderCost.deleteMany({ where: { orderId: order.id } });
+    await tx.orderCost.createMany({
+      data: buildOrderCostRows({
+        orderId: order.id,
+        currency: metrics.currency,
+        cogsTotal: metrics.cogsTotal,
+        shippingTemplateCost: metrics.shippingTemplateCost,
+        logisticsCost: metrics.logisticsCost,
+        paymentFees: metrics.paymentFees,
+        platformFees: metrics.platformFees,
+        customCosts: metrics.customCosts,
+      }),
+    });
+
+    const refundSummary = await syncRefundRecords(tx, {
+      storeId: store.id,
+      orderId: order.id,
+      shopifyOrderId: metrics.orderPayload.shopifyOrderId,
+      refunds: metrics.refunds,
+      currency: metrics.currency,
+    });
+
+    await updateDailyMetrics(tx, {
+      storeId: store.id,
+      date: metrics.orderDate,
+      currency: metrics.currency,
+      orderCount: 1,
+      units: metrics.totalUnits,
+      revenue: metrics.revenue,
+      cogs: metrics.cogsTotal,
+      shippingCost: metrics.shippingCost,
+      paymentFees: metrics.paymentFees,
+      platformFees: metrics.platformFees,
+      customCosts: metrics.customCosts,
+      netProfit: metrics.netProfit,
+      grossProfit: metrics.grossProfit,
+      lineRecords: metrics.lineRecords,
+      refundAmount: refundSummary.amount,
+      refundCount: refundSummary.count,
+      refundBySku: refundSummary.bySku,
+      channel: metrics.channelKey,
+    });
+
+    await allocateAdSpendAttributions(tx, {
+      storeId: store.id,
+      merchantId: store.merchantId,
+      orderId: order.id,
+      date: metrics.orderDate,
+      revenue: metrics.revenue,
+      currency: metrics.currency,
+    });
+
+    return {
+      revenue: metrics.revenue,
+      grossProfit: metrics.grossProfit,
+      netProfit: metrics.netProfit,
+      cogsTotal: metrics.cogsTotal,
+      variableCosts: metrics.variableCosts,
+      refunds: metrics.refunds,
+    };
+  });
+
+  return { transactionResult, overageRecordIds };
+}
+
+async function settlePlanOverages(overageRecordIds = []) {
+  for (const overageId of overageRecordIds) {
+    try {
+      await processPlanOverageCharge(overageId);
+    } catch (billingError) {
+      console.error(
+        `Failed to process overage usage record ${overageId}:`,
+        billingError,
+      );
+    }
   }
 }
 
@@ -395,11 +449,11 @@ function evaluateTemplates(templates, context) {
         return null;
       }
 
-    return {
-      type: template.type,
-      templateName: template.name,
-      amount,
-    };
+      return {
+        type: template.type,
+        templateName: template.name,
+        amount,
+      };
     })
     .filter(Boolean);
 }
