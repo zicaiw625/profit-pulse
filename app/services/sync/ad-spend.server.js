@@ -6,7 +6,10 @@ import { fetchGoogleAdMetrics } from "../connectors/google-ads.server";
 import { fetchTikTokAdMetrics } from "../connectors/tiktok-ads.server";
 import { fetchBingAdMetrics } from "../connectors/bing-ads.server";
 import { fetchSnapchatAdMetrics } from "../connectors/snapchat-ads.server";
-import { parseCredentialSecret } from "../credentials.server";
+import {
+  parseCredentialSecret,
+  ensureFreshAdAccessToken,
+} from "../credentials.server";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
 import { formatDateKey, startOfDay } from "../../utils/dates.server.js";
 import { getExchangeRate } from "../exchange-rates.server";
@@ -79,7 +82,12 @@ export async function syncAdProvider({ store, provider, days = 7 }) {
   });
 
   try {
-    const secret = parseCredentialSecret(credential.encryptedSecret);
+    let secret = parseCredentialSecret(credential.encryptedSecret);
+    ({ credential, secret } = await ensureFreshAdAccessToken({
+      credential,
+      secret,
+    }));
+
     const records = await CONNECTORS[provider]({
       provider,
       credential,

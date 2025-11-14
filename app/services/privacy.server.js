@@ -2,7 +2,7 @@ import pkg from "@prisma/client";
 import prisma from "../db.server";
 import { formatDateKey } from "../utils/dates.server.js";
 
-const { GdprRequestType, GdprRequestStatus } = pkg;
+const { GdprRequestType, GdprRequestStatus, StoreStatus } = pkg;
 
 function normalizeEmail(value) {
   return value?.toString().trim().toLowerCase() ?? "";
@@ -14,6 +14,7 @@ export async function queueGdprRequest({
   type,
   subjectEmail,
   requestedBy,
+  notes,
 }) {
   const normalizedEmail = normalizeEmail(subjectEmail);
   if (!merchantId || !normalizedEmail) {
@@ -31,6 +32,7 @@ export async function queueGdprRequest({
       status: GdprRequestStatus.PENDING,
       subjectEmail: normalizedEmail,
       requestedBy: requestedBy ?? null,
+      notes: notes ?? null,
     },
   });
 }
@@ -199,6 +201,79 @@ export async function processGdprRequest({ requestId, merchantId }) {
     });
     throw error;
   }
+}
+
+export async function queueCustomerPrivacyRequest({
+  shopDomain,
+  type,
+  subjectEmail,
+  requestedBy = "shopify-webhook",
+  notes,
+}) {
+  if (!shopDomain || !subjectEmail) {
+    return null;
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { shopDomain },
+    select: { id: true, merchantId: true },
+  });
+
+  if (!store) {
+    return null;
+  }
+
+  return queueGdprRequest({
+    merchantId: store.merchantId,
+    storeId: store.id,
+    type,
+    subjectEmail,
+    requestedBy,
+    notes,
+  });
+}
+
+export async function queueShopRedactionRequest({
+  shopDomain,
+  requestedBy = "shopify-webhook",
+}) {
+  if (!shopDomain) {
+    return null;
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { shopDomain },
+    select: { id: true, merchantId: true, status: true },
+  });
+
+  if (!store) {
+    return null;
+  }
+
+  const pseudoEmail = `shop@${shopDomain}`;
+
+  const request = await queueGdprRequest({
+    merchantId: store.merchantId,
+    storeId: store.id,
+    type: GdprRequestType.DELETE,
+    subjectEmail: pseudoEmail,
+    requestedBy,
+    notes: "Shopify shop redact webhook received",
+  });
+
+  await prisma.store.update({
+    where: { id: store.id },
+    data: {
+      status: StoreStatus.DISCONNECTED,
+      disconnectedAt: new Date(),
+    },
+  });
+
+  await prisma.adAccountCredential.deleteMany({ where: { storeId: store.id } });
+  await prisma.logisticsCredential.deleteMany({ where: { storeId: store.id } });
+  await prisma.syncJob.deleteMany({ where: { storeId: store.id } });
+
+  return request;
 }
 
 export async function summarizeGdprActivity({ merchantId }) {
