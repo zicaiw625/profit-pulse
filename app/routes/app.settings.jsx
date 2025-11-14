@@ -67,7 +67,6 @@ import {
 } from "../utils/formatting";
 import { upsertAttributionRule } from "../services/attribution.server";
 import { logAuditEvent } from "../services/audit.server";
-import pkg from "@prisma/client";
 import { importLogisticsRatesFromCsv } from "../services/logistics.server";
 import {
   upsertLogisticsCredential,
@@ -79,6 +78,12 @@ import { syncErpCosts } from "../services/erp-costs.server";
 import { syncInventoryAndCosts } from "../services/inventory.server";
 import { queueGdprRequest, processGdprRequest } from "../services/privacy.server";
 import { syncAccountingProvider } from "../services/accounting-sync.server";
+import {
+  CredentialProvider,
+  AttributionRuleType,
+  GdprRequestType,
+  GdprRequestStatus,
+} from "../constants/prismaEnums";
 
 const TEAM_ROLE_OPTIONS = [
   { value: "OWNER", label: "Owner" },
@@ -248,7 +253,6 @@ const REPORT_CHANNEL_OPTIONS = [
 ];
 
 const FREE_PLAN_TIER = "FREE";
-const { CredentialProvider, AttributionRuleType, GdprRequestType, GdprRequestStatus } = pkg;
 
 const NOTIFICATION_TYPE_OPTIONS = [
   { value: NOTIFICATION_CHANNEL_TYPES.SLACK, label: "Slack (Webhook)" },
