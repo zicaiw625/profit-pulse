@@ -2,6 +2,9 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { buildMetaAdsAuthorizationUrl } from "../services/oauth/meta-ads.server.js";
 import { createSignedState } from "../utils/oauth-state.server.js";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const oauthLogger = createScopedLogger({ route: "auth.meta-ads.start" });
 
 function buildSettingsRedirect({ provider, status, message }) {
   const url = new URL("/app/settings", "http://localhost");
@@ -70,7 +73,9 @@ export const action = async ({ request }) => {
       headers: { Location: authorizationUrl },
     });
   } catch (error) {
-    console.error("Failed to start Meta Ads OAuth", error);
+    oauthLogger.error("meta_ads_oauth_start_failed", {
+      error: serializeError(error),
+    });
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",

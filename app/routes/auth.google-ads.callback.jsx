@@ -7,6 +7,9 @@ import {
 } from "../services/oauth/google-ads.server.js";
 import { parseSignedState } from "../utils/oauth-state.server.js";
 import { logAuditEvent } from "../services/audit.server";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const oauthLogger = createScopedLogger({ route: "auth.google-ads.callback" });
 
 function buildSettingsRedirect({ provider, status, message }) {
   const url = new URL("/app/settings", "http://localhost");
@@ -49,7 +52,10 @@ export const loader = async ({ request }) => {
   try {
     state = parseSignedState(stateToken);
   } catch (parseError) {
-    console.error("Invalid Google Ads OAuth state", parseError);
+    oauthLogger.error("google_ads_oauth_state_invalid", {
+      error: serializeError(parseError),
+      stateToken,
+    });
     return buildSettingsRedirect({
       provider: "google-ads",
       status: "error",
@@ -132,7 +138,12 @@ export const loader = async ({ request }) => {
       message: "Google Ads 已成功授权。",
     });
   } catch (error) {
-    console.error("Google Ads OAuth callback failed", error);
+    oauthLogger.error("google_ads_oauth_callback_failed", {
+      merchantId: state?.merchantId,
+      storeId: state?.storeId,
+      accountId: state?.accountId,
+      error: serializeError(error),
+    });
     return buildSettingsRedirect({
       provider: "google-ads",
       status: "error",

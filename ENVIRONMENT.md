@@ -20,6 +20,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PROFIT_PULSE_EMAIL_ENDPOINT` | ⚠️ | HTTPS endpoint that accepts POST requests for outbound email. Required to enable scheduled email reports. |
+| `WEBHOOK_HOST_ALLOWLIST` | ⚠️ | Comma-separated list of additional webhook hosts or wildcards (e.g. `analytics.example.com,*.reports.internal`). Entries extend the built-in Slack/Teams/Zapier/Make allowlist. |
 
 ## Reporting & scheduling
 
@@ -28,6 +29,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
 | `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 | `CREDENTIAL_REFRESH_CONCURRENCY` | ⚠️ | Upper bound on parallel ad credential refreshes. Defaults to 5. |
+| `PAYOUT_SYNC_CONCURRENCY` | ⚠️ | Caps the number of simultaneous payout upserts across PayPal/Stripe/Klarna syncs. Defaults to 5 with a hard ceiling of 10. |
 
 ## Caching
 
@@ -52,6 +54,10 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | ⚠️ | Developer token for Google Ads API access. |
 | `META_ADS_APP_ID` | ⚠️ | Meta Ads application ID. |
 | `META_ADS_APP_SECRET` | ⚠️ | Meta Ads application secret. |
+| `BING_ADS_CLIENT_ID` | ⚠️ | Microsoft Advertising OAuth client ID. Enables Bing Ads spend sync. |
+| `BING_ADS_CLIENT_SECRET` | ⚠️ | Microsoft Advertising OAuth client secret. |
+| `TIKTOK_ADS_CLIENT_ID` | ⚠️ | TikTok Ads OAuth client ID for paid social spend imports. |
+| `TIKTOK_ADS_CLIENT_SECRET` | ⚠️ | TikTok Ads OAuth client secret. |
 
 ## Payment provider integrations
 
@@ -65,6 +71,8 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `KLARNA_USERNAME` | ⚠️ | Klarna API username for settlement reconciliation. |
 | `KLARNA_PASSWORD` | ⚠️ | Klarna API password. |
 | `KLARNA_API_BASE_URL` | ⚠️ | Optional override for Klarna API base (defaults to `https://api-na.klarna.com`). |
+| `ADYEN_API_KEY` | ⚠️ | Optional Adyen API key for settlements if that provider is enabled. |
+| `ADYEN_MERCHANT_ACCOUNT` | ⚠️ | Adyen merchant account identifier paired with the API key. |
 
 ## ERP & accounting integrations
 
@@ -73,6 +81,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `ERP_COST_SYNC_URL` | ⚠️ | Endpoint for syncing ERP-sourced cost adjustments. |
 | `QUICKBOOKS_SYNC_URL` | ⚠️ | Webhook or API endpoint for pushing accounting entries to QuickBooks. Enables QuickBooks toggle in settings. |
 | `XERO_SYNC_URL` | ⚠️ | Endpoint for Xero accounting sync. Enables Xero toggle in settings. |
+| `NETSUITE_SYNC_URL` | ⚠️ | Optional endpoint for NetSuite journal exports. |
 
 ## Billing & monetization
 
@@ -90,5 +99,5 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 ## Operational tips
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
-- Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` will receive payloads.
+- Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` or `WEBHOOK_HOST_ALLOWLIST` will receive payloads.
 - For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.

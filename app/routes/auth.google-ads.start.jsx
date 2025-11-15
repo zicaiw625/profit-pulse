@@ -4,6 +4,9 @@ import {
   buildGoogleAdsAuthorizationUrl,
 } from "../services/oauth/google-ads.server.js";
 import { createSignedState } from "../utils/oauth-state.server.js";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const oauthLogger = createScopedLogger({ route: "auth.google-ads.start" });
 
 function buildSettingsRedirect({ provider, status, message }) {
   const url = new URL("/app/settings", "http://localhost");
@@ -73,7 +76,9 @@ export const action = async ({ request }) => {
       headers: { Location: authorizationUrl },
     });
   } catch (error) {
-    console.error("Failed to start Google Ads OAuth", error);
+    oauthLogger.error("google_ads_oauth_start_failed", {
+      error: serializeError(error),
+    });
     return buildSettingsRedirect({
       provider: "google-ads",
       status: "error",

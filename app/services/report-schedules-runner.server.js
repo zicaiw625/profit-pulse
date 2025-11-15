@@ -7,6 +7,7 @@ import { notifyWebhook, sendSlackNotification } from "./notifications.server.js"
 import { formatCurrency, formatPercent } from "../utils/formatting.js";
 import { logger } from "../utils/logger.server.js";
 import { evaluatePerformanceAlerts } from "./alert-triggers.server.js";
+import { recordReportScheduleExecution } from "./metrics.server.js";
 
 const { ReportFrequency } = pkg;
 
@@ -24,6 +25,7 @@ function createDefaultDependencies() {
     notifyWebhook,
     sendSlackNotification,
     evaluatePerformanceAlerts,
+    recordReportScheduleExecution,
     logger: logger.child({ service: "report-schedules" }),
   };
 }
@@ -42,12 +44,32 @@ export async function runScheduledReports({ now = new Date() } = {}) {
   const schedules = await dependencies.listReportSchedules();
   const dueSchedules = schedules.filter((schedule) => isScheduleDue(schedule, now));
   for (const schedule of dueSchedules) {
+    const startedAt = Date.now();
     try {
-      await executeSchedule(schedule, now);
+      const result = await executeSchedule(schedule, now);
+      const status = result?.dispatched
+        ? "success"
+        : result?.reason ?? "delivery_failed";
+      dependencies.recordReportScheduleExecution({
+        scheduleId: schedule.id,
+        merchantId: schedule.merchantId,
+        storeId: result?.storeId,
+        channel: schedule.channel,
+        status,
+        durationMs: Date.now() - startedAt,
+      });
     } catch (error) {
       dependencies.logger.error("Failed to execute report schedule", {
         scheduleId: schedule.id,
         error: error?.message,
+      });
+      dependencies.recordReportScheduleExecution({
+        scheduleId: schedule.id,
+        merchantId: schedule.merchantId,
+        channel: schedule.channel,
+        status: "error",
+        durationMs: Date.now() - startedAt,
+        error,
       });
     }
   }
@@ -70,7 +92,7 @@ async function executeSchedule(schedule, now) {
     dependencies.logger.warn("No store found for report schedule", {
       scheduleId: schedule.id,
     });
-    return;
+    return { dispatched: false, reason: "store_missing" };
   }
 
   const overview = await dependencies.getReportingOverview({
@@ -106,6 +128,7 @@ async function executeSchedule(schedule, now) {
       scheduleId: schedule.id,
     });
   }
+  return { dispatched, storeId: store.id, reason: dispatched ? undefined : "delivery_failed" };
 }
 
 async function deliverDigest({ schedule, store, overview, subject, body }) {

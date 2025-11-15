@@ -42,6 +42,14 @@ describe('evaluateFormulaExpression', () => {
     assert.equal(empty, null);
   });
 
+  it('strips unsupported characters entirely before evaluation', () => {
+    const result = evaluateFormulaExpression('$$$ ???', {
+      netProfit: 120,
+    });
+
+    assert.equal(result, null);
+  });
+
   it('returns null for non-finite results such as division by zero', () => {
     const result = evaluateFormulaExpression('netProfit / adSpend', {
       netProfit: 100,

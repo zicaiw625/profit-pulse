@@ -5,11 +5,14 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { applySecurityHeaders } from "./utils/security.server";
-import { validateRequiredEnv } from "./utils/env.server";
+import { validateRequiredEnv } from "./utils/env.server.js";
+import { createScopedLogger, serializeError } from "./utils/logger.server.js";
 
 validateRequiredEnv();
 
 export const streamTimeout = 5000;
+
+const renderLogger = createScopedLogger({ service: "entry.server" });
 
 export default async function handleRequest(
   request,
@@ -50,7 +53,10 @@ export default async function handleRequest(
         },
         onError(error) {
           responseStatusCode = 500;
-          console.error(error);
+          renderLogger.error("react_stream_error", {
+            error: serializeError(error),
+            url: request.url,
+          });
         },
       },
     );
