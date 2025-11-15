@@ -1,15 +1,31 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
+import prisma from "../db.server.js";
+import { logger } from "../utils/logger.server.js";
 import {
   decryptSensitiveString,
   encryptSensitiveString,
-} from "../utils/security.server";
+} from "../utils/security.server.js";
 import {
   refreshGoogleAdsAccessToken,
 } from "./oauth/google-ads.server.js";
 import { extendMetaAccessToken, META_ADS_SCOPE } from "./oauth/meta-ads.server.js";
 
 const { CredentialProvider } = pkg;
+
+let credentialPrisma = prisma;
+let credentialLogger = logger.child({ service: "credentials" });
+let credentialTokenRefresher;
+
+function resolveRefreshConcurrency() {
+  const parsed = Number.parseInt(
+    process.env.CREDENTIAL_REFRESH_CONCURRENCY ?? "5",
+    10,
+  );
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 5;
+  }
+  return parsed;
+}
 
 export function parseCredentialSecret(encryptedSecret) {
   if (!encryptedSecret) {
@@ -77,18 +93,18 @@ export async function upsertAdCredential({
     expiresAt: expiresAt ?? null,
   };
 
-  const existing = await prisma.adAccountCredential.findFirst({
+  const existing = await credentialPrisma.adAccountCredential.findFirst({
     where: { storeId, provider },
   });
 
   if (existing) {
-    return prisma.adAccountCredential.update({
+    return credentialPrisma.adAccountCredential.update({
       where: { id: existing.id },
       data: payload,
     });
   }
 
-  return prisma.adAccountCredential.create({ data: payload });
+  return credentialPrisma.adAccountCredential.create({ data: payload });
 }
 
 export async function deleteAdCredential({ merchantId, storeId, provider }) {
@@ -96,7 +112,7 @@ export async function deleteAdCredential({ merchantId, storeId, provider }) {
     throw new Error("merchantId, storeId, and provider are required to remove credentials");
   }
 
-  await prisma.adAccountCredential.deleteMany({
+  await credentialPrisma.adAccountCredential.deleteMany({
     where: { merchantId, storeId, provider },
   });
 }
@@ -184,7 +200,7 @@ export async function refreshExpiringAdCredentials({ marginMinutes = 60 } = {}) 
   const marginMs = Math.max(0, Number(marginMinutes) || 0) * 60 * 1000;
   const threshold = new Date(Date.now() + marginMs);
 
-  const candidates = await prisma.adAccountCredential.findMany({
+  const candidates = await credentialPrisma.adAccountCredential.findMany({
     where: {
       provider: { in: [CredentialProvider.GOOGLE_ADS, CredentialProvider.META_ADS] },
       OR: [
@@ -194,18 +210,48 @@ export async function refreshExpiringAdCredentials({ marginMinutes = 60 } = {}) 
     },
   });
 
+  if (!candidates.length) {
+    return 0;
+  }
+
+  const concurrency = resolveRefreshConcurrency();
+  const refreshFn = credentialTokenRefresher ?? ensureFreshAdAccessToken;
+
   let refreshedCount = 0;
-  for (const credential of candidates) {
-    try {
-      await ensureFreshAdAccessToken({ credential });
-      refreshedCount += 1;
-    } catch (error) {
-      console.error(
-        `Failed to refresh ${credential.provider} credential ${credential.id}:`,
-        error,
-      );
-    }
+  for (let index = 0; index < candidates.length; index += concurrency) {
+    const batch = candidates.slice(index, index + concurrency);
+    const results = await Promise.all(
+      batch.map(async (credential) => {
+        try {
+          await refreshFn({ credential });
+          return true;
+        } catch (error) {
+          credentialLogger.error("Failed to refresh credential", {
+            credentialId: credential.id,
+            provider: credential.provider,
+            error: error instanceof Error ? error.message : error,
+          });
+          return false;
+        }
+      }),
+    );
+    refreshedCount += results.filter(Boolean).length;
   }
 
   return refreshedCount;
+}
+
+export function setCredentialServiceDependenciesForTests(overrides) {
+  if (!overrides) {
+    credentialPrisma = prisma;
+    credentialLogger = logger.child({ service: "credentials" });
+    credentialTokenRefresher = undefined;
+    return;
+  }
+
+  const { prisma: prismaOverride, logger: loggerOverride, tokenRefresher } = overrides;
+  credentialPrisma = prismaOverride ?? prisma;
+  credentialLogger =
+    loggerOverride ?? logger.child({ service: "credentials", test: true });
+  credentialTokenRefresher = tokenRefresher ?? undefined;
 }
