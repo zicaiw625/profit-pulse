@@ -60,7 +60,11 @@ export async function runScheduledReports({ now = new Date() } = {}) {
       });
     } catch (error) {
       dependencies.logger.error("Failed to execute report schedule", {
-        scheduleId: schedule.id,
+        context: {
+          scheduleId: schedule.id,
+          merchantId: schedule.merchantId,
+          channel: schedule.channel,
+        },
         error: error?.message,
       });
       dependencies.recordReportScheduleExecution({
@@ -90,7 +94,11 @@ async function executeSchedule(schedule, now) {
   });
   if (!store) {
     dependencies.logger.warn("No store found for report schedule", {
-      scheduleId: schedule.id,
+      context: {
+        scheduleId: schedule.id,
+        merchantId: schedule.merchantId,
+        channel: schedule.channel,
+      },
     });
     return { dispatched: false, reason: "store_missing" };
   }
@@ -125,7 +133,11 @@ async function executeSchedule(schedule, now) {
 
   if (!dispatched) {
     dependencies.logger.warn("Scheduled digest delivery failed", {
-      scheduleId: schedule.id,
+      context: {
+        scheduleId: schedule.id,
+        merchantId: schedule.merchantId,
+        channel: schedule.channel,
+      },
     });
   }
   return { dispatched, storeId: store.id, reason: dispatched ? undefined : "delivery_failed" };
@@ -144,7 +156,10 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
     const webhookUrl = schedule.settings?.webhookUrl;
     if (!webhookUrl) {
       dependencies.logger.warn("Webhook schedule missing URL", {
-        scheduleId: schedule.id,
+        context: {
+          scheduleId: schedule.id,
+          merchantId: schedule.merchantId,
+        },
       });
       return false;
     }

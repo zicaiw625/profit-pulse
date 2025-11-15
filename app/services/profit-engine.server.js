@@ -350,7 +350,11 @@ export async function processShopifyOrder({ store, payload }) {
         await processPlanOverageChargeImpl(overageId);
       } catch (billingError) {
         profitEngineLogger.error("plan_overage_charge_failed", {
-          overageRecordId: overageId,
+          context: {
+            overageRecordId: overageId,
+            storeId: store.id,
+            merchantId: storeRecord?.merchantId ?? initialMerchantId,
+          },
           error: serializeError(billingError),
         });
       }

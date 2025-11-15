@@ -220,7 +220,9 @@ describe('runScheduledReports', () => {
     assert.equal(warnMock.mock.callCount(), 1);
     const [message, details] = warnMock.mock.calls[0].arguments;
     assert.equal(message, 'Scheduled digest delivery failed');
-    assert.equal(details.scheduleId, schedule.id);
+    assert.equal(details.context.scheduleId, schedule.id);
+    assert.equal(details.context.merchantId, schedule.merchantId);
+    assert.equal(details.context.channel, schedule.channel);
 
     assert.equal(notifyMock.mock.callCount(), 1);
     assert.equal(updateMock.mock.callCount(), 1);

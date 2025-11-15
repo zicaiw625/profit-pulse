@@ -227,8 +227,12 @@ export async function refreshExpiringAdCredentials({ marginMinutes = 60 } = {}) 
           return true;
         } catch (error) {
           credentialLogger.error("Failed to refresh credential", {
-            credentialId: credential.id,
-            provider: credential.provider,
+            context: {
+              credentialId: credential.id,
+              provider: credential.provider,
+              merchantId: credential.merchantId,
+              storeId: credential.storeId,
+            },
             error: error instanceof Error ? error.message : error,
           });
           return false;

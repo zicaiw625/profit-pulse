@@ -111,8 +111,10 @@ function createUpstashCacheBackend({ url, token }) {
           }
         } catch (error) {
           cacheLogger.warn("Failed to read Upstash cache entry", {
-            backend: "upstash",
-            key,
+            context: {
+              backend: "upstash",
+              key,
+            },
             error: error.message,
           });
         }
@@ -124,8 +126,10 @@ function createUpstashCacheBackend({ url, token }) {
           await execute(["SET", key, serialized, "PX", String(ttl)]);
         } catch (error) {
           cacheLogger.warn("Failed to store Upstash cache entry", {
-            backend: "upstash",
-            key,
+            context: {
+              backend: "upstash",
+              key,
+            },
             error: error.message,
           });
         }
@@ -144,8 +148,10 @@ function createUpstashCacheBackend({ url, token }) {
         await execute(["DEL", key]);
       } catch (error) {
         cacheLogger.warn("Failed to clear Upstash cache entry", {
-          backend: "upstash",
-          key,
+          context: {
+            backend: "upstash",
+            key,
+          },
           error: error.message,
         });
       }

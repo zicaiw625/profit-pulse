@@ -241,9 +241,11 @@ export async function notifyWebhook({
   const normalizedUrl = url.trim();
   if (!isAllowedWebhookUrl(normalizedUrl)) {
     notificationLogger.warn("Blocked webhook URL", {
+      context: {
+        merchantId,
+        trigger: context ?? "webhook", 
+      },
       url: normalizedUrl,
-      merchantId,
-      context,
     });
     if (merchantId) {
       await auditLogger({
@@ -257,6 +259,10 @@ export async function notifyWebhook({
   const result = await postJsonWithRetry(normalizedUrl, payload ?? {});
   if (!result.ok) {
     notificationLogger.error("Failed to notify webhook", {
+      context: {
+        merchantId,
+        trigger: context ?? "webhook",
+      },
       url: normalizedUrl,
       status: result.status,
       error: result.error,

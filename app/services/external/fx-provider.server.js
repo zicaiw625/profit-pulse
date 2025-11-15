@@ -50,6 +50,9 @@ export async function fetchLatestRates(base = "USD") {
     };
   } catch (error) {
     fxLogger.error("fx_rates_fetch_failed", {
+      context: {
+        base,
+      },
       endpoint: url.toString(),
       error: serializeError(error),
     });
