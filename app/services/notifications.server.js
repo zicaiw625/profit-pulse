@@ -5,12 +5,84 @@ import { logAuditEvent } from "./audit.server.js";
 
 const WEBHOOK_TIMEOUT_MS = 5000;
 const WEBHOOK_MAX_ATTEMPTS = 3;
-const EXACT_ALLOWED_HOSTS = new Set([
-  "hooks.slack.com",
-  "hooks.zapier.com",
-  "hooks.make.com",
-]);
-const WILDCARD_HOST_SUFFIXES = ["office.com"];
+
+const BUILTIN_EXACT_HOSTS = ["hooks.slack.com", "hooks.zapier.com", "hooks.make.com"];
+const BUILTIN_SUFFIX_HOSTS = ["office.com"];
+
+const EXACT_ALLOWED_HOSTS = new Set(BUILTIN_EXACT_HOSTS);
+const WILDCARD_HOST_SUFFIXES = new Set(BUILTIN_SUFFIX_HOSTS);
+
+function resetAllowlistToDefaults() {
+  EXACT_ALLOWED_HOSTS.clear();
+  BUILTIN_EXACT_HOSTS.forEach((host) => EXACT_ALLOWED_HOSTS.add(host));
+  WILDCARD_HOST_SUFFIXES.clear();
+  BUILTIN_SUFFIX_HOSTS.forEach((host) => WILDCARD_HOST_SUFFIXES.add(host));
+}
+
+function stripTrailingDots(value) {
+  return value?.replace(/\.+$/, "") ?? "";
+}
+
+function normalizeAllowlistEntry(entry) {
+  if (!entry) return null;
+  let normalized = String(entry).trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.startsWith("https://") || normalized.startsWith("http://")) {
+    try {
+      const url = new URL(normalized);
+      normalized = url.hostname.toLowerCase();
+    } catch {
+      normalized = normalized.replace(/^https?:\/\//, "");
+    }
+  }
+
+  normalized = normalized.split("/")[0];
+  normalized = normalized.split(":")[0];
+
+  if (!normalized) return null;
+
+  if (normalized.startsWith("*.")) {
+    return { type: "suffix", value: stripTrailingDots(normalized.slice(2)) };
+  }
+  if (normalized.startsWith(".")) {
+    return { type: "suffix", value: stripTrailingDots(normalized.slice(1)) };
+  }
+  if (normalized.endsWith(".*")) {
+    return { type: "suffix", value: stripTrailingDots(normalized.slice(0, -2)) };
+  }
+  if (normalized.endsWith("*")) {
+    return { type: "suffix", value: stripTrailingDots(normalized.slice(0, -1)) };
+  }
+
+  const exact = stripTrailingDots(normalized);
+  if (!exact) {
+    return null;
+  }
+  return { type: "exact", value: exact };
+}
+
+function applyAllowlistOverrides(rawEntries) {
+  if (!rawEntries) return;
+  const entries = Array.isArray(rawEntries)
+    ? rawEntries
+    : String(rawEntries)
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+  for (const entry of entries) {
+    const normalized = normalizeAllowlistEntry(entry);
+    if (!normalized?.value) continue;
+    if (normalized.type === "suffix") {
+      WILDCARD_HOST_SUFFIXES.add(normalized.value);
+    } else {
+      EXACT_ALLOWED_HOSTS.add(normalized.value);
+    }
+  }
+}
+
+resetAllowlistToDefaults();
+applyAllowlistOverrides(process.env.WEBHOOK_HOST_ALLOWLIST);
 
 let auditLogger = logAuditEvent;
 let notificationLogger = logger.child({ service: "notifications" });
@@ -21,6 +93,16 @@ export function setNotificationAuditLoggerForTests(logger) {
 
 export function setNotificationLoggerForTests(testLogger) {
   notificationLogger = testLogger || logger.child({ service: "notifications", test: true });
+}
+
+export function setWebhookAllowlistForTests(entries) {
+  resetAllowlistToDefaults();
+  applyAllowlistOverrides(entries);
+}
+
+export function resetWebhookAllowlistForTests() {
+  resetAllowlistToDefaults();
+  applyAllowlistOverrides(process.env.WEBHOOK_HOST_ALLOWLIST);
 }
 
 export async function listNotificationChannels(merchantId, type) {
@@ -50,7 +132,7 @@ export async function createNotificationChannel({
   const normalizedUrl = webhookUrl.trim();
   if (!isAllowedWebhookUrl(normalizedUrl)) {
     throw new Error(
-      "Webhook URL 必须为 https 并指向经过允许的 Slack/Teams/Zapier/Make 域名。",
+      "Webhook URL 必须为 https 并指向经过允许的 Slack/Teams/Zapier/Make 域名或 `WEBHOOK_HOST_ALLOWLIST` 中配置的域名。",
     );
   }
   return prisma.notificationChannel.create({
@@ -197,9 +279,12 @@ export function isAllowedWebhookUrl(url) {
   if (EXACT_ALLOWED_HOSTS.has(host)) {
     return true;
   }
-  return WILDCARD_HOST_SUFFIXES.some(
-    (suffix) => host === suffix || host.endsWith(`.${suffix}`),
-  );
+  for (const suffix of WILDCARD_HOST_SUFFIXES) {
+    if (host === suffix || host.endsWith(`.${suffix}`)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function shouldRetryStatus(status) {
