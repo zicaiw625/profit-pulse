@@ -61,7 +61,7 @@ The development server relies on the Shopify CLI tunnel. Press `p` in the CLI ou
 
 ## Testing
 
-Domain-heavy modules (profit engine, plan limits, reporting) are designed for integration testing. Add tests under `app/tests` and run them with:
+Domain-heavy modules (profit engine, plan limits, reporting) are designed for integration testing. Add tests under `tests/` and run them with:
 
 ```bash
 npm test
