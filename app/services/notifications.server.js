@@ -137,9 +137,29 @@ function buildPayload(channel, text, customPayload) {
   return { text };
 }
 
-export async function notifyWebhook({ url, payload }) {
+export async function notifyWebhook({
+  url,
+  payload,
+  merchantId,
+  context,
+}) {
   if (!url) return false;
   const normalizedUrl = url.trim();
+  if (!isAllowedWebhookUrl(normalizedUrl)) {
+    console.warn("Blocked webhook URL", {
+      url: normalizedUrl,
+      merchantId,
+      context,
+    });
+    if (merchantId) {
+      await logAuditEvent({
+        merchantId,
+        action: "notification.webhook_blocked",
+        details: `Blocked webhook dispatch to ${normalizedUrl} (${context ?? "unspecified"})`,
+      });
+    }
+    return false;
+  }
   const result = await postJsonWithRetry(normalizedUrl, payload ?? {});
   if (!result.ok) {
     console.error("Failed to notify webhook", {
@@ -151,7 +171,7 @@ export async function notifyWebhook({ url, payload }) {
   return result.ok;
 }
 
-function isAllowedWebhookUrl(url) {
+export function isAllowedWebhookUrl(url) {
   let parsed;
   try {
     parsed = new URL(url);
