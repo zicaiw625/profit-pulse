@@ -1,5 +1,5 @@
-import prisma from "../db.server";
-import { fetchLatestRates } from "./external/fx-provider.server";
+import prisma from "../db.server.js";
+import { fetchLatestRates } from "./external/fx-provider.server.js";
 
 export async function refreshExchangeRates(base = "USD") {
   const data = await fetchLatestRates(base);
