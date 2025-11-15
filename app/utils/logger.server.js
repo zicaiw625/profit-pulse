@@ -6,6 +6,38 @@ const SENSITIVE_PARAM_KEYWORDS = [
   "password",
   "code",
 ];
+const SENSITIVE_META_KEYWORDS = [
+  "access_token",
+  "refresh_token",
+  "token",
+  "secret",
+  "password",
+  "authorization",
+  "cookie",
+  "credential",
+  "api_key",
+  "client_secret",
+];
+const BODY_KEY_MATCHERS = ["body", "payload", "raw", "response_body", "responsebody"];
+
+function redactScalar(value, hint = "value") {
+  if (value == null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return `[REDACTED_${hint.toUpperCase()}:${Math.min(value.length, 256)}]`;
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(value)) {
+    return `[REDACTED_${hint.toUpperCase()}:buffer:${value.length}]`;
+  }
+  if (Array.isArray(value)) {
+    return value.map(() => `[REDACTED_${hint.toUpperCase()}]`);
+  }
+  if (typeof value === "object") {
+    return { redacted: true, type: hint };
+  }
+  return `[REDACTED_${hint.toUpperCase()}]`;
+}
 
 function redactUrl(value) {
   if (typeof value !== "string" || value.length === 0) {
@@ -36,16 +68,26 @@ function sanitizeMeta(meta) {
   if (meta == null) {
     return meta;
   }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer?.(meta)) {
+    return redactScalar(meta, "binary");
+  }
   if (Array.isArray(meta)) {
     return meta.map((item) => sanitizeMeta(item));
   }
   if (typeof meta === "object") {
     const result = {};
     for (const [key, value] of Object.entries(meta)) {
-      if (typeof value === "string" && key.toLowerCase().includes("url")) {
+      const lowerKey = key.toLowerCase();
+      if (typeof value === "string" && lowerKey.includes("url")) {
         result[key] = redactUrl(value);
-      } else if (typeof value === "string" && key.toLowerCase().includes("authorization")) {
+      } else if (
+        SENSITIVE_META_KEYWORDS.some((keyword) => lowerKey.includes(keyword))
+      ) {
+        result[key] = redactScalar(value, "secret");
+      } else if (typeof value === "string" && lowerKey.includes("authorization")) {
         result[key] = "[REDACTED]";
+      } else if (BODY_KEY_MATCHERS.some((matcher) => lowerKey.includes(matcher))) {
+        result[key] = redactScalar(value, "body");
       } else {
         result[key] = sanitizeMeta(value);
       }
@@ -97,4 +139,27 @@ function createLogger(scope = {}) {
 export const logger = createLogger();
 export function createScopedLogger(scope) {
   return createLogger(scope);
+}
+
+export function serializeError(error) {
+  if (error instanceof Error) {
+    const serialized = {
+      name: error.name,
+      message: error.message,
+    };
+    if (error.stack) {
+      serialized.stack = error.stack;
+    }
+    if (error.cause) {
+      serialized.cause = serializeError(error.cause);
+    }
+    return serialized;
+  }
+  if (error == null) {
+    return { message: String(error) };
+  }
+  if (typeof error === "object") {
+    return sanitizeMeta(error);
+  }
+  return { message: String(error) };
 }

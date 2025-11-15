@@ -41,7 +41,7 @@ npm install
 
 Copy `.env.example` to `.env` and populate the required fields. Profit Pulse validates mandatory variables on boot to avoid silent misconfiguration.
 
-Refer to [docs/environment.md](docs/environment.md) for a complete list of required and optional variables, grouped by integration.
+Refer to [ENVIRONMENT.md](ENVIRONMENT.md) for a complete list of required and optional variables, grouped by integration.
 
 ### Database migrations
 
