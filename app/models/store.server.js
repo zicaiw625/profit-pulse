@@ -1,11 +1,11 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
-import { PLAN_DEFINITIONS } from "../config/billing";
-import { PlanLimitError } from "../errors/plan-limit-error";
+import prisma from "../db.server.js";
+import { PLAN_DEFINITIONS } from "../config/billing.js";
+import { PlanLimitError } from "../errors/plan-limit-error.js";
 import {
   processPlanOverageCharge,
   schedulePlanOverageRecord,
-} from "../services/overages.server";
+} from "../services/overages.server.js";
 
 const { PlanTier, Prisma } = pkg;
 const defaultPlan = PLAN_DEFINITIONS.FREE;
@@ -147,12 +147,12 @@ function resolvePlanDefinition(planTier) {
   );
 }
 
-function isUniqueConstraintError(error) {
+export function isUniqueConstraintError(error) {
   if (!error) return false;
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return error.code === "P2002";
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
   }
-  return false;
+  return error.code === "P2002";
 }
 
 async function findExistingStoreWithRetry(shopDomain, attempts = 5) {
