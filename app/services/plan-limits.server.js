@@ -2,6 +2,11 @@ import prisma from "../db.server.js";
 import { getPlanDefinitionByTier } from "./billing.server.js";
 import { PlanLimitError } from "../errors/plan-limit-error.js";
 import { schedulePlanOverageRecord } from "./overages.server.js";
+import {
+  getMonthKey,
+  startOfMonth,
+  startOfNextMonth,
+} from "../utils/dates.server.js";
 
 const DEFAULT_ALLOWANCES = {
   stores: 1,
@@ -20,7 +25,7 @@ export function setPlanOverageSchedulerForTests(fn) {
   schedulePlanOverageRecordImpl = fn ?? schedulePlanOverageRecord;
 }
 
-export async function getPlanUsage({ merchantId }) {
+export async function getPlanUsage({ merchantId, referenceDate } = {}) {
   if (!merchantId) {
     throw new Error("merchantId is required to calculate plan usage");
   }
@@ -29,10 +34,20 @@ export async function getPlanUsage({ merchantId }) {
     merchantId,
   );
   const allowances = planDefinition?.allowances ?? DEFAULT_ALLOWANCES;
-  const { year, month } = getCurrentMonthKey();
+  const monthContext = await getCurrentMonthContext({
+    merchantId,
+    db: planLimitsPrisma,
+    referenceDate,
+  });
+  const { year, month } = monthContext;
   const monthlyOrderCount =
     (await getMonthlyOrderUsage(merchantId, year, month, planLimitsPrisma)) ??
-    (await countOrdersForCurrentMonth(merchantId, planLimitsPrisma));
+    (await countOrdersForMonthRange(
+      merchantId,
+      monthContext.monthStart,
+      monthContext.monthEnd,
+      planLimitsPrisma,
+    ));
 
   const [storeCount, adAccountCount] = await Promise.all([
     planLimitsPrisma.store.count({ where: { merchantId } }),
@@ -64,11 +79,18 @@ export async function ensureOrderCapacity({
   const { limit, planDefinition } = await getPlanLimitInfo(merchantId, db);
   if (!limit) return { overageRecord: null };
 
+  const monthContext = await getCurrentMonthContext({ merchantId, db });
+  const { year, month } = monthContext;
+
   if (!tx) {
-    const { year, month } = getCurrentMonthKey();
     const currentOrders =
       (await getMonthlyOrderUsage(merchantId, year, month, db)) ??
-      (await countOrdersForCurrentMonth(merchantId, db));
+      (await countOrdersForMonthRange(
+        merchantId,
+        monthContext.monthStart,
+        monthContext.monthEnd,
+        db,
+      ));
     const nextOrders = currentOrders + incomingOrders;
     if (nextOrders > limit) {
       const overageConfig = planDefinition?.overages?.orders ?? null;
@@ -104,7 +126,6 @@ export async function ensureOrderCapacity({
     return { overageRecord: null };
   }
 
-  const { year, month } = getCurrentMonthKey();
   await tx.$executeRaw`
     INSERT INTO "monthly_order_usage"("merchantId", "year", "month", "orders")
     VALUES (${merchantId}, ${year}, ${month}, 0)
@@ -174,11 +195,12 @@ function buildUsage(count, limit) {
   };
 }
 
-async function countOrdersForCurrentMonth(merchantId, db = planLimitsPrisma) {
-  const now = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-
+async function countOrdersForMonthRange(
+  merchantId,
+  monthStart,
+  monthEnd,
+  db = planLimitsPrisma,
+) {
   return db.order.count({
     where: {
       store: {
@@ -215,12 +237,24 @@ async function getPlanLimitInfo(merchantId, db = planLimitsPrisma) {
   return { subscription, planDefinition, limit };
 }
 
-function getCurrentMonthKey() {
-  const now = new Date();
-  return {
-    year: now.getUTCFullYear(),
-    month: now.getUTCMonth() + 1,
-  };
+async function getCurrentMonthContext({
+  merchantId,
+  db = planLimitsPrisma,
+  referenceDate = new Date(),
+}) {
+  const timezone = await resolveMerchantTimezone(merchantId, db);
+  const monthStart = startOfMonth(referenceDate, { timezone });
+  const monthEnd = startOfNextMonth(referenceDate, { timezone });
+  const { year, month } = getMonthKey(referenceDate, { timezone });
+  return { year, month, timezone, monthStart, monthEnd };
+}
+
+async function resolveMerchantTimezone(merchantId, db = planLimitsPrisma) {
+  const merchant = await db.merchantAccount.findUnique({
+    where: { id: merchantId },
+    select: { primaryTimezone: true },
+  });
+  return merchant?.primaryTimezone ?? "UTC";
 }
 
 function calculateUnitsRequired({ overLimit, blockSize }) {

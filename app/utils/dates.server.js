@@ -65,6 +65,50 @@ export function formatDateKey(value, options) {
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
 }
 
+export function startOfMonth(value, options) {
+  const timezone = resolveTimezone(options);
+  const date = coerceDate(value);
+  const parts = getZonedDateParts(date, timezone);
+  return buildZonedDate(
+    {
+      year: parts.year,
+      month: parts.month,
+      day: 1,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      millisecond: 0,
+    },
+    timezone,
+  );
+}
+
+export function startOfNextMonth(value, options) {
+  const timezone = resolveTimezone(options);
+  const date = coerceDate(value);
+  const parts = getZonedDateParts(date, timezone);
+  const { year, month } = incrementMonth(parts.year, parts.month);
+  return buildZonedDate(
+    {
+      year,
+      month,
+      day: 1,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      millisecond: 0,
+    },
+    timezone,
+  );
+}
+
+export function getMonthKey(value, options) {
+  const timezone = resolveTimezone(options);
+  const date = coerceDate(value);
+  const parts = getZonedDateParts(date, timezone);
+  return { year: parts.year, month: parts.month };
+}
+
 function coerceDate(value) {
   if (value instanceof Date) {
     return new Date(value.getTime());
@@ -215,6 +259,13 @@ function getFormatter(timezone) {
   }
   FORMATTER_CACHE.set(timezone, formatter);
   return formatter;
+}
+
+function incrementMonth(year, month) {
+  if (month >= 12) {
+    return { year: year + 1, month: 1 };
+  }
+  return { year, month: month + 1 };
 }
 
 function normalizeTimezone(value) {

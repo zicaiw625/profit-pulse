@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { PlanTier } from '@prisma/client';
 
 import {
+  getPlanUsage,
   ensureOrderCapacity,
   setPlanLimitsPrismaForTests,
   setPlanOverageSchedulerForTests,
@@ -18,6 +19,9 @@ const basePrismaMock = {
   subscription: {
     findUnique: async () => null,
   },
+  merchantAccount: {
+    findUnique: async () => ({ primaryTimezone: 'UTC' }),
+  },
   store: { count: noopCount },
   adAccountCredential: { count: noopCount },
   monthlyOrderUsage: {
@@ -32,6 +36,7 @@ describe('ensureOrderCapacity', () => {
   afterEach(() => {
     setPlanLimitsPrismaForTests();
     setPlanOverageSchedulerForTests();
+    mock.restoreAll();
   });
 
   it('schedules an overage record when non-transactional usage exceeds the limit', async () => {
@@ -127,6 +132,9 @@ describe('ensureOrderCapacity', () => {
       monthlyOrderUsage: {
         update: updateMock,
       },
+      merchantAccount: {
+        findUnique: async () => ({ primaryTimezone: 'UTC' }),
+      },
     };
 
     const result = await ensureOrderCapacity({
@@ -202,6 +210,45 @@ describe('ensureOrderCapacity', () => {
 
     assert.equal(result.overageRecord, null);
     assert.equal(scheduleMock.mock.callCount(), 0);
+  });
+
+  it('uses the merchant timezone when determining the monthly window', async () => {
+    const now = new Date('2024-03-01T07:30:00.000Z');
+    const monthlyUsageMock = mock.fn(async () => null);
+    const orderCountMock = mock.fn(async () => 12);
+
+    const prismaMock = {
+      ...basePrismaMock,
+      subscription: {
+        findUnique: async () => ({
+          plan: PlanTier.BASIC,
+          orderLimit: 1000,
+        }),
+      },
+      merchantAccount: {
+        findUnique: async () => ({ primaryTimezone: 'America/Los_Angeles' }),
+      },
+      monthlyOrderUsage: {
+        findUnique: monthlyUsageMock,
+      },
+      order: {
+        count: orderCountMock,
+      },
+    };
+
+    setPlanLimitsPrismaForTests(prismaMock);
+
+    await getPlanUsage({ merchantId: 'merchant-tz', referenceDate: now });
+
+    assert.equal(monthlyUsageMock.mock.callCount(), 1);
+    const [{ where: monthlyWhere }] = monthlyUsageMock.mock.calls[0].arguments;
+    assert.equal(monthlyWhere.merchantId_year_month.month, 2);
+    assert.equal(monthlyWhere.merchantId_year_month.year, 2024);
+
+    assert.equal(orderCountMock.mock.callCount(), 1);
+    const [countArgs] = orderCountMock.mock.calls[0].arguments;
+    assert.equal(countArgs.where.processedAt.gte.toISOString(), '2024-02-01T08:00:00.000Z');
+    assert.equal(countArgs.where.processedAt.lt.toISOString(), '2024-03-01T08:00:00.000Z');
   });
 });
 
