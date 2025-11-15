@@ -13,6 +13,14 @@ import {
 } from "./cache.server.js";
 import { evaluateFormulaExpression as defaultEvaluateFormulaExpression } from "./report-formulas.server.js";
 
+/**
+ * NOTE: `evaluateFormulaExpression` only accepts identifiers comprised of
+ * letters/numbers/underscores alongside the arithmetic operators `+`, `-`,
+ * `*`, `/`, parentheses, and whitespace. Do not loosen those constraints or
+ * attempt to execute arbitrary JavaScript—if requirements grow beyond this
+ * grammar, replace the evaluator with a purpose-built parser instead.
+ */
+
 const defaultDependencies = {
   prismaClient: defaultPrisma,
   getFixedCostBreakdown: defaultGetFixedCostBreakdown,

@@ -1,8 +1,10 @@
 import pkg from "@prisma/client";
 import { authenticate } from "../shopify.server";
 import { queueCustomerPrivacyRequest } from "../services/privacy.server";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const { GdprRequestType } = pkg;
+const webhookLogger = createScopedLogger({ route: "webhooks.customers.data_request" });
 
 function extractCustomerEmail(payload) {
   if (!payload) return null;
@@ -16,12 +18,12 @@ function extractCustomerEmail(payload) {
 
 export const action = async ({ request }) => {
   const { shop, payload, topic } = await authenticate.webhook(request);
-  console.log(`Received ${topic} webhook for ${shop}`);
+  webhookLogger.info("webhook_received", { topic, shop });
 
   try {
     const email = extractCustomerEmail(payload);
     if (!email) {
-      console.warn("GDPR data request webhook missing customer email");
+      webhookLogger.warn("gdpr_request_missing_email", { shop, topic });
       return new Response();
     }
 
@@ -32,7 +34,11 @@ export const action = async ({ request }) => {
       notes: "Queued from Shopify customers/data_request webhook",
     });
   } catch (error) {
-    console.error("Failed to enqueue GDPR data request", error);
+    webhookLogger.error("gdpr_data_request_enqueue_failed", {
+      shop,
+      topic,
+      error: serializeError(error),
+    });
   }
 
   return new Response();

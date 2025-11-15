@@ -80,7 +80,7 @@ test("refreshExpiringAdCredentials refreshes eligible credentials and logs failu
   assert.equal(refreshed, 2);
   assert.deepEqual(refreshCalls, ["cred-1", "cred-2", "cred-3"]);
   assert.equal(logs.length, 1);
-  assert.equal(logs[0].meta.credentialId, "cred-2");
+  assert.equal(logs[0].meta.context.credentialId, "cred-2");
   assert.ok(capturedFindManyArgs.length >= 1);
   assert.ok(capturedFindManyArgs[0].where.provider.in.includes("GOOGLE_ADS"));
   assert.ok(capturedFindManyArgs[0].where.provider.in.includes("META_ADS"));

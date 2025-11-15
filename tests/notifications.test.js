@@ -4,8 +4,10 @@ import assert from 'node:assert/strict';
 import {
   isAllowedWebhookUrl,
   notifyWebhook,
+  resetWebhookAllowlistForTests,
   setNotificationAuditLoggerForTests,
   setNotificationLoggerForTests,
+  setWebhookAllowlistForTests,
 } from '../app/services/notifications.server.js';
 
 describe('isAllowedWebhookUrl', () => {
@@ -28,6 +30,26 @@ describe('isAllowedWebhookUrl', () => {
     assert.equal(isAllowedWebhookUrl('http://hooks.slack.com/services/foo'), false);
     assert.equal(isAllowedWebhookUrl('https://example.com/webhook'), false);
     assert.equal(isAllowedWebhookUrl('not-a-url'), false);
+  });
+
+  it('respects custom allowlist entries for exact and wildcard hosts', () => {
+    setWebhookAllowlistForTests(['analytics.example.com', '*.reports.internal']);
+    try {
+      assert.equal(
+        isAllowedWebhookUrl('https://analytics.example.com/hook'),
+        true,
+      );
+      assert.equal(
+        isAllowedWebhookUrl('https://billing.reports.internal/path'),
+        true,
+      );
+      assert.equal(
+        isAllowedWebhookUrl('https://unauthorized.example.net'),
+        false,
+      );
+    } finally {
+      resetWebhookAllowlistForTests();
+    }
   });
 });
 
