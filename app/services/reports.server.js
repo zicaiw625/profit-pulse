@@ -1,14 +1,40 @@
-import prisma from "../db.server.js";
-import { getFixedCostBreakdown } from "./fixed-costs.server.js";
-import { getExchangeRate } from "./exchange-rates.server.js";
+import defaultPrisma from "../db.server.js";
+import { getFixedCostBreakdown as defaultGetFixedCostBreakdown } from "./fixed-costs.server.js";
+import { getExchangeRate as defaultGetExchangeRate } from "./exchange-rates.server.js";
 import {
   startOfDay,
   shiftDays,
   resolveTimezone,
   formatDateKey,
 } from "../utils/dates.server.js";
-import { buildCacheKey, memoizeAsync } from "./cache.server.js";
-import { evaluateFormulaExpression } from "./report-formulas.server.js";
+import {
+  buildCacheKey as defaultBuildCacheKey,
+  memoizeAsync as defaultMemoizeAsync,
+} from "./cache.server.js";
+import { evaluateFormulaExpression as defaultEvaluateFormulaExpression } from "./report-formulas.server.js";
+
+const defaultDependencies = {
+  prismaClient: defaultPrisma,
+  getFixedCostBreakdown: defaultGetFixedCostBreakdown,
+  getExchangeRate: defaultGetExchangeRate,
+  memoizeAsync: defaultMemoizeAsync,
+  buildCacheKey: defaultBuildCacheKey,
+  evaluateFormulaExpression: defaultEvaluateFormulaExpression,
+};
+
+let reportServiceDependencies = { ...defaultDependencies };
+
+export function setReportServiceDependenciesForTests(overrides = {}) {
+  reportServiceDependencies = { ...reportServiceDependencies, ...overrides };
+}
+
+export function resetReportServiceDependenciesForTests() {
+  reportServiceDependencies = { ...defaultDependencies };
+}
+
+function getReportServiceDependencies() {
+  return reportServiceDependencies;
+}
 
 const DEFAULT_RANGE_DAYS = 30;
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -83,12 +109,14 @@ export async function getReportingOverview({
     rangeEnd,
     timezone: context.timezone,
   });
-  const cacheKey = buildCacheKey(
+  const { memoizeAsync: memoizeAsyncImpl, buildCacheKey: buildCacheKeyImpl } =
+    getReportServiceDependencies();
+  const cacheKey = buildCacheKeyImpl(
     "reporting-overview",
     storeId,
     `${context.timezone}|${start.toISOString()}|${end.toISOString()}`,
   );
-  return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
+  return memoizeAsyncImpl(cacheKey, CACHE_TTL_MS, () =>
     buildReportingOverview({
       storeId,
       rangeDays: resolvedDays,
@@ -113,6 +141,12 @@ export async function getCustomReportData({
     throw new Error("storeId is required for custom reports");
   }
 
+  const {
+    prismaClient,
+    getExchangeRate: getExchangeRateImpl,
+    evaluateFormulaExpression: evaluateFormulaExpressionImpl,
+  } = getReportServiceDependencies();
+
   const normalizedDimension = DIMENSION_DEFINITIONS[dimension]
     ? dimension
     : "channel";
@@ -127,7 +161,7 @@ export async function getCustomReportData({
     : shiftDays(rangeEnd, -Math.max(rangeDays, 1) + 1, { timezone });
 
   const { storeCurrency, masterCurrency } = context;
-  const conversionRate = await getExchangeRate({
+  const conversionRate = await getExchangeRateImpl({
     base: storeCurrency,
     quote: masterCurrency,
   });
@@ -181,7 +215,7 @@ export async function getCustomReportData({
 
     const firstMetricField =
       METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
-    const groupedRows = await prisma.dailyMetric.groupBy({
+    const groupedRows = await prismaClient.dailyMetric.groupBy({
       by: [dimensionDef.field],
       where: whereClause,
       _sum: sumSelect,
@@ -228,7 +262,10 @@ export async function getCustomReportData({
         acc[metric.key] = metric.value;
         return acc;
       }, {});
-      const computed = evaluateFormulaExpression(customFormula.expression, valueMap);
+      const computed = evaluateFormulaExpressionImpl(
+        customFormula.expression,
+        valueMap,
+      );
       if (computed === null) {
         return row;
       }
@@ -290,7 +327,9 @@ async function buildOrderDimensionRows({
   masterCurrency,
   limit = 25,
 }) {
-  const orders = await prisma.order.findMany({
+  const { prismaClient } = getReportServiceDependencies();
+
+  const orders = await prismaClient.order.findMany({
     where: {
       storeId,
       processedAt: { gte: rangeStart, lte: rangeEnd },
@@ -314,7 +353,7 @@ async function buildOrderDimensionRows({
 
   const orderIds = orders.map((order) => order.id);
   const [costs, refunds, attributions] = await Promise.all([
-    prisma.orderCost.findMany({
+    prismaClient.orderCost.findMany({
       where: { orderId: { in: orderIds } },
       select: {
         orderId: true,
@@ -323,7 +362,7 @@ async function buildOrderDimensionRows({
         type: true,
       },
     }),
-    prisma.refundRecord.findMany({
+    prismaClient.refundRecord.findMany({
       where: { orderId: { in: orderIds } },
       select: {
         orderId: true,
@@ -331,7 +370,7 @@ async function buildOrderDimensionRows({
         currency: true,
       },
     }),
-    prisma.orderAttribution.findMany({
+    prismaClient.orderAttribution.findMany({
       where: { orderId: { in: orderIds } },
       select: {
         orderId: true,
@@ -460,6 +499,7 @@ async function buildOrderDimensionRows({
 }
 
 async function buildRateCache(currencies, masterCurrency) {
+  const { getExchangeRate: getExchangeRateImpl } = getReportServiceDependencies();
   const cache = new Map();
   for (const currency of currencies) {
     if (!currency || cache.has(currency)) {
@@ -469,7 +509,7 @@ async function buildRateCache(currencies, masterCurrency) {
       cache.set(currency, 1);
       continue;
     }
-    const rate = await getExchangeRate({
+    const rate = await getExchangeRateImpl({
       base: currency,
       quote: masterCurrency,
     });
@@ -576,6 +616,7 @@ function buildCustomerFilter(identifier) {
 }
 
 async function ensureRateCache(cache, currencies, masterCurrency) {
+  const { getExchangeRate: getExchangeRateImpl } = getReportServiceDependencies();
   const missing = Array.from(currencies).filter(
     (currency) => currency && !cache.has(currency),
   );
@@ -584,7 +625,7 @@ async function ensureRateCache(cache, currencies, masterCurrency) {
       cache.set(currency, 1);
       continue;
     }
-    const rate = await getExchangeRate({ base: currency, quote: masterCurrency });
+    const rate = await getExchangeRateImpl({ base: currency, quote: masterCurrency });
     cache.set(currency, rate || 1);
   }
   if (!cache.has(masterCurrency)) {
@@ -599,6 +640,8 @@ async function populateCustomerLifetimeMetrics({
   rateCache,
 }) {
   if (!bucketMap?.size) return;
+
+  const { prismaClient } = getReportServiceDependencies();
 
   const identifiers = Array.from(bucketMap.values())
     .map((bucket) => bucket.identifier)
@@ -624,7 +667,7 @@ async function populateCustomerLifetimeMetrics({
     return;
   }
 
-  const lifetimeOrders = await prisma.order.findMany({
+  const lifetimeOrders = await prismaClient.order.findMany({
     where: {
       storeId,
       OR: orFilters,
@@ -669,9 +712,14 @@ async function populateCustomerLifetimeMetrics({
 
 async function buildReportingOverview({ storeId, rangeDays, range, context }) {
   const { store, storeCurrency, masterCurrency, timezone } = context;
+  const {
+    prismaClient,
+    getExchangeRate: getExchangeRateImpl,
+    getFixedCostBreakdown: getFixedCostBreakdownImpl,
+  } = getReportServiceDependencies();
   const [channelRows, productRows, aggregateMetrics] =
     await Promise.all([
-      prisma.dailyMetric.groupBy({
+      prismaClient.dailyMetric.groupBy({
         by: ["channel"],
         where: {
           storeId,
@@ -685,7 +733,7 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
           orders: true,
         },
       }),
-      prisma.dailyMetric.groupBy({
+      prismaClient.dailyMetric.groupBy({
         by: ["productSku"],
         where: {
           storeId,
@@ -709,7 +757,7 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
         },
         take: 15,
       }),
-      prisma.dailyMetric.aggregate({
+      prismaClient.dailyMetric.aggregate({
         where: { storeId, date: { gte: range.start, lte: range.end } },
         _sum: {
           revenue: true,
@@ -725,7 +773,7 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
       }),
     ]);
 
-  const conversionRate = await getExchangeRate({
+  const conversionRate = await getExchangeRateImpl({
     base: storeCurrency,
     quote: masterCurrency,
   });
@@ -738,7 +786,7 @@ async function buildReportingOverview({ storeId, rangeDays, range, context }) {
     return acc;
   }, {});
   const fixedCostStore = store?.merchantId
-    ? await getFixedCostBreakdown({
+    ? await getFixedCostBreakdownImpl({
         merchantId: store.merchantId,
         rangeDays,
         rangeStart: range.start,
@@ -871,18 +919,20 @@ export async function getNetProfitVsSpendSeries({
 
   const context = await loadStoreContext(storeId);
   const { timezone, storeCurrency, masterCurrency } = context;
+  const { prismaClient, getExchangeRate: getExchangeRateImpl } =
+    getReportServiceDependencies();
   const { start, end, resolvedDays } = resolveRange({
     rangeDays,
     rangeStart,
     rangeEnd,
     timezone,
   });
-  const conversionRate = await getExchangeRate({
+  const conversionRate = await getExchangeRateImpl({
     base: storeCurrency,
     quote: masterCurrency,
   });
 
-  const rows = await prisma.dailyMetric.findMany({
+  const rows = await prismaClient.dailyMetric.findMany({
     where: {
       storeId,
       channel: "TOTAL",
@@ -937,6 +987,8 @@ export async function getAdPerformanceBreakdown({
 
   const context = await loadStoreContext(storeId);
   const { timezone, storeCurrency, masterCurrency, store } = context;
+  const { prismaClient, getExchangeRate: getExchangeRateImpl } =
+    getReportServiceDependencies();
   const { start, end } = resolveRange({
     rangeDays,
     rangeStart,
@@ -945,13 +997,13 @@ export async function getAdPerformanceBreakdown({
   });
 
   const [adSpendRows, channelMetrics] = await Promise.all([
-    prisma.adSpendRecord.findMany({
+    prismaClient.adSpendRecord.findMany({
       where: {
         storeId,
         date: { gte: start, lte: end },
       },
     }),
-    prisma.dailyMetric.findMany({
+    prismaClient.dailyMetric.findMany({
       where: {
         storeId,
         channel: { in: ["META_ADS", "GOOGLE_ADS"] },
@@ -961,7 +1013,7 @@ export async function getAdPerformanceBreakdown({
     }),
   ]);
 
-  const conversionRate = await getExchangeRate({
+  const conversionRate = await getExchangeRateImpl({
     base: storeCurrency,
     quote: masterCurrency,
   });
@@ -1109,7 +1161,8 @@ function resolveRange({
 }
 
 async function loadStoreContext(storeId) {
-  const store = await prisma.store.findUnique({
+  const { prismaClient } = getReportServiceDependencies();
+  const store = await prismaClient.store.findUnique({
     where: { id: storeId },
     include: { merchant: true },
   });
