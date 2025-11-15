@@ -5,6 +5,7 @@ import { mapWithConcurrency } from "../../utils/concurrency.server.js";
 import { fetchPaypalPayouts } from "../payments/paypal.server.js";
 import { fetchStripePayouts } from "../payments/stripe.server.js";
 import { fetchKlarnaPayouts } from "../payments/klarna.server.js";
+import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
 
 const { CredentialProvider, SyncJobType } = pkg;
 
@@ -37,6 +38,8 @@ const defaultDependencies = {
 
 let paymentSyncDependencies = { ...defaultDependencies };
 let shopifyModulePromise;
+
+const payoutLogger = createScopedLogger({ service: "payment-payouts" });
 
 export function setPaymentSyncDependenciesForTests(overrides = {}) {
   paymentSyncDependencies = { ...paymentSyncDependencies, ...overrides };
@@ -81,15 +84,20 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
   const { startSyncJob: startJob, finishSyncJob: finishJob, failSyncJob: failJob } =
     getPaymentSyncDependencies();
 
+  const provider = CredentialProvider.SHOPIFY_PAYMENTS;
   const shopifyApi = await loadShopifyApi();
   const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider: CredentialProvider.SHOPIFY_PAYMENTS,
+    provider,
     metadata: { days },
   });
 
   try {
+    payoutLogger.info("payments.sync.started", {
+      context: { provider, storeId: store.id },
+      days,
+    });
     const restClient = new shopifyApi.api.clients.Rest({ session });
     const payouts = await collectPayouts({ restClient, days });
 
@@ -116,8 +124,19 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
       processedCount: payouts.length,
     });
 
+    payoutLogger.info("payments.sync.completed", {
+      context: { provider, storeId: store.id },
+      days,
+      processed: payouts.length,
+    });
+
     return { processed: payouts.length };
   } catch (error) {
+    payoutLogger.error("payments.sync.failed", {
+      context: { provider, storeId: store.id },
+      days,
+      error: serializeError(error),
+    });
     await failJob(job.id, error);
     throw error;
   }
@@ -136,14 +155,19 @@ export async function syncPaypalPayments({ store, days = 7 }) {
     failSyncJob: failJob,
   } = getPaymentSyncDependencies();
 
+  const provider = CredentialProvider.PAYPAL;
   const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider: CredentialProvider.PAYPAL,
+    provider,
     metadata: { days },
   });
 
   try {
+    payoutLogger.info("payments.sync.started", {
+      context: { provider, storeId: store.id },
+      days,
+    });
     const payouts = await fetchPaypal({
       startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
       endDate: new Date(),
@@ -156,8 +180,19 @@ export async function syncPaypalPayments({ store, days = 7 }) {
     await finishJob(job.id, {
       processedCount: payouts.length,
     });
+
+    payoutLogger.info("payments.sync.completed", {
+      context: { provider, storeId: store.id },
+      days,
+      processed: payouts.length,
+    });
     return { processed: payouts.length };
   } catch (error) {
+    payoutLogger.error("payments.sync.failed", {
+      context: { provider, storeId: store.id },
+      days,
+      error: serializeError(error),
+    });
     await failJob(job.id, error);
     throw error;
   }
@@ -176,14 +211,19 @@ export async function syncStripePayments({ store, days = 7 }) {
     failSyncJob: failJob,
   } = getPaymentSyncDependencies();
 
+  const provider = CredentialProvider.STRIPE;
   const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider: CredentialProvider.STRIPE,
+    provider,
     metadata: { days },
   });
 
   try {
+    payoutLogger.info("payments.sync.started", {
+      context: { provider, storeId: store.id },
+      days,
+    });
     const payouts = await fetchStripe({ days });
     await mapWithConcurrency(
       payouts,
@@ -193,8 +233,19 @@ export async function syncStripePayments({ store, days = 7 }) {
     await finishJob(job.id, {
       processedCount: payouts.length,
     });
+
+    payoutLogger.info("payments.sync.completed", {
+      context: { provider, storeId: store.id },
+      days,
+      processed: payouts.length,
+    });
     return { processed: payouts.length };
   } catch (error) {
+    payoutLogger.error("payments.sync.failed", {
+      context: { provider, storeId: store.id },
+      days,
+      error: serializeError(error),
+    });
     await failJob(job.id, error);
     throw error;
   }
@@ -213,14 +264,19 @@ export async function syncKlarnaPayments({ store, days = 7 }) {
     failSyncJob: failJob,
   } = getPaymentSyncDependencies();
 
+  const provider = CredentialProvider.KLARNA;
   const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider: CredentialProvider.KLARNA,
+    provider,
     metadata: { days },
   });
 
   try {
+    payoutLogger.info("payments.sync.started", {
+      context: { provider, storeId: store.id },
+      days,
+    });
     const payouts = await fetchKlarna({ days });
     await mapWithConcurrency(
       payouts,
@@ -230,8 +286,19 @@ export async function syncKlarnaPayments({ store, days = 7 }) {
     await finishJob(job.id, {
       processedCount: payouts.length,
     });
+
+    payoutLogger.info("payments.sync.completed", {
+      context: { provider, storeId: store.id },
+      days,
+      processed: payouts.length,
+    });
     return { processed: payouts.length };
   } catch (error) {
+    payoutLogger.error("payments.sync.failed", {
+      context: { provider, storeId: store.id },
+      days,
+      error: serializeError(error),
+    });
     await failJob(job.id, error);
     throw error;
   }

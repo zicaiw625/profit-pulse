@@ -9,12 +9,12 @@ export function setReportFormulaLoggerForTests(logger) {
 
 /**
  * evaluateFormulaExpression intentionally supports only a minimal arithmetic grammar:
- * addition, subtraction, multiplication, division, parentheses, and identifiers that
- * match `/[A-Za-z_][A-Za-z0-9_]*`. Do not expand this sanitizer to admit broader
- * JavaScript syntax (function calls, array literals, template strings, etc.).
- * If business requirements evolve beyond simple formulas, replace this module with a
- * dedicated expression parser/evaluator that performs full tokenization and AST checks
- * instead of relying on `Function`.
+ * addition, subtraction, multiplication, division, parentheses, whitespace, and
+ * identifiers that match `/[A-Za-z_][A-Za-z0-9_]*`. Do not expand this sanitizer to
+ * admit broader JavaScript syntax (function calls, array literals, template strings,
+ * etc.). If future requirements need richer expressions, swap this implementation for
+ * a dedicated parser/evaluator rather than relaxing the allowed character set or
+ * continuing to execute arbitrary strings via `Function`.
  */
 export function evaluateFormulaExpression(expression, values = {}) {
   if (typeof expression !== "string") {

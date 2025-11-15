@@ -99,6 +99,82 @@ describe('runScheduledReports', () => {
     assert.equal(metricsArgs.storeId, store.id);
   });
 
+  it('rolls month-end schedules forward while clamping to valid calendar days', async () => {
+    const now = new Date('2024-01-31T08:30:00.000Z');
+
+    const schedule = {
+      id: 'schedule-month-end',
+      merchantId: 'merchant-4',
+      frequency: ReportFrequency.MONTHLY,
+      isActive: true,
+      nextRunAt: new Date('2024-01-31T08:00:00.000Z'),
+      channel: 'EMAIL',
+      recipients: 'finance@example.com',
+    };
+
+    const store = {
+      id: 'store-4',
+      merchantId: 'merchant-4',
+      shopDomain: 'brand-4.myshopify.com',
+    };
+
+    const findFirstMock = mock.fn(async () => store);
+    const updateMock = mock.fn(async () => ({}));
+    const emailMock = mock.fn(async () => true);
+
+    setReportScheduleRunnerDependenciesForTests({
+      listReportSchedules: async () => [schedule],
+      prisma: {
+        store: { findFirst: findFirstMock },
+        reportSchedule: { update: updateMock },
+      },
+      notifyWebhook: async () => false,
+      sendSlackNotification: async () => false,
+      sendDigestEmail: emailMock,
+      getReportingOverview: async () => baseOverview,
+      evaluatePerformanceAlerts: async () => {},
+      logger: { warn: mock.fn(), error: mock.fn() },
+      recordReportScheduleExecution: mock.fn(),
+    });
+
+    await runScheduledReports({ now });
+
+    const [updateArgs] = updateMock.mock.calls[0].arguments;
+    assert.equal(
+      updateArgs.data.nextRunAt.toISOString(),
+      new Date('2024-02-29T08:30:00.000Z').toISOString(),
+    );
+
+    const nextInvocation = new Date(updateArgs.data.nextRunAt);
+    setReportScheduleRunnerDependenciesForTests({
+      listReportSchedules: async () => [
+        {
+          ...schedule,
+          nextRunAt: nextInvocation,
+        },
+      ],
+      prisma: {
+        store: { findFirst: findFirstMock },
+        reportSchedule: { update: updateMock },
+      },
+      notifyWebhook: async () => false,
+      sendSlackNotification: async () => false,
+      sendDigestEmail: emailMock,
+      getReportingOverview: async () => baseOverview,
+      evaluatePerformanceAlerts: async () => {},
+      logger: { warn: mock.fn(), error: mock.fn() },
+      recordReportScheduleExecution: mock.fn(),
+    });
+
+    await runScheduledReports({ now: new Date('2024-02-29T08:30:00.000Z') });
+
+    const febUpdateArgs = updateMock.mock.calls[1].arguments[0];
+    assert.equal(
+      febUpdateArgs.data.nextRunAt.toISOString(),
+      new Date('2024-03-29T08:30:00.000Z').toISOString(),
+    );
+  });
+
   it('logs a warning when a digest fails to dispatch', async () => {
     const now = new Date('2024-05-05T10:00:00.000Z');
     const schedule = {

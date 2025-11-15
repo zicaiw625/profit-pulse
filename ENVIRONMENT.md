@@ -54,6 +54,10 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `GOOGLE_ADS_DEVELOPER_TOKEN` | ⚠️ | Developer token for Google Ads API access. |
 | `META_ADS_APP_ID` | ⚠️ | Meta Ads application ID. |
 | `META_ADS_APP_SECRET` | ⚠️ | Meta Ads application secret. |
+| `BING_ADS_CLIENT_ID` | ⚠️ | Microsoft Advertising OAuth client ID. Enables Bing Ads spend sync. |
+| `BING_ADS_CLIENT_SECRET` | ⚠️ | Microsoft Advertising OAuth client secret. |
+| `TIKTOK_ADS_CLIENT_ID` | ⚠️ | TikTok Ads OAuth client ID for paid social spend imports. |
+| `TIKTOK_ADS_CLIENT_SECRET` | ⚠️ | TikTok Ads OAuth client secret. |
 
 ## Payment provider integrations
 
@@ -67,6 +71,8 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `KLARNA_USERNAME` | ⚠️ | Klarna API username for settlement reconciliation. |
 | `KLARNA_PASSWORD` | ⚠️ | Klarna API password. |
 | `KLARNA_API_BASE_URL` | ⚠️ | Optional override for Klarna API base (defaults to `https://api-na.klarna.com`). |
+| `ADYEN_API_KEY` | ⚠️ | Optional Adyen API key for settlements if that provider is enabled. |
+| `ADYEN_MERCHANT_ACCOUNT` | ⚠️ | Adyen merchant account identifier paired with the API key. |
 
 ## ERP & accounting integrations
 
@@ -75,6 +81,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `ERP_COST_SYNC_URL` | ⚠️ | Endpoint for syncing ERP-sourced cost adjustments. |
 | `QUICKBOOKS_SYNC_URL` | ⚠️ | Webhook or API endpoint for pushing accounting entries to QuickBooks. Enables QuickBooks toggle in settings. |
 | `XERO_SYNC_URL` | ⚠️ | Endpoint for Xero accounting sync. Enables Xero toggle in settings. |
+| `NETSUITE_SYNC_URL` | ⚠️ | Optional endpoint for NetSuite journal exports. |
 
 ## Billing & monetization
 
