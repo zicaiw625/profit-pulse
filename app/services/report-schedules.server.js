@@ -1,5 +1,6 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
+import { isAllowedWebhookUrl } from "./notifications.server";
 
 const { ReportFrequency } = pkg;
 
@@ -45,13 +46,32 @@ export async function createReportSchedule({
     normalizedRecipients = recipients?.toString().trim() ?? "";
   }
 
+  const sanitizedSettings = { ...(settings ?? {}) };
+
+  if (normalizedChannel === "WEBHOOK") {
+    const providedUrl = sanitizedSettings.webhookUrl ?? "";
+    const normalizedWebhookUrl = providedUrl.toString().trim();
+
+    if (!normalizedWebhookUrl) {
+      throw new Error("Webhook URL is required for webhook schedules");
+    }
+
+    if (!isAllowedWebhookUrl(normalizedWebhookUrl)) {
+      throw new Error(
+        "Webhook URL must be HTTPS and point to an allowed Slack/Teams/Zapier/Make domain.",
+      );
+    }
+
+    sanitizedSettings.webhookUrl = normalizedWebhookUrl;
+  }
+
   return prisma.reportSchedule.create({
     data: {
       merchantId,
       frequency,
       channel: normalizedChannel,
       recipients: normalizedRecipients,
-      settings: settings ?? {},
+      settings: sanitizedSettings,
     },
   });
 }

@@ -96,6 +96,8 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
     return notifyWebhook({
       url: webhookUrl,
       payload: buildWebhookPayload(store, overview, schedule, subject, body),
+      merchantId: schedule.merchantId,
+      context: `report_schedule:${schedule.id}`,
     });
   }
 
