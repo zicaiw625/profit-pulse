@@ -1,6 +1,6 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
-import { isAllowedWebhookUrl } from "./notifications.server";
+import prisma from "../db.server.js";
+import { isAllowedWebhookUrl } from "./notifications.server.js";
 
 const { ReportFrequency } = pkg;
 

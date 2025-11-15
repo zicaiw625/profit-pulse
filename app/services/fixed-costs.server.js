@@ -1,4 +1,4 @@
-import prisma from "../db.server";
+import prisma from "../db.server.js";
 import { shiftDays } from "../utils/dates.server.js";
 
 const CADENCE_IN_DAYS = {

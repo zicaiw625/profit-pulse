@@ -1,12 +1,12 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
-import { getReportingOverview } from "./reports.server";
-import { listReportSchedules } from "./report-schedules.server";
-import { sendDigestEmail } from "./email.server";
-import { notifyWebhook, sendSlackNotification } from "./notifications.server";
-import { formatCurrency, formatPercent } from "../utils/formatting";
+import prisma from "../db.server.js";
+import { getReportingOverview } from "./reports.server.js";
+import { listReportSchedules } from "./report-schedules.server.js";
+import { sendDigestEmail } from "./email.server.js";
+import { notifyWebhook, sendSlackNotification } from "./notifications.server.js";
+import { formatCurrency, formatPercent } from "../utils/formatting.js";
 import { logger } from "../utils/logger.server.js";
-import { evaluatePerformanceAlerts } from "./alert-triggers.server";
+import { evaluatePerformanceAlerts } from "./alert-triggers.server.js";
 
 const { ReportFrequency } = pkg;
 
@@ -15,16 +15,37 @@ const FREQUENCY_INTERVAL_MS = {
   [ReportFrequency.WEEKLY]: 1000 * 60 * 60 * 24 * 7,
 };
 
-const scheduleLogger = logger.child({ service: "report-schedules" });
+function createDefaultDependencies() {
+  return {
+    prisma,
+    getReportingOverview,
+    listReportSchedules,
+    sendDigestEmail,
+    notifyWebhook,
+    sendSlackNotification,
+    evaluatePerformanceAlerts,
+    logger: logger.child({ service: "report-schedules" }),
+  };
+}
+
+let dependencies = createDefaultDependencies();
+
+export function setReportScheduleRunnerDependenciesForTests(overrides = {}) {
+  dependencies = { ...dependencies, ...overrides };
+}
+
+export function resetReportScheduleRunnerDependenciesForTests() {
+  dependencies = createDefaultDependencies();
+}
 
 export async function runScheduledReports({ now = new Date() } = {}) {
-  const schedules = await listReportSchedules();
+  const schedules = await dependencies.listReportSchedules();
   const dueSchedules = schedules.filter((schedule) => isScheduleDue(schedule, now));
   for (const schedule of dueSchedules) {
     try {
       await executeSchedule(schedule, now);
     } catch (error) {
-      scheduleLogger.error("Failed to execute report schedule", {
+      dependencies.logger.error("Failed to execute report schedule", {
         scheduleId: schedule.id,
         error: error?.message,
       });
@@ -41,23 +62,23 @@ function isScheduleDue(schedule, now) {
 }
 
 async function executeSchedule(schedule, now) {
-  const store = await prisma.store.findFirst({
+  const store = await dependencies.prisma.store.findFirst({
     where: { merchantId: schedule.merchantId },
     orderBy: { installedAt: "asc" },
   });
   if (!store) {
-    scheduleLogger.warn("No store found for report schedule", {
+    dependencies.logger.warn("No store found for report schedule", {
       scheduleId: schedule.id,
     });
     return;
   }
 
-  const overview = await getReportingOverview({
+  const overview = await dependencies.getReportingOverview({
     storeId: store.id,
     rangeDays: 30,
   });
 
-  await evaluatePerformanceAlerts({
+  await dependencies.evaluatePerformanceAlerts({
     store,
   });
 
@@ -72,7 +93,7 @@ async function executeSchedule(schedule, now) {
   });
 
   const nextRunAt = computeNextRun(now, schedule.frequency);
-  await prisma.reportSchedule.update({
+  await dependencies.prisma.reportSchedule.update({
     where: { id: schedule.id },
     data: {
       lastRunAt: now,
@@ -81,7 +102,7 @@ async function executeSchedule(schedule, now) {
   });
 
   if (!dispatched) {
-    scheduleLogger.warn("Scheduled digest delivery failed", {
+    dependencies.logger.warn("Scheduled digest delivery failed", {
       scheduleId: schedule.id,
     });
   }
@@ -89,7 +110,7 @@ async function executeSchedule(schedule, now) {
 
 async function deliverDigest({ schedule, store, overview, subject, body }) {
   if (schedule.channel === "SLACK") {
-    return sendSlackNotification({
+    return dependencies.sendSlackNotification({
       merchantId: schedule.merchantId,
       text: `${subject}\n\n${body}`,
       payload: buildSlackDigestPayload(subject, overview),
@@ -99,12 +120,12 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
   if (schedule.channel === "WEBHOOK") {
     const webhookUrl = schedule.settings?.webhookUrl;
     if (!webhookUrl) {
-      scheduleLogger.warn("Webhook schedule missing URL", {
+      dependencies.logger.warn("Webhook schedule missing URL", {
         scheduleId: schedule.id,
       });
       return false;
     }
-    return notifyWebhook({
+    return dependencies.notifyWebhook({
       url: webhookUrl,
       payload: buildWebhookPayload(store, overview, schedule, subject, body),
       merchantId: schedule.merchantId,
@@ -112,7 +133,7 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
     });
   }
 
-  return sendDigestEmail({
+  return dependencies.sendDigestEmail({
     recipients: schedule.recipients,
     subject,
     body,

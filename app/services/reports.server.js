@@ -1,13 +1,13 @@
-import prisma from "../db.server";
-import { getFixedCostBreakdown } from "./fixed-costs.server";
-import { getExchangeRate } from "./exchange-rates.server";
+import prisma from "../db.server.js";
+import { getFixedCostBreakdown } from "./fixed-costs.server.js";
+import { getExchangeRate } from "./exchange-rates.server.js";
 import {
   startOfDay,
   shiftDays,
   resolveTimezone,
   formatDateKey,
 } from "../utils/dates.server.js";
-import { buildCacheKey, memoizeAsync } from "./cache.server";
+import { buildCacheKey, memoizeAsync } from "./cache.server.js";
 
 const DEFAULT_RANGE_DAYS = 30;
 const DAY_MS = 1000 * 60 * 60 * 24;
