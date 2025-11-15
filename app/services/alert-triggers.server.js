@@ -1,8 +1,8 @@
-import prisma from "../db.server";
-import { sendSlackNotification } from "./notifications.server";
+import prisma from "../db.server.js";
+import { sendSlackNotification } from "./notifications.server.js";
 import { startOfDay, shiftDays, resolveTimezone } from "../utils/dates.server.js";
 import { getExchangeRate } from "./exchange-rates.server.js";
-import { formatCurrency, formatPercent } from "../utils/formatting";
+import { formatCurrency, formatPercent } from "../utils/formatting.js";
 
 const DEFAULT_ROAS_THRESHOLD = 1.0;
 const NET_PROFIT_DROP_PERCENT = 0.3;

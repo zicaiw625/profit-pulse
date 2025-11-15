@@ -1,6 +1,63 @@
-import prisma from "../../db.server";
-import shopify from "../../shopify.server";
-import { processShopifyOrder } from "../profit-engine.server";
+import defaultPrisma from "../../db.server.js";
+import { processShopifyOrder as defaultProcessShopifyOrder } from "../profit-engine.server.js";
+
+const DEFAULT_CONCURRENCY = Number.parseInt(
+  process.env.ORDER_SYNC_CONCURRENCY ?? "5",
+  10,
+);
+
+const defaultDependencies = {
+  prismaClient: defaultPrisma,
+  shopifyApi: null,
+  processShopifyOrder: defaultProcessShopifyOrder,
+};
+
+let orderSyncDependencies = { ...defaultDependencies };
+let configuredConcurrency = Number.isFinite(DEFAULT_CONCURRENCY)
+  ? DEFAULT_CONCURRENCY
+  : 5;
+let shopifyModulePromise;
+
+export function setShopifyOrderSyncDependenciesForTests(overrides = {}) {
+  orderSyncDependencies = { ...orderSyncDependencies, ...overrides };
+}
+
+export function resetShopifyOrderSyncDependenciesForTests() {
+  orderSyncDependencies = { ...defaultDependencies };
+  shopifyModulePromise = undefined;
+}
+
+export function setOrderSyncConcurrencyForTests(value) {
+  configuredConcurrency = Number.isFinite(value) && value > 0 ? value : configuredConcurrency;
+}
+
+export function resetOrderSyncConcurrencyForTests() {
+  configuredConcurrency = Number.isFinite(DEFAULT_CONCURRENCY)
+    ? DEFAULT_CONCURRENCY
+    : 5;
+}
+
+function getOrderSyncDependencies() {
+  return orderSyncDependencies;
+}
+
+function resolveConcurrency() {
+  return Number.isFinite(configuredConcurrency) && configuredConcurrency > 0
+    ? configuredConcurrency
+    : 5;
+}
+
+async function loadShopifyApi() {
+  const { shopifyApi } = getOrderSyncDependencies();
+  if (shopifyApi) {
+    return shopifyApi;
+  }
+  if (!shopifyModulePromise) {
+    shopifyModulePromise = import("../../shopify.server.js");
+  }
+  const module = await shopifyModulePromise;
+  return module.default;
+}
 
 export async function syncShopifyOrders({ store, session, days = 2 }) {
   if (!store?.id) {
@@ -10,7 +67,10 @@ export async function syncShopifyOrders({ store, session, days = 2 }) {
     throw new Error("Shopify admin session is required for order sync");
   }
 
-  const restClient = new shopify.api.clients.Rest({ session });
+  const { prismaClient, processShopifyOrder: processOrder } = getOrderSyncDependencies();
+  const shopifyApi = await loadShopifyApi();
+
+  const restClient = new shopifyApi.api.clients.Rest({ session });
   const processedAtMin = await determineStartDate(store.id, days);
   let cursor = null;
   let processed = 0;
@@ -29,9 +89,15 @@ export async function syncShopifyOrders({ store, session, days = 2 }) {
     });
 
     const orders = response.body?.orders ?? [];
-    for (const payload of orders) {
-      await processShopifyOrder({ store, payload });
-      processed += 1;
+    const concurrency = resolveConcurrency();
+    for (let index = 0; index < orders.length; index += concurrency) {
+      const batch = orders.slice(index, index + concurrency);
+      await Promise.all(
+        batch.map(async (payload) => {
+          await processOrder({ store, payload });
+          processed += 1;
+        }),
+      );
     }
 
     cursor = response.pageInfo?.nextPage?.query?.page_info ?? null;
@@ -48,7 +114,10 @@ export async function syncOrderById({ store, session, orderId }) {
     throw new Error("Shopify admin session is required");
   }
 
-  const restClient = new shopify.api.clients.Rest({ session });
+  const { processShopifyOrder: processOrder } = getOrderSyncDependencies();
+  const shopifyApi = await loadShopifyApi();
+
+  const restClient = new shopifyApi.api.clients.Rest({ session });
   const response = await restClient.get({
     path: `orders/${orderId}.json`,
     query: {
@@ -61,12 +130,13 @@ export async function syncOrderById({ store, session, orderId }) {
     throw new Error(`Order ${orderId} not found while syncing`);
   }
 
-  await processShopifyOrder({ store, payload: order });
+  await processOrder({ store, payload: order });
   return order;
 }
 
 async function determineStartDate(storeId, days) {
-  const latestOrder = await prisma.order.findFirst({
+  const { prismaClient } = getOrderSyncDependencies();
+  const latestOrder = await prismaClient.order.findFirst({
     where: { storeId },
     orderBy: { processedAt: "desc" },
   });

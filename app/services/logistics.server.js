@@ -1,5 +1,5 @@
-import prisma from "../db.server";
-import { getExchangeRate } from "./exchange-rates.server";
+import prisma from "../db.server.js";
+import { getExchangeRate } from "./exchange-rates.server.js";
 
 function toNumber(value) {
   if (value === null || value === undefined || value === "") {
