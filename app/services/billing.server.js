@@ -1,4 +1,4 @@
-import prisma from "../db.server";
+import prisma from "../db.server.js";
 import {
   PLAN_DEFINITIONS,
   listPlanOptions,
@@ -6,8 +6,8 @@ import {
   findPlanByTier,
   DEFAULT_PLAN,
   BILLABLE_PLANS,
-} from "../config/billing";
-import { sendSlackNotification } from "./notifications.server";
+} from "../config/billing.js";
+import { sendSlackNotification } from "./notifications.server.js";
 
 const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
 
