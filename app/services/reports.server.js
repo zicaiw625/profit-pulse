@@ -666,6 +666,10 @@ async function populateCustomerLifetimeMetrics({
   });
 }
 
+// NOTE: This parser intentionally supports only a restricted subset of arithmetic expressions
+// (`+`, `-`, `*`, `/`, parentheses, identifiers, and numeric literals). Do not extend the
+// allowed character set or introduce additional JavaScript syntax here without replacing the
+// evaluator, otherwise the `Function` call below could become a code execution vector.
 function evaluateFormulaExpression(expression, values = {}) {
   const sanitized = expression.replace(/[^0-9a-zA-Z_+\-*/().\s]/g, "");
   if (!sanitized.trim()) {
