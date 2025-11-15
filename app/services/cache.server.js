@@ -2,6 +2,12 @@ import { createScopedLogger } from "../utils/logger.server.js";
 
 const cacheLogger = createScopedLogger({ service: "cache" });
 
+// NOTE: The default backend below keeps memoized entries inside a single Node.js
+// process via a module-scoped Map. It is perfect for single-instance deployments,
+// but multi-instance or serverless environments will not share cache state. Configure
+// the Upstash backend (or swap in another centralized store) when horizontal scaling
+// is required to avoid redundant recomputation.
+
 function createMemoryCacheBackend() {
   const cacheStore = new Map();
 

@@ -1,12 +1,74 @@
 import pkg from "@prisma/client";
-import prisma from "../../db.server";
-import shopify from "../../shopify.server";
-import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
-import { fetchPaypalPayouts } from "../payments/paypal.server";
-import { fetchStripePayouts } from "../payments/stripe.server";
-import { fetchKlarnaPayouts } from "../payments/klarna.server";
+import prisma from "../../db.server.js";
+import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server.js";
+import { mapWithConcurrency } from "../../utils/concurrency.server.js";
+import { fetchPaypalPayouts } from "../payments/paypal.server.js";
+import { fetchStripePayouts } from "../payments/stripe.server.js";
+import { fetchKlarnaPayouts } from "../payments/klarna.server.js";
 
 const { CredentialProvider, SyncJobType } = pkg;
+
+const FALLBACK_EXTERNAL_PAYOUT_CONCURRENCY = 5;
+const MAX_EXTERNAL_PAYOUT_CONCURRENCY = 10;
+
+function sanitizeConcurrency(value) {
+  const numeric = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(numeric) || numeric < 1) {
+    return FALLBACK_EXTERNAL_PAYOUT_CONCURRENCY;
+  }
+  return Math.min(numeric, MAX_EXTERNAL_PAYOUT_CONCURRENCY);
+}
+
+const DEFAULT_EXTERNAL_PAYOUT_CONCURRENCY = sanitizeConcurrency(
+  process.env.PAYOUT_SYNC_CONCURRENCY ?? FALLBACK_EXTERNAL_PAYOUT_CONCURRENCY,
+);
+
+let externalPayoutConcurrency = DEFAULT_EXTERNAL_PAYOUT_CONCURRENCY;
+
+const defaultDependencies = {
+  fetchPaypalPayouts,
+  fetchStripePayouts,
+  fetchKlarnaPayouts,
+  persistExternalPayout: persistExternalPayoutRecord,
+  startSyncJob,
+  finishSyncJob,
+  failSyncJob,
+};
+
+let paymentSyncDependencies = { ...defaultDependencies };
+let shopifyModulePromise;
+
+export function setPaymentSyncDependenciesForTests(overrides = {}) {
+  paymentSyncDependencies = { ...paymentSyncDependencies, ...overrides };
+}
+
+export function resetPaymentSyncDependenciesForTests() {
+  paymentSyncDependencies = { ...defaultDependencies };
+}
+
+export function setExternalPayoutConcurrencyForTests(value) {
+  externalPayoutConcurrency = sanitizeConcurrency(value);
+}
+
+export function resetExternalPayoutConcurrencyForTests() {
+  externalPayoutConcurrency = DEFAULT_EXTERNAL_PAYOUT_CONCURRENCY;
+}
+
+function resolveExternalPayoutConcurrency() {
+  return sanitizeConcurrency(externalPayoutConcurrency);
+}
+
+function getPaymentSyncDependencies() {
+  return paymentSyncDependencies;
+}
+
+async function loadShopifyApi() {
+  if (!shopifyModulePromise) {
+    shopifyModulePromise = import("../../shopify.server.js");
+  }
+  const module = await shopifyModulePromise;
+  return module.default;
+}
 
 export async function syncShopifyPayments({ store, session, days = 7 }) {
   if (!store?.id) {
@@ -16,7 +78,11 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
     throw new Error("Shopify admin session is required to sync payouts");
   }
 
-  const job = await startSyncJob({
+  const { startSyncJob: startJob, finishSyncJob: finishJob, failSyncJob: failJob } =
+    getPaymentSyncDependencies();
+
+  const shopifyApi = await loadShopifyApi();
+  const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
     provider: CredentialProvider.SHOPIFY_PAYMENTS,
@@ -24,7 +90,7 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
   });
 
   try {
-    const restClient = new shopify.api.clients.Rest({ session });
+    const restClient = new shopifyApi.api.clients.Rest({ session });
     const payouts = await collectPayouts({ restClient, days });
 
     for (const payout of payouts) {
@@ -46,13 +112,13 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
       data: { paymentsLastSyncedAt: new Date() },
     });
 
-    await finishSyncJob(job.id, {
+    await finishJob(job.id, {
       processedCount: payouts.length,
     });
 
     return { processed: payouts.length };
   } catch (error) {
-    await failSyncJob(job.id, error);
+    await failJob(job.id, error);
     throw error;
   }
 }
@@ -62,7 +128,15 @@ export async function syncPaypalPayments({ store, days = 7 }) {
     throw new Error("Store is required for PayPal sync");
   }
 
-  const job = await startSyncJob({
+  const {
+    fetchPaypalPayouts: fetchPaypal,
+    persistExternalPayout: persistPayout,
+    startSyncJob: startJob,
+    finishSyncJob: finishJob,
+    failSyncJob: failJob,
+  } = getPaymentSyncDependencies();
+
+  const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
     provider: CredentialProvider.PAYPAL,
@@ -70,21 +144,21 @@ export async function syncPaypalPayments({ store, days = 7 }) {
   });
 
   try {
-    const payouts = await fetchPaypalPayouts({
+    const payouts = await fetchPaypal({
       startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
       endDate: new Date(),
     });
-    await Promise.all(
-      payouts.map((payout) =>
-        persistExternalPayout(store.id, CredentialProvider.PAYPAL, payout),
-      ),
+    await mapWithConcurrency(
+      payouts,
+      resolveExternalPayoutConcurrency(),
+      (payout) => persistPayout(store.id, CredentialProvider.PAYPAL, payout),
     );
-    await finishSyncJob(job.id, {
+    await finishJob(job.id, {
       processedCount: payouts.length,
     });
     return { processed: payouts.length };
   } catch (error) {
-    await failSyncJob(job.id, error);
+    await failJob(job.id, error);
     throw error;
   }
 }
@@ -94,7 +168,15 @@ export async function syncStripePayments({ store, days = 7 }) {
     throw new Error("Store is required for Stripe sync");
   }
 
-  const job = await startSyncJob({
+  const {
+    fetchStripePayouts: fetchStripe,
+    persistExternalPayout: persistPayout,
+    startSyncJob: startJob,
+    finishSyncJob: finishJob,
+    failSyncJob: failJob,
+  } = getPaymentSyncDependencies();
+
+  const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
     provider: CredentialProvider.STRIPE,
@@ -102,18 +184,18 @@ export async function syncStripePayments({ store, days = 7 }) {
   });
 
   try {
-    const payouts = await fetchStripePayouts({ days });
-    await Promise.all(
-      payouts.map((payout) =>
-        persistExternalPayout(store.id, CredentialProvider.STRIPE, payout),
-      ),
+    const payouts = await fetchStripe({ days });
+    await mapWithConcurrency(
+      payouts,
+      resolveExternalPayoutConcurrency(),
+      (payout) => persistPayout(store.id, CredentialProvider.STRIPE, payout),
     );
-    await finishSyncJob(job.id, {
+    await finishJob(job.id, {
       processedCount: payouts.length,
     });
     return { processed: payouts.length };
   } catch (error) {
-    await failSyncJob(job.id, error);
+    await failJob(job.id, error);
     throw error;
   }
 }
@@ -123,7 +205,15 @@ export async function syncKlarnaPayments({ store, days = 7 }) {
     throw new Error("Store is required for Klarna sync");
   }
 
-  const job = await startSyncJob({
+  const {
+    fetchKlarnaPayouts: fetchKlarna,
+    persistExternalPayout: persistPayout,
+    startSyncJob: startJob,
+    finishSyncJob: finishJob,
+    failSyncJob: failJob,
+  } = getPaymentSyncDependencies();
+
+  const job = await startJob({
     storeId: store.id,
     jobType: SyncJobType.PAYMENT_PAYOUT,
     provider: CredentialProvider.KLARNA,
@@ -131,18 +221,18 @@ export async function syncKlarnaPayments({ store, days = 7 }) {
   });
 
   try {
-    const payouts = await fetchKlarnaPayouts({ days });
-    await Promise.all(
-      payouts.map((payout) =>
-        persistExternalPayout(store.id, CredentialProvider.KLARNA, payout),
-      ),
+    const payouts = await fetchKlarna({ days });
+    await mapWithConcurrency(
+      payouts,
+      resolveExternalPayoutConcurrency(),
+      (payout) => persistPayout(store.id, CredentialProvider.KLARNA, payout),
     );
-    await finishSyncJob(job.id, {
+    await finishJob(job.id, {
       processedCount: payouts.length,
     });
     return { processed: payouts.length };
   } catch (error) {
-    await failSyncJob(job.id, error);
+    await failJob(job.id, error);
     throw error;
   }
 }
@@ -203,7 +293,7 @@ function mapPayout(store, payout, transactions) {
   };
 }
 
-async function persistExternalPayout(storeId, provider, payout) {
+async function persistExternalPayoutRecord(storeId, provider, payout) {
   const record = {
     storeId,
     provider,

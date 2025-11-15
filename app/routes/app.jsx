@@ -7,6 +7,9 @@ import { LinkWithQuery } from "../components/LinkWithQuery";
 import { ShopifyFetchProvider } from "../components/ShopifyFetchProvider";
 import { useLocale } from "../hooks/useLocale";
 import { TRANSLATION_KEYS } from "../constants/translations";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const appLogger = createScopedLogger({ route: "app.loader" });
 
 // 让所有 /app/* 子路由在进入时完成 Admin 侧认证
 export const loader = async ({ request }) => {
@@ -35,7 +38,7 @@ export const loader = async ({ request }) => {
       );
     }
 
-    console.debug("Admin session prewarm failed", error);
+    appLogger.warn("admin_prewarm_failed", { error: serializeError(error) });
   }
   // eslint-disable-next-line no-undef
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };

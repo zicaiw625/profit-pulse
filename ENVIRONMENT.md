@@ -28,6 +28,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
 | `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 | `CREDENTIAL_REFRESH_CONCURRENCY` | ⚠️ | Upper bound on parallel ad credential refreshes. Defaults to 5. |
+| `PAYOUT_SYNC_CONCURRENCY` | ⚠️ | Caps the number of simultaneous payout upserts across PayPal/Stripe/Klarna syncs. Defaults to 5 with a hard ceiling of 10. |
 
 ## Caching
 
