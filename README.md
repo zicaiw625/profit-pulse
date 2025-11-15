@@ -7,7 +7,7 @@ Profit Pulse is a production-ready Shopify SaaS that ingests multi-store commerc
 - **Multi-store commerce ingestion** – Sync Shopify orders, payouts, logistics, and ad spend into a unified merchant workspace with currency/timezone normalization.
 - **Profit engine** – Decompose revenue, COGS, shipping, payment, platform, and custom costs per order and aggregate daily KPIs for dashboards and reports.
 - **Alerts & notifications** – Dispatch Slack/Teams/Zapier/Make alerts when margins degrade, refunds spike, or attribution rules detect anomalies.
-- **Report scheduling** – Email or webhook recurring digests with calendar-aware frequencies and strict webhook allowlisting to prevent SSRF.
+- **Report scheduling** – Email or webhook recurring digests with calendar-aware frequencies and strict webhook allowlisting to prevent SSRF (extendable via `WEBHOOK_HOST_ALLOWLIST`).
 - **Plan enforcement & overages** – Track monthly order usage, pause ingestion when limits are hit, and bill overage charges safely inside transactions.
 - **Internationalization** – Ship with English and Simplified Chinese UI text, including dashboards, alerts, and plan messaging.
 
