@@ -1,6 +1,6 @@
-import prisma from "../db.server";
-import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes";
-import { logAuditEvent } from "./audit.server";
+import prisma from "../db.server.js";
+import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes.js";
+import { logAuditEvent } from "./audit.server.js";
 
 const WEBHOOK_TIMEOUT_MS = 5000;
 const WEBHOOK_MAX_ATTEMPTS = 3;
@@ -10,6 +10,12 @@ const EXACT_ALLOWED_HOSTS = new Set([
   "hooks.make.com",
 ]);
 const WILDCARD_HOST_SUFFIXES = ["office.com"];
+
+let auditLogger = logAuditEvent;
+
+export function setNotificationAuditLoggerForTests(logger) {
+  auditLogger = typeof logger === "function" ? logger : logAuditEvent;
+}
 
 export async function listNotificationChannels(merchantId, type) {
   if (!merchantId) return [];
@@ -76,7 +82,7 @@ async function sendToChannel(channel, text, customPayload) {
   const webhookUrl = getWebhookUrlFromChannel(channel);
   if (!webhookUrl) return false;
   if (!isAllowedWebhookUrl(webhookUrl)) {
-    await logAuditEvent({
+    await auditLogger({
       merchantId: channel.merchantId,
       action: "notification.webhook_blocked",
       details: `Blocked webhook for channel ${channel.id} (${channel.type}) to ${webhookUrl}`,
@@ -86,7 +92,7 @@ async function sendToChannel(channel, text, customPayload) {
   const payloadToSend = buildPayload(channel, text, customPayload);
   const result = await postJsonWithRetry(webhookUrl, payloadToSend);
   if (!result.ok) {
-    await logAuditEvent({
+    await auditLogger({
       merchantId: channel.merchantId,
       action: "notification.webhook_failed",
       details: buildFailureDetails(channel, webhookUrl, result),
@@ -137,9 +143,29 @@ function buildPayload(channel, text, customPayload) {
   return { text };
 }
 
-export async function notifyWebhook({ url, payload }) {
+export async function notifyWebhook({
+  url,
+  payload,
+  merchantId,
+  context,
+}) {
   if (!url) return false;
   const normalizedUrl = url.trim();
+  if (!isAllowedWebhookUrl(normalizedUrl)) {
+    console.warn("Blocked webhook URL", {
+      url: normalizedUrl,
+      merchantId,
+      context,
+    });
+    if (merchantId) {
+      await auditLogger({
+        merchantId,
+        action: "notification.webhook_blocked",
+        details: `Blocked webhook dispatch to ${normalizedUrl} (${context ?? "unspecified"})`,
+      });
+    }
+    return false;
+  }
   const result = await postJsonWithRetry(normalizedUrl, payload ?? {});
   if (!result.ok) {
     console.error("Failed to notify webhook", {
@@ -151,7 +177,7 @@ export async function notifyWebhook({ url, payload }) {
   return result.ok;
 }
 
-function isAllowedWebhookUrl(url) {
+export function isAllowedWebhookUrl(url) {
   let parsed;
   try {
     parsed = new URL(url);

@@ -249,7 +249,7 @@ const REPORT_FREQUENCY_OPTIONS = [
 const REPORT_CHANNEL_OPTIONS = [
   { value: "EMAIL", label: "Email" },
   { value: "SLACK", label: "Slack / Teams" },
-  { value: "WEBHOOK", label: "Webhook (Zapier/Make)" },
+  { value: "WEBHOOK", label: "Webhook (Slack/Teams/Zapier/Make)" },
 ];
 
 const FREE_PLAN_TIER = "FREE";
@@ -1129,7 +1129,8 @@ export const action = async ({ request }) => {
     const channel = formData.get("channel") ?? "EMAIL";
     const recipients = formData.get("recipients")?.toString() ?? "";
     const subjectPrefix = formData.get("subjectPrefix")?.toString().trim();
-    const webhookUrl = formData.get("webhookUrl")?.toString().trim();
+    const webhookUrl = formData.get("webhookUrl")?.toString() ?? "";
+    const sanitizedWebhookUrl = webhookUrl.trim();
     try {
       await createReportSchedule({
         merchantId: store.merchantId,
@@ -1138,16 +1139,20 @@ export const action = async ({ request }) => {
         recipients,
         settings: {
           ...(subjectPrefix ? { subjectPrefix } : {}),
-          ...(channel === "WEBHOOK" && webhookUrl
-            ? { webhookUrl }
+          ...(channel === "WEBHOOK" && sanitizedWebhookUrl
+            ? { webhookUrl: sanitizedWebhookUrl }
             : {}),
         },
       });
+      const auditTarget =
+        channel === "WEBHOOK"
+          ? sanitizedWebhookUrl || "configured webhook"
+          : recipients.trim() || "configured recipients";
       await logAuditEvent({
         merchantId: store.merchantId,
         userEmail: session.email,
         action: "create_report_schedule",
-        details: `Created ${frequency} ${channel} report for ${recipients}`,
+        details: `Created ${frequency} ${channel} report for ${auditTarget}`,
       });
       return { message: "Report schedule saved." };
     } catch (error) {
@@ -2623,6 +2628,10 @@ export default function SettingsPage() {
                   label="Webhook URL (for Webhook channel)"
                   placeholder="https://hooks.make.com/..."
                 ></s-text-field>
+                <s-text variation="subdued">
+                  仅支持使用 Slack、Microsoft Teams (office.com)、Zapier 或 Make 域名的 HTTPS
+                  Webhook。
+                </s-text>
                 <s-text-field
                   name="subjectPrefix"
                   label="Subject prefix (optional)"

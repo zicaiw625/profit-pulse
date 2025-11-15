@@ -12,7 +12,6 @@ const { ReportFrequency } = pkg;
 const FREQUENCY_INTERVAL_MS = {
   [ReportFrequency.DAILY]: 1000 * 60 * 60 * 24,
   [ReportFrequency.WEEKLY]: 1000 * 60 * 60 * 24 * 7,
-  [ReportFrequency.MONTHLY]: 1000 * 60 * 60 * 24 * 30,
 };
 
 export async function runScheduledReports({ now = new Date() } = {}) {
@@ -96,6 +95,8 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
     return notifyWebhook({
       url: webhookUrl,
       payload: buildWebhookPayload(store, overview, schedule, subject, body),
+      merchantId: schedule.merchantId,
+      context: `report_schedule:${schedule.id}`,
     });
   }
 
@@ -137,8 +138,26 @@ function buildDigestBody(store, overview) {
 }
 
 function computeNextRun(basis, frequency) {
-  const interval = FREQUENCY_INTERVAL_MS[frequency] ?? FREQUENCY_INTERVAL_MS[ReportFrequency.DAILY];
+  if (frequency === ReportFrequency.MONTHLY) {
+    return addMonthsPreservingDay(basis, 1);
+  }
+  const interval =
+    FREQUENCY_INTERVAL_MS[frequency] ?? FREQUENCY_INTERVAL_MS[ReportFrequency.DAILY];
   return new Date(basis.getTime() + interval);
+}
+
+function addMonthsPreservingDay(date, months) {
+  const base = new Date(date.getTime());
+  const desiredDay = base.getDate();
+
+  const next = new Date(base.getTime());
+  next.setHours(base.getHours(), base.getMinutes(), base.getSeconds(), base.getMilliseconds());
+  next.setDate(1);
+  next.setMonth(next.getMonth() + months);
+
+  const lastDayOfTargetMonth = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate();
+  next.setDate(Math.min(desiredDay, lastDayOfTargetMonth));
+  return next;
 }
 
 function buildWebhookPayload(store, overview, schedule, subject, body) {
