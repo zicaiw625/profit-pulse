@@ -11,6 +11,10 @@ import { isPlanLimitError } from "../errors/plan-limit-error.js";
 import { getAttributionRules as defaultGetAttributionRules } from "./attribution.server.js";
 import { startOfDay } from "../utils/dates.server.js";
 import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+import {
+  recordOrderProcessing,
+  recordPlanLimitError,
+} from "./metrics.server.js";
 
 const { CostType, CredentialProvider } = pkg;
 const ATTRIBUTION_CHANNELS = [
@@ -31,6 +35,8 @@ const defaultDependencies = {
   notifyPlanOverage,
   processPlanOverageCharge,
   getAttributionRules: defaultGetAttributionRules,
+  recordOrderProcessing,
+  recordPlanLimitError,
 };
 
 let profitEngineDependencies = { ...defaultDependencies };
@@ -53,169 +59,179 @@ export async function processShopifyOrder({ store, payload }) {
     notifyPlanOverage: notifyPlanOverageImpl,
     processPlanOverageCharge: processPlanOverageChargeImpl,
     getAttributionRules: getAttributionRulesImpl,
+    recordOrderProcessing: recordOrderProcessingImpl,
+    recordPlanLimitError: recordPlanLimitErrorImpl,
   } = profitEngineDependencies;
 
-  if (!store?.id) {
-    throw new Error("Store is required");
-  }
+  const startedAt = Date.now();
+  const storeId = store?.id;
+  const initialMerchantId = store?.merchantId;
+  const shopifyOrderId = payload?.id ? String(payload.id) : undefined;
 
-  const storeRecord =
-    store.merchantId && store.merchant
-      ? store
-      : await prismaClient.store.findUnique({
-          where: { id: store.id },
-          include: { merchant: true },
-        });
-
-  if (!storeRecord) {
-    throw new Error("Store record not found");
-  }
-
-  const orderDate = new Date(
-    payload.processed_at ||
-      payload.closed_at ||
-      payload.created_at ||
-      payload.updated_at ||
-      Date.now(),
-  );
-  const currency = payload.currency || store.currency || "USD";
-  const subtotalIncludesDiscount =
-    payload.current_subtotal_price != null ||
-    payload.current_subtotal_price_set?.shop_money?.amount != null;
-  const subtotal = toNumber(
-    subtotalIncludesDiscount
-      ? payload.current_subtotal_price ??
-          payload.current_subtotal_price_set?.shop_money?.amount ??
-          0
-      : payload.subtotal_price ??
-          payload.subtotal_price_set?.shop_money?.amount ??
-          0,
-  );
-  const shippingLines = payload.shipping_lines ?? [];
-  const shippingRevenue = sumArray(shippingLines, (line) => toNumber(line.price));
-  const tax = toNumber(payload.current_total_tax ?? payload.total_tax ?? 0);
-  const discount = toNumber(
-    payload.current_total_discounts ?? payload.total_discounts ?? 0,
-  );
-  const total = toNumber(payload.current_total_price ?? payload.total_price ?? 0);
   const sourceName = payload.source_name ?? "online";
   const channelKey = resolveOrderChannel(sourceName);
-  const customerCountry =
-    payload.customer?.default_address?.country_code ?? undefined;
-  const paymentGateway = payload.gateway ?? payload.payment_gateway_names?.[0];
-
-  const lineItems = payload.line_items ?? [];
-  const skuCostMap = await getActiveSkuCostMapImpl(store.id, orderDate);
-
-  const lineRecords = lineItems.map((line) => {
-    const quantity = line.quantity ?? 0;
-    const price = toNumber(line.price ?? line.price_set?.shop_money?.amount ?? 0);
-    const lineDiscount = toNumber(line.total_discount ?? 0);
-    const revenue = price * quantity - lineDiscount;
-    const sku = line.sku ?? undefined;
-    const unitCost = sku ? skuCostMap.get(sku) ?? 0 : 0;
-    const cogs = unitCost * quantity;
-
-    return {
-      productId: line.product_id ? String(line.product_id) : null,
-      variantId: line.variant_id ? String(line.variant_id) : null,
-      sku,
-      title: line.title ?? "",
-      quantity,
-      price,
-      discount: lineDiscount,
-      revenue,
-      cogs,
-    };
-  });
-
-  const totalUnits = lineRecords.reduce((sum, line) => sum + line.quantity, 0);
-  const cogsTotal = lineRecords.reduce((sum, line) => sum + line.cogs, 0);
-  const revenue =
-    subtotal -
-    (subtotalIncludesDiscount ? 0 : discount) +
-    shippingRevenue +
-    tax;
-
-  const templates = await getVariableCostTemplatesImpl(store.id);
-  const variableCosts = evaluateTemplates(templates, {
-    orderTotal: total,
-    subtotal,
-    shippingRevenue,
-    paymentGateway,
-    channel: channelKey,
-  });
-
-  const shippingAddress =
-    payload.shipping_address ?? payload.customer?.default_address ?? null;
-  const destinationCountry =
-    shippingAddress?.country_code ??
-    customerCountry ??
-    undefined;
-  const destinationRegion =
-    shippingAddress?.province_code ??
-    shippingAddress?.province ??
-    undefined;
-  const totalWeightGrams =
-    toNumber(payload.total_weight ?? 0) ||
-    lineItems.reduce(
-      (sum, item) =>
-        sum + toNumber(item.grams ?? 0) * (item.quantity ?? 0),
-      0,
-    );
-  const weightKg = totalWeightGrams / 1000;
-  const shippingCarrier =
-    shippingLines[0]?.carrier_identifier ??
-    shippingLines[0]?.carrier ??
-    shippingLines[0]?.title ??
-    undefined;
-  const logisticsCost = await getLogisticsCostImpl({
-    storeId: store.id,
-    country: destinationCountry,
-    region: destinationRegion,
-    weightKg,
-    provider: shippingCarrier,
-    date: orderDate,
-    currency,
-  });
-
-  const refunds = extractRefunds(payload, currency);
-
-  const costTotals = aggregateCostTotals(variableCosts);
-  const shippingTemplateCost = costTotals[CostType.SHIPPING] ?? 0;
-  const shippingCost = shippingTemplateCost + logisticsCost;
-  const paymentFees = costTotals[CostType.PAYMENT_FEE] ?? 0;
-  const platformFees = costTotals[CostType.PLATFORM_FEE] ?? 0;
-  const customCosts = costTotals[CostType.CUSTOM] ?? 0;
-
-  const grossProfit = revenue - cogsTotal - shippingCost - paymentFees;
-  const netProfit = grossProfit - platformFees - customCosts;
-
-  const orderPayload = {
-    storeId: store.id,
-    shopifyOrderId: String(payload.id),
-    orderNumber: payload.name ?? payload.order_number?.toString(),
-    currency,
-    presentmentCurrency: payload.presentment_currency ?? currency,
-    subtotal,
-    shipping: shippingRevenue,
-    tax,
-    discount,
-    total: total || revenue,
-    financialStatus: payload.financial_status ?? "paid",
-    processedAt: orderDate,
-    sourceName,
-    customerCountry,
-    customerId: payload.customer?.id ? String(payload.customer.id) : null,
-    customerEmail: payload.customer?.email?.toLowerCase?.() ?? null,
-    customerName: buildCustomerName(payload.customer),
-    grossProfit,
-    netProfit,
-  };
-
-  const pendingOverageRecordIds = [];
+  const effectiveShopifyOrderId = shopifyOrderId ?? String(payload.id);
+  let storeRecord;
 
   try {
+    if (!storeId) {
+      throw new Error("Store is required");
+    }
+
+    storeRecord =
+      store.merchantId && store.merchant
+        ? store
+        : await prismaClient.store.findUnique({
+            where: { id: storeId },
+            include: { merchant: true },
+          });
+
+    if (!storeRecord) {
+      throw new Error("Store record not found");
+    }
+
+    const orderDate = new Date(
+      payload.processed_at ||
+        payload.closed_at ||
+        payload.created_at ||
+        payload.updated_at ||
+        Date.now(),
+    );
+    const currency = payload.currency || store.currency || "USD";
+    const subtotalIncludesDiscount =
+      payload.current_subtotal_price != null ||
+      payload.current_subtotal_price_set?.shop_money?.amount != null;
+    const subtotal = toNumber(
+      subtotalIncludesDiscount
+        ? payload.current_subtotal_price ??
+            payload.current_subtotal_price_set?.shop_money?.amount ??
+            0
+        : payload.subtotal_price ??
+            payload.subtotal_price_set?.shop_money?.amount ??
+            0,
+    );
+    const shippingLines = payload.shipping_lines ?? [];
+    const shippingRevenue = sumArray(shippingLines, (line) => toNumber(line.price));
+    const tax = toNumber(payload.current_total_tax ?? payload.total_tax ?? 0);
+    const discount = toNumber(
+      payload.current_total_discounts ?? payload.total_discounts ?? 0,
+    );
+    const total = toNumber(payload.current_total_price ?? payload.total_price ?? 0);
+    const customerCountry =
+      payload.customer?.default_address?.country_code ?? undefined;
+    const paymentGateway = payload.gateway ?? payload.payment_gateway_names?.[0];
+
+    const lineItems = payload.line_items ?? [];
+    const skuCostMap = await getActiveSkuCostMapImpl(store.id, orderDate);
+
+    const lineRecords = lineItems.map((line) => {
+      const quantity = line.quantity ?? 0;
+      const price = toNumber(line.price ?? line.price_set?.shop_money?.amount ?? 0);
+      const lineDiscount = toNumber(line.total_discount ?? 0);
+      const revenue = price * quantity - lineDiscount;
+      const sku = line.sku ?? undefined;
+      const unitCost = sku ? skuCostMap.get(sku) ?? 0 : 0;
+      const cogs = unitCost * quantity;
+
+      return {
+        productId: line.product_id ? String(line.product_id) : null,
+        variantId: line.variant_id ? String(line.variant_id) : null,
+        sku,
+        title: line.title ?? "",
+        quantity,
+        price,
+        discount: lineDiscount,
+        revenue,
+        cogs,
+      };
+    });
+
+    const totalUnits = lineRecords.reduce((sum, line) => sum + line.quantity, 0);
+    const cogsTotal = lineRecords.reduce((sum, line) => sum + line.cogs, 0);
+    const revenue =
+      subtotal -
+      (subtotalIncludesDiscount ? 0 : discount) +
+      shippingRevenue +
+      tax;
+
+    const templates = await getVariableCostTemplatesImpl(store.id);
+    const variableCosts = evaluateTemplates(templates, {
+      orderTotal: total,
+      subtotal,
+      shippingRevenue,
+      paymentGateway,
+      channel: channelKey,
+    });
+
+    const shippingAddress =
+      payload.shipping_address ?? payload.customer?.default_address ?? null;
+    const destinationCountry =
+      shippingAddress?.country_code ??
+      customerCountry ??
+      undefined;
+    const destinationRegion =
+      shippingAddress?.province_code ??
+      shippingAddress?.province ??
+      undefined;
+    const totalWeightGrams =
+      toNumber(payload.total_weight ?? 0) ||
+      lineItems.reduce(
+        (sum, item) =>
+          sum + toNumber(item.grams ?? 0) * (item.quantity ?? 0),
+        0,
+      );
+    const weightKg = totalWeightGrams / 1000;
+    const shippingCarrier =
+      shippingLines[0]?.carrier_identifier ??
+      shippingLines[0]?.carrier ??
+      shippingLines[0]?.title ??
+      undefined;
+    const logisticsCost = await getLogisticsCostImpl({
+      storeId: store.id,
+      country: destinationCountry,
+      region: destinationRegion,
+      weightKg,
+      provider: shippingCarrier,
+      date: orderDate,
+      currency,
+    });
+
+    const refunds = extractRefunds(payload, currency);
+
+    const costTotals = aggregateCostTotals(variableCosts);
+    const shippingTemplateCost = costTotals[CostType.SHIPPING] ?? 0;
+    const shippingCost = shippingTemplateCost + logisticsCost;
+    const paymentFees = costTotals[CostType.PAYMENT_FEE] ?? 0;
+    const platformFees = costTotals[CostType.PLATFORM_FEE] ?? 0;
+    const customCosts = costTotals[CostType.CUSTOM] ?? 0;
+
+    const grossProfit = revenue - cogsTotal - shippingCost - paymentFees;
+    const netProfit = grossProfit - platformFees - customCosts;
+
+    const orderPayload = {
+      storeId: store.id,
+      shopifyOrderId: effectiveShopifyOrderId,
+      orderNumber: payload.name ?? payload.order_number?.toString(),
+      currency,
+      presentmentCurrency: payload.presentment_currency ?? currency,
+      subtotal,
+      shipping: shippingRevenue,
+      tax,
+      discount,
+      total: total || revenue,
+      financialStatus: payload.financial_status ?? "paid",
+      processedAt: orderDate,
+      sourceName,
+      customerCountry,
+      customerId: payload.customer?.id ? String(payload.customer.id) : null,
+      customerEmail: payload.customer?.email?.toLowerCase?.() ?? null,
+      customerName: buildCustomerName(payload.customer),
+      grossProfit,
+      netProfit,
+    };
+
+    const pendingOverageRecordIds = [];
+
     const transactionResult = await prismaClient.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { shopifyOrderId: orderPayload.shopifyOrderId },
@@ -339,19 +355,56 @@ export async function processShopifyOrder({ store, payload }) {
         });
       }
     }
+
+    recordOrderProcessingImpl({
+      storeId: store.id,
+      merchantId: storeRecord.merchantId,
+      shopifyOrderId: effectiveShopifyOrderId,
+      status: "success",
+      durationMs: Date.now() - startedAt,
+      channel: channelKey,
+      totals: {
+        revenue: transactionResult.revenue,
+        grossProfit: transactionResult.grossProfit,
+        netProfit: transactionResult.netProfit,
+        refundCount: Array.isArray(transactionResult.refunds)
+          ? transactionResult.refunds.length
+          : undefined,
+      },
+    });
+
     return transactionResult;
   } catch (error) {
+    const merchantId = storeRecord?.merchantId ?? initialMerchantId;
     if (
       isPlanLimitError(error) &&
-      storeRecord?.merchantId &&
+      merchantId &&
       error.detail?.limit !== undefined
     ) {
       await notifyPlanOverageImpl({
-        merchantId: storeRecord.merchantId,
+        merchantId,
         limit: error.detail.limit,
         usage: error.detail.usage ?? 0,
       });
+      recordPlanLimitErrorImpl({
+        merchantId,
+        storeId,
+        limit: error.detail.limit,
+        usage: error.detail.usage ?? 0,
+        source: "processShopifyOrder",
+      });
     }
+
+    recordOrderProcessingImpl({
+      storeId,
+      merchantId,
+      shopifyOrderId: effectiveShopifyOrderId,
+      status: "failure",
+      durationMs: Date.now() - startedAt,
+      channel: channelKey,
+      error,
+    });
+
     throw error;
   }
 }

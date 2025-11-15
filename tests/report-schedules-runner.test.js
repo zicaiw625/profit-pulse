@@ -54,6 +54,7 @@ describe('runScheduledReports', () => {
       warn: mock.fn(),
       error: mock.fn(),
     };
+    const metricsMock = mock.fn();
 
     setReportScheduleRunnerDependenciesForTests({
       listReportSchedules: async () => [schedule],
@@ -67,6 +68,7 @@ describe('runScheduledReports', () => {
       getReportingOverview: async () => baseOverview,
       evaluatePerformanceAlerts: async () => {},
       logger: loggerMock,
+      recordReportScheduleExecution: metricsMock,
     });
 
     await runScheduledReports({ now });
@@ -89,6 +91,12 @@ describe('runScheduledReports', () => {
 
     assert.equal(loggerMock.warn.mock.callCount(), 0);
     assert.equal(loggerMock.error.mock.callCount(), 0);
+
+    assert.equal(metricsMock.mock.callCount(), 1);
+    const [metricsArgs] = metricsMock.mock.calls[0].arguments;
+    assert.equal(metricsArgs.scheduleId, schedule.id);
+    assert.equal(metricsArgs.status, 'success');
+    assert.equal(metricsArgs.storeId, store.id);
   });
 
   it('logs a warning when a digest fails to dispatch', async () => {
@@ -114,6 +122,7 @@ describe('runScheduledReports', () => {
 
     const warnMock = mock.fn();
     const errorMock = mock.fn();
+    const metricsMock = mock.fn();
 
     setReportScheduleRunnerDependenciesForTests({
       listReportSchedules: async () => [schedule],
@@ -127,6 +136,7 @@ describe('runScheduledReports', () => {
       getReportingOverview: async () => baseOverview,
       evaluatePerformanceAlerts: async () => {},
       logger: { warn: warnMock, error: errorMock },
+      recordReportScheduleExecution: metricsMock,
     });
 
     await runScheduledReports({ now });
@@ -139,6 +149,11 @@ describe('runScheduledReports', () => {
     assert.equal(notifyMock.mock.callCount(), 1);
     assert.equal(updateMock.mock.callCount(), 1);
     assert.equal(errorMock.mock.callCount(), 0);
+
+    assert.equal(metricsMock.mock.callCount(), 1);
+    const [metricsArgs] = metricsMock.mock.calls[0].arguments;
+    assert.equal(metricsArgs.status, 'delivery_failed');
+    assert.equal(metricsArgs.scheduleId, schedule.id);
   });
 
   it('skips inactive or not-yet-due schedules', async () => {
@@ -172,6 +187,7 @@ describe('runScheduledReports', () => {
     const updateMock = mock.fn(async () => ({}));
     const notifyMock = mock.fn(async () => true);
     const emailMock = mock.fn(async () => true);
+    const metricsMock = mock.fn();
 
     setReportScheduleRunnerDependenciesForTests({
       listReportSchedules: async () => [inactive, future],
@@ -185,6 +201,7 @@ describe('runScheduledReports', () => {
       getReportingOverview: async () => baseOverview,
       evaluatePerformanceAlerts: async () => {},
       logger: { warn: mock.fn(), error: mock.fn() },
+      recordReportScheduleExecution: metricsMock,
     });
 
     await runScheduledReports({ now });
@@ -193,5 +210,6 @@ describe('runScheduledReports', () => {
     assert.equal(updateMock.mock.callCount(), 0);
     assert.equal(notifyMock.mock.callCount(), 0);
     assert.equal(emailMock.mock.callCount(), 0);
+    assert.equal(metricsMock.mock.callCount(), 0);
   });
 });
