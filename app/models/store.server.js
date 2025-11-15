@@ -152,7 +152,7 @@ function isUniqueConstraintError(error) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     return error.code === "P2002";
   }
-  return error.code === "P2002";
+  return false;
 }
 
 async function findExistingStoreWithRetry(shopDomain, attempts = 5) {

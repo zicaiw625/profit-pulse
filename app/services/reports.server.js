@@ -1,13 +1,14 @@
-import prisma from "../db.server";
-import { getFixedCostBreakdown } from "./fixed-costs.server";
-import { getExchangeRate } from "./exchange-rates.server";
+import prisma from "../db.server.js";
+import { getFixedCostBreakdown } from "./fixed-costs.server.js";
+import { getExchangeRate } from "./exchange-rates.server.js";
 import {
   startOfDay,
   shiftDays,
   resolveTimezone,
   formatDateKey,
 } from "../utils/dates.server.js";
-import { buildCacheKey, memoizeAsync } from "./cache.server";
+import { buildCacheKey, memoizeAsync } from "./cache.server.js";
+import { evaluateFormulaExpression } from "./report-formulas.server.js";
 
 const DEFAULT_RANGE_DAYS = 30;
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -664,27 +665,6 @@ async function populateCustomerLifetimeMetrics({
     bucket.lifetimeOrders = lifetime.orders;
     bucket.repeatOrders = Math.max(0, lifetime.orders - 1);
   });
-}
-
-function evaluateFormulaExpression(expression, values = {}) {
-  const sanitized = expression.replace(/[^0-9a-zA-Z_+\-*/().\s]/g, "");
-  if (!sanitized.trim()) {
-    return null;
-  }
-  const substituted = sanitized.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (token) => {
-    if (Object.prototype.hasOwnProperty.call(values, token)) {
-      const numeric = Number(values[token] ?? 0);
-      return Number.isFinite(numeric) ? String(numeric) : "0";
-    }
-    return "0";
-  });
-  try {
-    const result = Function(`"use strict"; return (${substituted});`)();
-    return Number.isFinite(result) ? Number(result) : null;
-  } catch (error) {
-    console.error("Failed to evaluate custom report formula", error);
-    return null;
-  }
 }
 
 async function buildReportingOverview({ storeId, rangeDays, range, context }) {
