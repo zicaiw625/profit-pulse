@@ -2,6 +2,11 @@ import prisma from "../../db.server";
 import shopify from "../../shopify.server";
 import { processShopifyOrder } from "../profit-engine.server";
 
+const ORDER_SYNC_CONCURRENCY = Number.parseInt(
+  process.env.ORDER_SYNC_CONCURRENCY ?? "5",
+  10,
+);
+
 export async function syncShopifyOrders({ store, session, days = 2 }) {
   if (!store?.id) {
     throw new Error("Store is required to sync Shopify orders");
@@ -29,9 +34,17 @@ export async function syncShopifyOrders({ store, session, days = 2 }) {
     });
 
     const orders = response.body?.orders ?? [];
-    for (const payload of orders) {
-      await processShopifyOrder({ store, payload });
-      processed += 1;
+    const concurrency = Number.isFinite(ORDER_SYNC_CONCURRENCY) && ORDER_SYNC_CONCURRENCY > 0
+      ? ORDER_SYNC_CONCURRENCY
+      : 5;
+    for (let index = 0; index < orders.length; index += concurrency) {
+      const batch = orders.slice(index, index + concurrency);
+      await Promise.all(
+        batch.map(async (payload) => {
+          await processShopifyOrder({ store, payload });
+          processed += 1;
+        }),
+      );
     }
 
     cursor = response.pageInfo?.nextPage?.query?.page_info ?? null;

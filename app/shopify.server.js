@@ -6,8 +6,8 @@ import {
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
-import prisma from "./db.server";
-import { BILLING_CONFIG } from "./config/billing";
+import prisma from "./db.server.js";
+import { BILLING_CONFIG } from "./config/billing.js";
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
