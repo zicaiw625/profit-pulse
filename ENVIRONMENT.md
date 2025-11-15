@@ -20,6 +20,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PROFIT_PULSE_EMAIL_ENDPOINT` | ⚠️ | HTTPS endpoint that accepts POST requests for outbound email. Required to enable scheduled email reports. |
+| `WEBHOOK_HOST_ALLOWLIST` | ⚠️ | Comma-separated list of additional webhook hosts or wildcards (e.g. `analytics.example.com,*.reports.internal`). Entries extend the built-in Slack/Teams/Zapier/Make allowlist. |
 
 ## Reporting & scheduling
 
@@ -28,6 +29,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
 | `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 | `CREDENTIAL_REFRESH_CONCURRENCY` | ⚠️ | Upper bound on parallel ad credential refreshes. Defaults to 5. |
+| `PAYOUT_SYNC_CONCURRENCY` | ⚠️ | Caps the number of simultaneous payout upserts across PayPal/Stripe/Klarna syncs. Defaults to 5 with a hard ceiling of 10. |
 
 ## Caching
 
@@ -90,5 +92,5 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 ## Operational tips
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
-- Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` will receive payloads.
+- Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` or `WEBHOOK_HOST_ALLOWLIST` will receive payloads.
 - For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.

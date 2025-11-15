@@ -58,7 +58,7 @@ export async function createReportSchedule({
 
     if (!isAllowedWebhookUrl(normalizedWebhookUrl)) {
       throw new Error(
-        "Webhook URL must be HTTPS and point to an allowed Slack/Teams/Zapier/Make domain.",
+        "Webhook URL must be HTTPS and point to an allowed Slack/Teams/Zapier/Make domain or one configured via WEBHOOK_HOST_ALLOWLIST.",
       );
     }
 
