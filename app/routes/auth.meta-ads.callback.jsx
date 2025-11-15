@@ -6,6 +6,9 @@ import {
   META_ADS_SCOPE,
 } from "../services/oauth/meta-ads.server.js";
 import { parseCredentialSecret, upsertAdCredential } from "../services/credentials.server";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const oauthLogger = createScopedLogger({ route: "auth.meta-ads.callback" });
 
 function buildSettingsRedirect({ provider, status, message }) {
   const url = new URL("/app/settings", "http://localhost");
@@ -48,7 +51,10 @@ export const loader = async ({ request }) => {
   try {
     state = parseSignedState(stateToken);
   } catch (parseError) {
-    console.error("Invalid Meta Ads OAuth state", parseError);
+    oauthLogger.error("meta_ads_oauth_state_invalid", {
+      error: serializeError(parseError),
+      stateToken,
+    });
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
@@ -124,7 +130,12 @@ export const loader = async ({ request }) => {
       message: "Meta Ads 已成功授权。",
     });
   } catch (error) {
-    console.error("Meta Ads OAuth callback failed", error);
+    oauthLogger.error("meta_ads_oauth_callback_failed", {
+      merchantId: state?.merchantId,
+      storeId: state?.storeId,
+      accountId: state?.accountId,
+      error: serializeError(error),
+    });
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",

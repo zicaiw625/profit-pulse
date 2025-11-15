@@ -1,3 +1,7 @@
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const emailLogger = createScopedLogger({ service: "email" });
+
 export async function sendDigestEmail({ recipients, subject, body }) {
   const endpoint = process.env.PROFIT_PULSE_EMAIL_ENDPOINT;
   const payload = {
@@ -14,13 +18,27 @@ export async function sendDigestEmail({ recipients, subject, body }) {
         body: JSON.stringify(payload),
       });
     } catch (error) {
-      console.error("Failed to send scheduled digest email", error);
+      emailLogger.error("digest_email_failed", {
+        endpoint,
+        error: serializeError(error),
+      });
       return false;
     }
     return true;
   }
 
-  console.log("Scheduled digest email (mock)");
-  console.log(JSON.stringify(payload, null, 2));
+  const recipientList =
+    typeof recipients === "string"
+      ? recipients
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : Array.isArray(recipients)
+        ? recipients.filter(Boolean)
+        : [];
+  emailLogger.info("digest_email_mock", {
+    recipientsCount: recipientList.length,
+    subject,
+  });
   return true;
 }

@@ -1,4 +1,7 @@
+import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
+
 const DEFAULT_ENDPOINT = "https://api.exchangerate.host/latest";
+const fxLogger = createScopedLogger({ service: "fx-provider" });
 
 export async function fetchLatestRates(base = "USD") {
   const endpoint =
@@ -46,7 +49,10 @@ export async function fetchLatestRates(base = "USD") {
       rates,
     };
   } catch (error) {
-    console.error("Failed to fetch live FX data, falling back to defaults.", error);
+    fxLogger.error("fx_rates_fetch_failed", {
+      endpoint: url.toString(),
+      error: serializeError(error),
+    });
     const now = new Date();
     return {
       base,

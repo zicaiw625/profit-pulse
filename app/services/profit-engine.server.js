@@ -10,6 +10,7 @@ import { notifyPlanOverage, processPlanOverageCharge } from "./overages.server.j
 import { isPlanLimitError } from "../errors/plan-limit-error.js";
 import { getAttributionRules as defaultGetAttributionRules } from "./attribution.server.js";
 import { startOfDay } from "../utils/dates.server.js";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const { CostType, CredentialProvider } = pkg;
 const ATTRIBUTION_CHANNELS = [
@@ -18,6 +19,8 @@ const ATTRIBUTION_CHANNELS = [
   CredentialProvider.BING_ADS,
   CredentialProvider.TIKTOK_ADS,
 ];
+
+const profitEngineLogger = createScopedLogger({ service: "profit-engine" });
 
 const defaultDependencies = {
   prismaClient: defaultPrisma,
@@ -330,10 +333,10 @@ export async function processShopifyOrder({ store, payload }) {
       try {
         await processPlanOverageChargeImpl(overageId);
       } catch (billingError) {
-        console.error(
-          `Failed to process overage usage record ${overageId}:`,
-          billingError,
-        );
+        profitEngineLogger.error("plan_overage_charge_failed", {
+          overageRecordId: overageId,
+          error: serializeError(billingError),
+        });
       }
     }
     return transactionResult;
