@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
-import prisma from "../db.server";
-import shopify, { sessionStorage } from "../shopify.server";
-import { sendSlackNotification } from "./notifications.server";
+import prisma from "../db.server.js";
+import { sendSlackNotification } from "./notifications.server.js";
 
 const BILLING_TEST_MODE =
   process.env.SHOPIFY_BILLING_TEST_MODE === "true" ||
   process.env.NODE_ENV !== "production";
+
+let shopifyModulePromise;
+
+async function loadShopifyModule() {
+  if (!shopifyModulePromise) {
+    shopifyModulePromise = import("../shopify.server.js");
+  }
+  return shopifyModulePromise;
+}
 
 const OverageStatus = {
   PENDING: "PENDING",
@@ -106,6 +114,8 @@ export async function processPlanOverageCharge(overageRecordId) {
     });
     return null;
   }
+
+  const { default: shopify, sessionStorage } = await loadShopifyModule();
 
   const sessionId = `offline_${storeDomain}`;
   const session = await sessionStorage.loadSession(sessionId);
