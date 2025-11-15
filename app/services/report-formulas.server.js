@@ -7,6 +7,15 @@ export function setReportFormulaLoggerForTests(logger) {
   formulaLogger = logger ?? defaultLogger;
 }
 
+/**
+ * evaluateFormulaExpression intentionally supports only a minimal arithmetic grammar:
+ * addition, subtraction, multiplication, division, parentheses, whitespace, and
+ * identifiers that match `/[A-Za-z_][A-Za-z0-9_]*`. Do not expand this sanitizer to
+ * admit broader JavaScript syntax (function calls, array literals, template strings,
+ * etc.). If future requirements need richer expressions, swap this implementation for
+ * a dedicated parser/evaluator rather than relaxing the allowed character set or
+ * continuing to execute arbitrary strings via `Function`.
+ */
 export function evaluateFormulaExpression(expression, values = {}) {
   if (typeof expression !== "string") {
     return null;
