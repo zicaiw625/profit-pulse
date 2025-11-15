@@ -59,6 +59,11 @@ async function loadShopifyApi() {
   return module.default;
 }
 
+const ORDER_SYNC_CONCURRENCY = Number.parseInt(
+  process.env.ORDER_SYNC_CONCURRENCY ?? "5",
+  10,
+);
+
 export async function syncShopifyOrders({ store, session, days = 2 }) {
   if (!store?.id) {
     throw new Error("Store is required to sync Shopify orders");
