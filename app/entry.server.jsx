@@ -5,7 +5,7 @@ import { createReadableStreamFromReadable } from "@react-router/node";
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 import { applySecurityHeaders } from "./utils/security.server";
-import { validateRequiredEnv } from "./utils/env.server";
+import { validateRequiredEnv } from "./utils/env.server.js";
 import { createScopedLogger, serializeError } from "./utils/logger.server.js";
 
 validateRequiredEnv();
