@@ -1,13 +1,13 @@
-import prisma from "../db.server";
-import { getFixedCostBreakdown } from "./fixed-costs.server";
-import { getExchangeRate } from "./exchange-rates.server";
+import prisma from "../db.server.js";
+import { getFixedCostBreakdown } from "./fixed-costs.server.js";
+import { getExchangeRate } from "./exchange-rates.server.js";
 import {
   startOfDay,
   shiftDays,
   resolveTimezone,
   formatDateKey,
 } from "../utils/dates.server.js";
-import { buildCacheKey, memoizeAsync } from "./cache.server";
+import { buildCacheKey, memoizeAsync } from "./cache.server.js";
 
 const DEFAULT_RANGE_DAYS = 30;
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -666,6 +666,10 @@ async function populateCustomerLifetimeMetrics({
   });
 }
 
+// NOTE: This parser intentionally supports only a restricted subset of arithmetic expressions
+// (`+`, `-`, `*`, `/`, parentheses, identifiers, and numeric literals). Do not extend the
+// allowed character set or introduce additional JavaScript syntax here without replacing the
+// evaluator, otherwise the `Function` call below could become a code execution vector.
 function evaluateFormulaExpression(expression, values = {}) {
   const sanitized = expression.replace(/[^0-9a-zA-Z_+\-*/().\s]/g, "");
   if (!sanitized.trim()) {
