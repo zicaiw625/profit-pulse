@@ -75,6 +75,11 @@ npm test
 - Sensitive API credentials are encrypted with `CREDENTIAL_ENCRYPTION_KEY` before persistence.
 - Plan limit enforcement locks monthly usage rows with `FOR UPDATE` semantics to prevent double counting under concurrency.
 
+## Caching and scale-out
+
+- The default cache backend is in-process for simplicity. Set both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable a shared Upstash Redis cache accessed via HTTPS, which keeps memoized FX rates and dashboard aggregates coherent across instances.
+- When no external backend is configured, memoized functions remain safe to call—they simply recompute results per instance.
+
 ## Contributing
 
 Issues and pull requests that improve observability, add integration coverage, or expand automated tests are appreciated. Please:

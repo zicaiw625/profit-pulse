@@ -28,6 +28,13 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
 | `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 
+## Caching
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `UPSTASH_REDIS_REST_URL` | ⚠️ | HTTPS base URL for an Upstash Redis REST instance. When paired with `UPSTASH_REDIS_REST_TOKEN`, memoized cache reads/writes are shared across all Profit Pulse instances. |
+| `UPSTASH_REDIS_REST_TOKEN` | ⚠️ | Bearer token for the Upstash REST endpoint. Required when `UPSTASH_REDIS_REST_URL` is set. |
+
 ## Exchange rates
 
 | Variable | Required | Description |
@@ -83,4 +90,4 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
 - Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` will receive payloads.
-- For multi-instance deployments, consider an external cache or message bus if you need to share memoized data across nodes; the default cache is process-local.
+- For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.
