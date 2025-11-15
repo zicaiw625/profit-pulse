@@ -1,14 +1,14 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
+import defaultPrisma from "../db.server.js";
 import {
   getActiveSkuCostMap,
   getVariableCostTemplates,
-} from "./costs.server";
-import { getLogisticsCost } from "./logistics.server";
-import { ensureOrderCapacity } from "./plan-limits.server";
-import { notifyPlanOverage, processPlanOverageCharge } from "./overages.server";
-import { isPlanLimitError } from "../errors/plan-limit-error";
-import { getAttributionRules } from "./attribution.server";
+} from "./costs.server.js";
+import { getLogisticsCost } from "./logistics.server.js";
+import { ensureOrderCapacity } from "./plan-limits.server.js";
+import { notifyPlanOverage, processPlanOverageCharge } from "./overages.server.js";
+import { isPlanLimitError } from "../errors/plan-limit-error.js";
+import { getAttributionRules as defaultGetAttributionRules } from "./attribution.server.js";
 import { startOfDay } from "../utils/dates.server.js";
 
 const { CostType, CredentialProvider } = pkg;
@@ -19,7 +19,39 @@ const ATTRIBUTION_CHANNELS = [
   CredentialProvider.TIKTOK_ADS,
 ];
 
+const defaultDependencies = {
+  prismaClient: defaultPrisma,
+  getActiveSkuCostMap,
+  getVariableCostTemplates,
+  getLogisticsCost,
+  ensureOrderCapacity,
+  notifyPlanOverage,
+  processPlanOverageCharge,
+  getAttributionRules: defaultGetAttributionRules,
+};
+
+let profitEngineDependencies = { ...defaultDependencies };
+
+export function setProfitEngineDependenciesForTests(overrides = {}) {
+  profitEngineDependencies = { ...profitEngineDependencies, ...overrides };
+}
+
+export function resetProfitEngineDependenciesForTests() {
+  profitEngineDependencies = { ...defaultDependencies };
+}
+
 export async function processShopifyOrder({ store, payload }) {
+  const {
+    prismaClient,
+    getActiveSkuCostMap: getActiveSkuCostMapImpl,
+    getVariableCostTemplates: getVariableCostTemplatesImpl,
+    getLogisticsCost: getLogisticsCostImpl,
+    ensureOrderCapacity: ensureOrderCapacityImpl,
+    notifyPlanOverage: notifyPlanOverageImpl,
+    processPlanOverageCharge: processPlanOverageChargeImpl,
+    getAttributionRules: getAttributionRulesImpl,
+  } = profitEngineDependencies;
+
   if (!store?.id) {
     throw new Error("Store is required");
   }
@@ -27,7 +59,7 @@ export async function processShopifyOrder({ store, payload }) {
   const storeRecord =
     store.merchantId && store.merchant
       ? store
-      : await prisma.store.findUnique({
+      : await prismaClient.store.findUnique({
           where: { id: store.id },
           include: { merchant: true },
         });
@@ -70,7 +102,7 @@ export async function processShopifyOrder({ store, payload }) {
   const paymentGateway = payload.gateway ?? payload.payment_gateway_names?.[0];
 
   const lineItems = payload.line_items ?? [];
-  const skuCostMap = await getActiveSkuCostMap(store.id, orderDate);
+  const skuCostMap = await getActiveSkuCostMapImpl(store.id, orderDate);
 
   const lineRecords = lineItems.map((line) => {
     const quantity = line.quantity ?? 0;
@@ -102,7 +134,7 @@ export async function processShopifyOrder({ store, payload }) {
     shippingRevenue +
     tax;
 
-  const templates = await getVariableCostTemplates(store.id);
+  const templates = await getVariableCostTemplatesImpl(store.id);
   const variableCosts = evaluateTemplates(templates, {
     orderTotal: total,
     subtotal,
@@ -134,7 +166,7 @@ export async function processShopifyOrder({ store, payload }) {
     shippingLines[0]?.carrier ??
     shippingLines[0]?.title ??
     undefined;
-  const logisticsCost = await getLogisticsCost({
+  const logisticsCost = await getLogisticsCostImpl({
     storeId: store.id,
     country: destinationCountry,
     region: destinationRegion,
@@ -181,7 +213,7 @@ export async function processShopifyOrder({ store, payload }) {
   const pendingOverageRecordIds = [];
 
   try {
-    const transactionResult = await prisma.$transaction(async (tx) => {
+    const transactionResult = await prismaClient.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { shopifyOrderId: orderPayload.shopifyOrderId },
         include: {
@@ -201,7 +233,7 @@ export async function processShopifyOrder({ store, payload }) {
 
       const isNewOrder = !existingOrder;
       if (isNewOrder && storeRecord?.merchantId) {
-        const capacityResult = await ensureOrderCapacity({
+        const capacityResult = await ensureOrderCapacityImpl({
           merchantId: storeRecord.merchantId,
           incomingOrders: 1,
           tx,
@@ -272,14 +304,18 @@ export async function processShopifyOrder({ store, payload }) {
         channel: channelKey,
       });
 
-      await allocateAdSpendAttributions(tx, {
-        storeId: store.id,
-        merchantId: storeRecord.merchantId,
-        orderId: order.id,
-        date: orderDate,
-        revenue,
-        currency,
-      });
+      await allocateAdSpendAttributions(
+        tx,
+        {
+          storeId: store.id,
+          merchantId: storeRecord.merchantId,
+          orderId: order.id,
+          date: orderDate,
+          revenue,
+          currency,
+        },
+        getAttributionRulesImpl,
+      );
 
       return {
         revenue,
@@ -292,7 +328,7 @@ export async function processShopifyOrder({ store, payload }) {
     });
     for (const overageId of pendingOverageRecordIds) {
       try {
-        await processPlanOverageCharge(overageId);
+        await processPlanOverageChargeImpl(overageId);
       } catch (billingError) {
         console.error(
           `Failed to process overage usage record ${overageId}:`,
@@ -307,7 +343,7 @@ export async function processShopifyOrder({ store, payload }) {
       storeRecord?.merchantId &&
       error.detail?.limit !== undefined
     ) {
-      await notifyPlanOverage({
+      await notifyPlanOverageImpl({
         merchantId: storeRecord.merchantId,
         limit: error.detail.limit,
         usage: error.detail.usage ?? 0,
@@ -924,7 +960,11 @@ function buildCustomerName(customer) {
   );
 }
 
-async function allocateAdSpendAttributions(tx, payload) {
+async function allocateAdSpendAttributions(
+  tx,
+  payload,
+  getAttributionRulesImpl = defaultGetAttributionRules,
+) {
   const { storeId, merchantId, orderId, date, revenue, currency } = payload;
   if (!merchantId || !orderId || !date || !revenue) {
     return;
@@ -961,7 +1001,7 @@ async function allocateAdSpendAttributions(tx, payload) {
 
   if (!providerRows.length) return;
 
-  const rules = await getAttributionRules(merchantId);
+  const rules = await getAttributionRulesImpl(merchantId);
   const ruleTouchMap = new Map((rules ?? []).map((rule) => [rule.provider, rule.touches ?? []]));
 
   const attributions = providerRows
