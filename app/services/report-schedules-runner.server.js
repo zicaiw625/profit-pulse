@@ -5,6 +5,7 @@ import { listReportSchedules } from "./report-schedules.server";
 import { sendDigestEmail } from "./email.server";
 import { notifyWebhook, sendSlackNotification } from "./notifications.server";
 import { formatCurrency, formatPercent } from "../utils/formatting";
+import { logger } from "../utils/logger.server.js";
 import { evaluatePerformanceAlerts } from "./alert-triggers.server";
 
 const { ReportFrequency } = pkg;
@@ -14,6 +15,8 @@ const FREQUENCY_INTERVAL_MS = {
   [ReportFrequency.WEEKLY]: 1000 * 60 * 60 * 24 * 7,
 };
 
+const scheduleLogger = logger.child({ service: "report-schedules" });
+
 export async function runScheduledReports({ now = new Date() } = {}) {
   const schedules = await listReportSchedules();
   const dueSchedules = schedules.filter((schedule) => isScheduleDue(schedule, now));
@@ -21,7 +24,10 @@ export async function runScheduledReports({ now = new Date() } = {}) {
     try {
       await executeSchedule(schedule, now);
     } catch (error) {
-      console.error(`Failed to execute schedule ${schedule.id}`, error);
+      scheduleLogger.error("Failed to execute report schedule", {
+        scheduleId: schedule.id,
+        error: error?.message,
+      });
     }
   }
 }
@@ -40,7 +46,9 @@ async function executeSchedule(schedule, now) {
     orderBy: { installedAt: "asc" },
   });
   if (!store) {
-    console.warn("No store found for report schedule", schedule.id);
+    scheduleLogger.warn("No store found for report schedule", {
+      scheduleId: schedule.id,
+    });
     return;
   }
 
@@ -73,7 +81,9 @@ async function executeSchedule(schedule, now) {
   });
 
   if (!dispatched) {
-    console.warn("Scheduled digest email failed for", schedule.id);
+    scheduleLogger.warn("Scheduled digest delivery failed", {
+      scheduleId: schedule.id,
+    });
   }
 }
 
@@ -89,7 +99,9 @@ async function deliverDigest({ schedule, store, overview, subject, body }) {
   if (schedule.channel === "WEBHOOK") {
     const webhookUrl = schedule.settings?.webhookUrl;
     if (!webhookUrl) {
-      console.warn("Webhook schedule missing URL", schedule.id);
+      scheduleLogger.warn("Webhook schedule missing URL", {
+        scheduleId: schedule.id,
+      });
       return false;
     }
     return notifyWebhook({

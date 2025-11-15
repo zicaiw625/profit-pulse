@@ -5,6 +5,7 @@ import {
   isAllowedWebhookUrl,
   notifyWebhook,
   setNotificationAuditLoggerForTests,
+  setNotificationLoggerForTests,
 } from '../app/services/notifications.server.js';
 
 describe('isAllowedWebhookUrl', () => {
@@ -33,19 +34,24 @@ describe('isAllowedWebhookUrl', () => {
 describe('notifyWebhook', () => {
   let originalFetch;
   let auditMock;
-  let warnMock;
+  let loggerMocks;
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     auditMock = mock.fn(async () => {});
     setNotificationAuditLoggerForTests(auditMock);
-    warnMock = mock.method(console, 'warn', () => {});
+    loggerMocks = {
+      info: mock.fn(() => {}),
+      warn: mock.fn(() => {}),
+      error: mock.fn(() => {}),
+    };
+    setNotificationLoggerForTests(loggerMocks);
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     setNotificationAuditLoggerForTests();
-    warnMock.mock.restore();
+    setNotificationLoggerForTests();
   });
 
   it('sends to allowed hosts and returns success', async () => {
@@ -78,6 +84,7 @@ describe('notifyWebhook', () => {
     assert.equal(ok, false);
     assert.equal(fetchMock.mock.callCount(), 0);
     assert.equal(auditMock.mock.callCount(), 1);
+    assert.equal(loggerMocks.warn.mock.callCount(), 1);
     const [auditArgs] = auditMock.mock.calls[0].arguments;
     assert.equal(auditArgs.merchantId, 'merchant-456');
     assert.equal(auditArgs.action, 'notification.webhook_blocked');

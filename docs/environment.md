@@ -26,6 +26,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | Variable | Required | Description |
 | --- | --- | --- |
 | `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
+| `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 
 ## Exchange rates
 

@@ -1,5 +1,6 @@
 import prisma from "../db.server.js";
 import { NOTIFICATION_CHANNEL_TYPES } from "../constants/notificationTypes.js";
+import { logger } from "../utils/logger.server.js";
 import { logAuditEvent } from "./audit.server.js";
 
 const WEBHOOK_TIMEOUT_MS = 5000;
@@ -12,9 +13,14 @@ const EXACT_ALLOWED_HOSTS = new Set([
 const WILDCARD_HOST_SUFFIXES = ["office.com"];
 
 let auditLogger = logAuditEvent;
+let notificationLogger = logger.child({ service: "notifications" });
 
 export function setNotificationAuditLoggerForTests(logger) {
   auditLogger = typeof logger === "function" ? logger : logAuditEvent;
+}
+
+export function setNotificationLoggerForTests(testLogger) {
+  notificationLogger = testLogger || logger.child({ service: "notifications", test: true });
 }
 
 export async function listNotificationChannels(merchantId, type) {
@@ -152,7 +158,7 @@ export async function notifyWebhook({
   if (!url) return false;
   const normalizedUrl = url.trim();
   if (!isAllowedWebhookUrl(normalizedUrl)) {
-    console.warn("Blocked webhook URL", {
+    notificationLogger.warn("Blocked webhook URL", {
       url: normalizedUrl,
       merchantId,
       context,
@@ -168,7 +174,7 @@ export async function notifyWebhook({
   }
   const result = await postJsonWithRetry(normalizedUrl, payload ?? {});
   if (!result.ok) {
-    console.error("Failed to notify webhook", {
+    notificationLogger.error("Failed to notify webhook", {
       url: normalizedUrl,
       status: result.status,
       error: result.error,
