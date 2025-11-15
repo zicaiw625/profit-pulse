@@ -6,9 +6,11 @@ import {
   processPlanOverageCharge,
   schedulePlanOverageRecord,
 } from "../services/overages.server.js";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const { PlanTier, Prisma } = pkg;
 const defaultPlan = PLAN_DEFINITIONS.FREE;
+const storeLogger = createScopedLogger({ service: "store" });
 
 export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
   if (!shopDomain) {
@@ -124,10 +126,10 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
       try {
         await processPlanOverageCharge(overageRecord.id);
       } catch (error) {
-        console.error(
-          `Failed to process store overage usage record ${overageRecord.id}:`,
-          error,
-        );
+        storeLogger.error("store_overage_charge_failed", {
+          overageRecordId: overageRecord.id,
+          error: serializeError(error),
+        });
       }
     }
   }

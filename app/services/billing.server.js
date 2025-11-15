@@ -8,8 +8,11 @@ import {
   BILLABLE_PLANS,
 } from "../config/billing.js";
 import { sendSlackNotification } from "./notifications.server.js";
+import { createScopedLogger } from "../utils/logger.server.js";
 
 const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
+
+const billingLogger = createScopedLogger({ service: "billing" });
 
 const BILLING_TEST_MODE =
   process.env.SHOPIFY_BILLING_TEST_MODE === "true" ||
@@ -113,9 +116,7 @@ export async function applySubscriptionWebhook({ shopDomain, payload }) {
   });
 
   if (!store?.merchantId) {
-    console.warn(
-      `No merchant found for ${shopDomain} while processing billing webhook.`,
-    );
+    billingLogger.warn("billing_webhook_missing_merchant", { shopDomain });
     return;
   }
 

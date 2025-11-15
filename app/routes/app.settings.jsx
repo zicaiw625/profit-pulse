@@ -78,6 +78,17 @@ import { syncErpCosts } from "../services/erp-costs.server";
 import { syncInventoryAndCosts } from "../services/inventory.server";
 import { queueGdprRequest, processGdprRequest } from "../services/privacy.server";
 import { syncAccountingProvider } from "../services/accounting-sync.server";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+
+const settingsLogger = createScopedLogger({ route: "app.settings" });
+
+function logActionFailure(action, error, meta = {}) {
+  settingsLogger.error("settings_action_failed", {
+    action,
+    ...meta,
+    error: serializeError(error),
+  });
+}
 import {
   CredentialProvider,
   AttributionRuleType,
@@ -545,7 +556,7 @@ export const action = async ({ request }) => {
       });
       return { message: `Ad spend synced for ${provider}.` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-ad-provider", error, { provider });
       return {
         message:
           "Failed to sync ad spend. Verify credentials or try again shortly.",
@@ -709,7 +720,7 @@ export const action = async ({ request }) => {
         message: `已同步 ${provider} 的物流费率（${result.processed} 条规则）。`,
       };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-logistics-provider", error, { provider });
       return {
         message: error.message ?? "同步物流费率失败，请检查凭证。",
       };
@@ -795,7 +806,10 @@ export const action = async ({ request }) => {
       });
       return { message: `已保存 ${baseCurrency} → ${quoteCurrency} 汇率。` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("set-custom-exchange-rate", error, {
+        base: baseCurrency,
+        quote: quoteCurrency,
+      });
       return { message: error.message ?? "保存汇率失败，请稍后再试。" };
     }
   }
@@ -834,7 +848,7 @@ export const action = async ({ request }) => {
       });
       return { message: `已导入 ${count} 条 ${provider} 结算记录。` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("import-payment-payouts", error, { provider });
       return { message: error.message ?? "无法解析结算 CSV，请检查格式。" };
     }
   }
@@ -855,7 +869,10 @@ export const action = async ({ request }) => {
       if (isPlanLimitError(error)) {
         return { message: error.message };
       }
-      console.error(error);
+      logActionFailure("sync-shopify-orders", error, {
+        shop: store.shopDomain,
+        lookbackDays: 7,
+      });
       return { message: "Failed to sync Shopify orders. Check app permissions and try again." };
     }
   }
@@ -871,7 +888,7 @@ export const action = async ({ request }) => {
       });
       return { message: "Shopify Payments payouts refreshed." };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-shopify-payments", error, { shop: store.shopDomain });
       return {
         message: "Failed to sync Shopify Payments. Try again shortly.",
       };
@@ -889,7 +906,7 @@ export const action = async ({ request }) => {
       });
       return { message: `PayPal payouts synced (${result.processed} records).` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-paypal-payments", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "Failed to sync PayPal payouts. Check API credentials.",
       };
@@ -907,7 +924,7 @@ export const action = async ({ request }) => {
       });
       return { message: `Stripe payouts synced (${result.processed} records).` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-stripe-payments", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "Failed to sync Stripe payouts. Verify STRIPE_SECRET_KEY.",
       };
@@ -925,7 +942,7 @@ export const action = async ({ request }) => {
       });
       return { message: `Klarna payouts synced (${result.processed} records).` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-klarna-payments", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "Failed to sync Klarna payouts. Check API credentials.",
       };
@@ -945,7 +962,7 @@ export const action = async ({ request }) => {
         message: `Inventory updated (${summary.variants} variants / ${summary.inventoryRows} rows).`,
       };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-inventory", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "Inventory sync failed. Confirm product & inventory scopes.",
       };
@@ -972,7 +989,7 @@ export const action = async ({ request }) => {
       });
       return { message: `Imported ${imported} SKU cost rows.` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("import-sku-costs", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "Unable to import SKU costs. Please check your file.",
       };
@@ -1053,7 +1070,7 @@ export const action = async ({ request }) => {
       });
       return null;
     } catch (error) {
-      console.error(error);
+      logActionFailure("change-plan", error, { planTier });
       return {
         message: "Unable to start billing session. Please try again.",
       };
@@ -1156,7 +1173,10 @@ export const action = async ({ request }) => {
       });
       return { message: "Report schedule saved." };
     } catch (error) {
-      console.error(error);
+      logActionFailure("create-report-schedule", error, {
+        frequency,
+        channel,
+      });
       return {
         message: error.message ?? "Unable to create report schedule.",
       };
@@ -1185,8 +1205,8 @@ export const action = async ({ request }) => {
     if (!store.merchantId) {
       return { message: "无法识别商户。" };
     }
+    const updates = [];
     try {
-      const updates = [];
       for (const option of ATTRIBUTION_PROVIDER_OPTIONS) {
         for (const ruleType of ATTRIBUTION_RULE_TYPES) {
           const weightValue = Number(
@@ -1221,7 +1241,10 @@ export const action = async ({ request }) => {
       });
       return { message: "Attribution rules updated." };
     } catch (error) {
-      console.error(error);
+      logActionFailure("update-attribution-rules", error, {
+        shop: store.shopDomain,
+        ruleCount: updates.length,
+      });
       return {
         message: error.message ?? "Unable to update attribution rules.",
       };
@@ -1247,7 +1270,7 @@ export const action = async ({ request }) => {
       });
       return { message: `导入 ${imported} 条物流规则。` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("import-logistics-rates", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "无法导入物流规则，请检查 CSV 格式。",
       };
@@ -1272,7 +1295,7 @@ export const action = async ({ request }) => {
       });
       return { message: `导入 ${imported} 条税率模板。` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("import-tax-rates", error, { shop: store.shopDomain });
       return {
         message: error.message ?? "无法导入税率模板，请检查 CSV。",
       };
@@ -1290,7 +1313,7 @@ export const action = async ({ request }) => {
       });
       return { message: `ERP cost sync completed (${imported} rows).` };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-erp-costs", error, { shop: store.shopDomain });
       return {
         message:
           error.message ?? "无法同步 ERP 成本，请检查配置或稍后重试。",
@@ -1312,7 +1335,10 @@ export const action = async ({ request }) => {
         message: `${provider} sync dispatched (${result.count} rows).`,
       };
     } catch (error) {
-      console.error(error);
+      logActionFailure("sync-accounting-provider", error, {
+        shop: store.shopDomain,
+        provider,
+      });
       return {
         message: error.message ?? `Failed to sync ${provider}.` ,
       };
@@ -1348,7 +1374,10 @@ export const action = async ({ request }) => {
           : `已排队删除 ${subjectEmail} 的个人数据。`;
       return { message: summaryLabel };
     } catch (error) {
-      console.error(error);
+      logActionFailure("queue-gdpr-request", error, {
+        type,
+        subjectEmail,
+      });
       return {
         message: error.message ?? "GDPR 请求排队失败，请稍后重试。",
       };
@@ -1377,7 +1406,7 @@ export const action = async ({ request }) => {
           : "GDPR 删除请求已处理并匿名化客户数据。";
       return { message: successMessage };
     } catch (error) {
-      console.error(error);
+      logActionFailure("process-gdpr-request", error, { requestId });
       return {
         message: error.message ?? "处理 GDPR 请求失败，请稍后重试。",
       };
