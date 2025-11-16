@@ -35,8 +35,7 @@ export default function Auth() {
               autoComplete="on"
               error={errors.shop}
             ></s-text-field>
-            {/* 关键点：用 submit 属性，而不是 type="submit" */}
-            <s-button submit>Log in</s-button>
+            <button type="submit">Log in</button>
           </s-section>
         </Form>
       </s-page>
