@@ -1070,6 +1070,11 @@ export const action = async ({ request }) => {
       });
       return null;
     } catch (error) {
+      // 关键修复点：不要拦截 Shopify 的重定向 Response
+      if (error instanceof Response) {
+        throw error;
+      }
+  
       logActionFailure("change-plan", error, { planTier });
       return {
         message: "Unable to start billing session. Please try again.",
