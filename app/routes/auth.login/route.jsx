@@ -35,10 +35,10 @@ export default function Auth() {
               details="example.myshopify.com"
               value={shop}
               onChange={(e) => setShop(e.currentTarget.value)}
-              autocomplete="on"
+              autoComplete="on"
               error={errors.shop}
             ></s-text-field>
-            <s-button type="submit">Log in</s-button>
+            <s-button submit>Log in</s-button>
           </s-section>
         </Form>
       </s-page>
