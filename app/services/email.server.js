@@ -13,7 +13,7 @@ export async function sendDigestEmail({ recipients, subject, body }) {
           .filter(Boolean)
       : [];
   const payload = {
-    to: recipients,
+    to: normalizedRecipients,
     subject,
     body,
   };
