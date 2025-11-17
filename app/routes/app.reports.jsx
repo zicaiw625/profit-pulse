@@ -144,8 +144,10 @@ export default function ReportsPage() {
   };
 
   useEffect(() => {
-    builderFetcher.load(buildAppUrl(buildCustomUrl()));
-  }, [buildAppUrl, builderFetcher]);
+    if (builderFetcher.state === "idle" && !builderFetcher.data) {
+      builderFetcher.load(buildAppUrl(buildCustomUrl()));
+    }
+  }, [buildAppUrl, builderFetcher.state, builderFetcher.data]);
 
   const handleBuilderSubmit = (event) => {
     event.preventDefault();
