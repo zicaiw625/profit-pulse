@@ -19,7 +19,7 @@ RUN npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/scripts ./scripts
+# COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/shopify.app.toml ./shopify.app.toml
 COPY --from=builder /app/shopify.web.toml ./shopify.web.toml
 EXPOSE 3000
