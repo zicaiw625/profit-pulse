@@ -1,10 +1,23 @@
 import prisma from "../db.server.js";
 import { fetchLatestRates } from "./external/fx-provider.server.js";
+import { createScopedLogger } from "../utils/logger.server.js";
+
+const fxLogger = createScopedLogger({ service: "exchange-rates" });
 
 export async function refreshExchangeRates(base = "USD") {
-  const data = await fetchLatestRates(base);
+  let data = null;
+  try {
+    data = await fetchLatestRates(base);
+  } catch (error) {
+    fxLogger.error("exchange_rate_fetch_failed", {
+      base,
+      error: error?.message ?? "unknown_error",
+    });
+    return null;
+  }
   if (!data || !data.rates) {
-    throw new Error("Failed to fetch exchange rates");
+    fxLogger.warn("exchange_rate_payload_missing", { base });
+    return null;
   }
   const entries = Object.entries(data.rates).map(([quote, rate]) => ({
     base,

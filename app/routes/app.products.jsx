@@ -44,6 +44,7 @@ export default function ProductsPage() {
   const buildAppUrl = useAppUrlBuilder();
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
+  const missingCostCount = products.filter((product) => product.missingCost).length;
 
   return (
     <s-page heading="Product profitability" subtitle="SKU level sales, COGS, and net profit">
@@ -78,6 +79,19 @@ export default function ProductsPage() {
         </Form>
       </s-section>
 
+      {missingCostCount > 0 && (
+        <s-section>
+          <s-banner tone="warning" title="Some SKUs are missing costs">
+            <s-text variation="subdued">
+              {`${missingCostCount} SKU(s) have revenue but zero cost. Update their COGS to keep profit accurate.`}
+            </s-text>
+            <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
+              Update costs
+            </s-button>
+          </s-banner>
+        </s-section>
+      )}
+
       <s-section heading="Products">
         <s-data-table>
           <table>
@@ -98,6 +112,12 @@ export default function ProductsPage() {
                     <strong>{product.title}</strong>
                     <br />
                     <s-text variation="subdued">{product.sku}</s-text>
+                    {product.missingCost && (
+                      <>
+                        <br />
+                        <s-badge tone="critical">Missing cost</s-badge>
+                      </>
+                    )}
                   </td>
                   <td align="right">{product.units.toLocaleString()}</td>
                   <td align="right">{formatCurrency(product.revenue, currency)}</td>

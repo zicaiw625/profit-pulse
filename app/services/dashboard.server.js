@@ -83,6 +83,30 @@ async function buildDashboardOverview({ store, timezone, range, rangeDays }) {
       ? await getPlanUsage({ merchantId: storeRecord.merchantId })
       : null;
 
+  const [missingCostOrders, totalOrdersInRange, totalOrdersAllTime] =
+    await Promise.all([
+      prisma.order.count({
+        where: {
+          storeId: store.id,
+          processedAt: { gte: range.start, lte: range.end },
+          lineItems: {
+            some: {
+              OR: [{ cogs: null }, { cogs: 0 }],
+            },
+          },
+        },
+      }),
+      prisma.order.count({
+        where: {
+          storeId: store.id,
+          processedAt: { gte: range.start, lte: range.end },
+        },
+      }),
+      prisma.order.count({
+        where: { storeId: store.id },
+      }),
+    ]);
+
   const summaryCards = buildSummaryCards({
     current: currentMetrics,
     previous: previousMetrics,
@@ -117,6 +141,17 @@ async function buildDashboardOverview({ store, timezone, range, rangeDays }) {
     currency: masterCurrency,
     planStatus: buildPlanStatus(planUsage),
     timezone,
+    missingCost: {
+      orders: missingCostOrders,
+      total: totalOrdersInRange,
+      percent:
+        totalOrdersInRange > 0
+          ? missingCostOrders / totalOrdersInRange
+          : 0,
+    },
+    syncState: {
+      totalOrders: totalOrdersAllTime,
+    },
   };
 }
 
@@ -241,22 +276,25 @@ function buildCostBreakdown({ metrics, conversionRate }) {
   const adSpend = sumField(metrics, "adSpend") * conversionRate;
   const shipping = sumField(metrics, "shippingCost") * conversionRate;
   const paymentFees = sumField(metrics, "paymentFees") * conversionRate;
-  const refunds = sumField(metrics, "refundAmount") * conversionRate;
 
-  const slices = [
-    { label: "COGS", value: cogs },
-    { label: "Ad spend", value: adSpend },
-    { label: "Payment fees", value: paymentFees },
-    { label: "Shipping", value: shipping },
-    { label: "Refunds", value: refunds },
+  const coreTotal = cogs + adSpend + shipping + paymentFees;
+  const other = Math.max(0, revenue - coreTotal);
+
+  return [
+    createSlice("COGS", cogs, revenue),
+    createSlice("Ad spend", adSpend, revenue),
+    createSlice("Fees", paymentFees, revenue),
+    createSlice("Shipping", shipping, revenue),
+    createSlice("Other", other, revenue),
   ];
-  const accounted = slices.reduce((sum, slice) => sum + slice.value, 0);
-  slices.push({ label: "Other", value: Math.max(0, revenue - accounted) });
+}
 
-  return slices.map((slice) => ({
-    ...slice,
-    percentage: revenue > 0 ? slice.value / revenue : 0,
-  }));
+function createSlice(label, amount, revenue) {
+  return {
+    label,
+    amount,
+    share: revenue > 0 ? amount / revenue : 0,
+  };
 }
 
 async function loadTopProducts({
@@ -289,6 +327,7 @@ async function loadTopProducts({
       sku: row.sku ?? "Unknown SKU",
       title: row.sku ?? "Unknown SKU",
       revenue,
+      cogs,
       netProfit,
       margin: revenue > 0 ? netProfit / revenue : 0,
       units: Number(row._sum.quantity || 0),

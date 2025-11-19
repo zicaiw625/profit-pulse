@@ -121,9 +121,11 @@ export default function SettingsPage() {
         <IntegrationList integrations={settings.integrations} />
       </s-section>
 
-      <s-section heading="Cost configuration">
-        <CostConfiguration costConfig={settings.costConfig} primaryCurrency={settings.primaryCurrency} />
-      </s-section>
+      <div id="costs">
+        <s-section heading="Cost configuration">
+          <CostConfiguration costConfig={settings.costConfig} primaryCurrency={settings.primaryCurrency} />
+        </s-section>
+      </div>
 
       <s-section heading="Manual sync tools">
         <SyncTools />

@@ -114,6 +114,32 @@ export async function seedDemoCostConfiguration({ storeId, currency = "USD" }) {
     await tx.costTemplate.create({
       data: {
         storeId,
+        name: "PayPal fee",
+        type: CostType.PAYMENT_FEE,
+        config: {
+          gateway: "paypal",
+          appliesTo: "TOTAL",
+        },
+        lines: {
+          create: [
+            {
+              label: "Fixed fee",
+              flatAmount: 0.3,
+              appliesTo: "ORDER_TOTAL",
+            },
+            {
+              label: "Percentage fee",
+              percentageRate: 0.034,
+              appliesTo: "ORDER_TOTAL",
+            },
+          ],
+        },
+      },
+    });
+
+    await tx.costTemplate.create({
+      data: {
+        storeId,
         name: "Average shipping label",
         type: CostType.SHIPPING,
         config: {

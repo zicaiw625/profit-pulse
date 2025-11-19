@@ -6,6 +6,7 @@ import {
   runReconciliationChecks,
 } from "../services/reconciliation.server";
 import { formatCurrency } from "../utils/formatting";
+import { RECONCILIATION_THRESHOLDS } from "../config/reconciliationThresholds.js";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -14,11 +15,19 @@ export const loader = async ({ request }) => {
   const snapshot = await getReconciliationSnapshot({
     storeId: store.id,
   });
-  return { snapshot };
+  return {
+    snapshot,
+    rules: RECONCILIATION_THRESHOLDS,
+    currency: store.currency ?? "USD",
+  };
 };
 
 export default function ReconciliationPage() {
-  const { snapshot } = useLoaderData();
+  const { snapshot, rules, currency } = useLoaderData();
+  const paymentPercent = (rules.payment.percentDelta * 100).toFixed(1);
+  const paymentAmount = formatCurrency(rules.payment.amountDelta, currency);
+  const adsMultiple = rules.ads.conversionMultiple.toFixed(1);
+  const spendThreshold = formatCurrency(rules.ads.minSpendWithoutConversions, currency);
 
   return (
     <s-page heading="Reconciliation workspace">
@@ -36,6 +45,15 @@ export default function ReconciliationPage() {
             </s-card>
           ))}
         </s-stack>
+      </s-section>
+
+      <s-section heading="Rule of thumb">
+        <s-card padding="base">
+          <s-text variation="subdued">
+            当某天 Shopify 与支付渠道营收差异超过 {paymentPercent}% 或 {paymentAmount} 时，我们会标记为「支付异常」；
+            当 Meta 转化数高于 Shopify 订单 {adsMultiple} 倍，或花费超过 {spendThreshold} 但 0 转化时，会标记为「广告异常」。
+          </s-text>
+        </s-card>
       </s-section>
 
       <s-section heading="Open issues">

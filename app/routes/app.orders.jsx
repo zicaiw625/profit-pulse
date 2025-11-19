@@ -86,6 +86,7 @@ export default function OrdersPage() {
                 <th align="left">Date</th>
                 <th align="right">Revenue</th>
                 <th align="right">COGS</th>
+                <th align="right">Shipping</th>
                 <th align="right">Fees</th>
                 <th align="right">Advertising</th>
                 <th align="right">Net profit</th>
@@ -99,12 +100,8 @@ export default function OrdersPage() {
                   <td>{formatDateShort(order.processedAt)}</td>
                   <td align="right">{formatCurrency(order.revenue, order.currency ?? currency)}</td>
                   <td align="right">{formatCurrency(order.cogs, order.currency ?? currency)}</td>
-                  <td align="right">
-                    {formatCurrency(
-                      order.paymentFees + order.platformFees + order.shippingCost,
-                      order.currency ?? currency,
-                    )}
-                  </td>
+                  <td align="right">{formatCurrency(order.shippingCost, order.currency ?? currency)}</td>
+                  <td align="right">{formatCurrency(order.paymentFees + order.platformFees, order.currency ?? currency)}</td>
                   <td align="right">{formatCurrency(order.adSpend, order.currency ?? currency)}</td>
                   <td align="right">{formatCurrency(order.netProfit, order.currency ?? currency)}</td>
                   <td align="right">{formatPercent(order.margin)}</td>

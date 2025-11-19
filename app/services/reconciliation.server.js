@@ -1,5 +1,6 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
+import { RECONCILIATION_THRESHOLDS } from "../config/reconciliationThresholds.js";
 import {
   startOfDay,
   shiftDays,
@@ -7,9 +8,11 @@ import {
   resolveTimezone,
 } from "../utils/dates.server.js";
 import { formatCurrency } from "../utils/formatting";
+import { createScopedLogger } from "../utils/logger.server.js";
 
 const { ReconciliationIssueType, IssueStatus } = pkg;
 const DEFAULT_RANGE_DAYS = 14;
+const reconciliationLogger = createScopedLogger({ service: "reconciliation" });
 
 export async function getReconciliationSnapshot({
   storeId,
@@ -54,6 +57,8 @@ export async function getReconciliationSnapshot({
 
 export async function detectPaymentDiscrepancies({ storeId, timezone }) {
   const tz = timezone ?? (await getStoreTimezone(storeId));
+  const amountThreshold = RECONCILIATION_THRESHOLDS.payment.amountDelta;
+  const percentThreshold = RECONCILIATION_THRESHOLDS.payment.percentDelta;
   const payouts = await prisma.paymentPayout.findMany({
     where: { storeId },
     orderBy: { payoutDate: "desc" },
@@ -89,7 +94,8 @@ export async function detectPaymentDiscrepancies({ storeId, timezone }) {
     );
     const netAmount = Number(payout.netAmount || 0);
     const diff = Math.abs(orderTotal - netAmount);
-    if (diff > 50) {
+    const percentDiff = orderTotal > 0 ? diff / orderTotal : 0;
+    if (diff > amountThreshold || percentDiff > percentThreshold) {
       issues.push({
         storeId,
         issueType: ReconciliationIssueType.SHOPIFY_VS_PAYMENT,
@@ -98,7 +104,7 @@ export async function detectPaymentDiscrepancies({ storeId, timezone }) {
         currency: payout.currency,
         status: IssueStatus.OPEN,
         details: {
-          message: `Orders total ${formatCurrency(orderTotal)} vs payout ${formatCurrency(netAmount)}`,
+          message: `Orders total ${formatCurrency(orderTotal)} vs payout ${formatCurrency(netAmount)} (>${percentThreshold * 100}% or ${formatCurrency(amountThreshold, payout.currency)})`,
           channel: "Shopify Payments",
           payoutId: payout.payoutId,
         },
@@ -112,6 +118,8 @@ export async function detectPaymentDiscrepancies({ storeId, timezone }) {
 
 export async function detectAdConversionAnomalies({ storeId, timezone }) {
   const tz = timezone ?? (await getStoreTimezone(storeId));
+  const conversionMultiple = RECONCILIATION_THRESHOLDS.ads.conversionMultiple;
+  const spendThreshold = RECONCILIATION_THRESHOLDS.ads.minSpendWithoutConversions;
   const adSpend = await prisma.adSpendRecord.groupBy({
     by: ["provider", "date"],
     where: {
@@ -152,7 +160,7 @@ export async function detectAdConversionAnomalies({ storeId, timezone }) {
     const dateKey = formatDateKey(row.date, { timezone: tz });
     const conversions = Number(row._sum.conversions || 0);
     const orders = orderCountByDay.get(dateKey) ?? 0;
-    if (conversions > orders * 1.5) {
+    if (conversions > orders * conversionMultiple) {
       issues.push({
         storeId,
         issueType: ReconciliationIssueType.SHOPIFY_VS_ADS,
@@ -163,7 +171,7 @@ export async function detectAdConversionAnomalies({ storeId, timezone }) {
           channel: row.provider,
         },
       });
-    } else if (orders > 5 && conversions === 0 && Number(row._sum.spend || 0) > 200) {
+    } else if (orders > 5 && conversions === 0 && Number(row._sum.spend || 0) > spendThreshold) {
       issues.push({
         storeId,
         issueType: ReconciliationIssueType.SHOPIFY_VS_ADS,
@@ -183,8 +191,15 @@ export async function detectAdConversionAnomalies({ storeId, timezone }) {
 
 export async function runReconciliationChecks({ storeId }) {
   const timezone = await getStoreTimezone(storeId);
-  await detectPaymentDiscrepancies({ storeId, timezone });
-  await detectAdConversionAnomalies({ storeId, timezone });
+  const [paymentIssues, adIssues] = await Promise.all([
+    detectPaymentDiscrepancies({ storeId, timezone }),
+    detectAdConversionAnomalies({ storeId, timezone }),
+  ]);
+  reconciliationLogger.info("reconciliation_run", {
+    storeId,
+    paymentIssues: paymentIssues.length,
+    adIssues: adIssues.length,
+  });
 }
 
 async function persistIssues(storeId, issues, issueType) {

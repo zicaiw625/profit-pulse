@@ -111,14 +111,17 @@ export async function getProductProfitTable({
     const cogs = Number(row._sum.cogs || 0);
     const netProfit = revenue - cogs;
     const margin = revenue > 0 ? netProfit / revenue : 0;
+    const units = Number(row._sum.quantity || 0);
+    const missingCost = revenue > 0 && cogs <= 0 && units > 0;
     return {
       sku: row.sku ?? "Unknown SKU",
       title: row.title ?? row.sku ?? "Unknown SKU",
-      units: Number(row._sum.quantity || 0),
+      units,
       revenue,
       cogs,
       netProfit,
       margin,
+      missingCost,
     };
   });
 

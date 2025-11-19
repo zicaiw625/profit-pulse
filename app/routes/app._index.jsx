@@ -46,6 +46,8 @@ export default function DashboardIndex() {
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
   const planStatus = overview.planStatus ?? null;
+  const missingCost = overview.missingCost ?? null;
+  const pendingSync = (overview.syncState?.totalOrders ?? 0) === 0;
   const localizedCards = overview.summaryCards.map((card) => ({
     ...card,
     label: CARD_LABEL_MAP[card.key]
@@ -62,6 +64,27 @@ export default function DashboardIndex() {
       heading={t(TRANSLATION_KEYS.DASHBOARD_HEADING)}
       subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)} · ${overview.shopDomain}`}
     >
+      {pendingSync && (
+        <s-section>
+          <s-banner tone="info" title="数据同步中">
+            <s-text variation="subdued">
+              Shopify 订单与 Meta Ads 花费正在同步，通常需要几分钟。当前展示示意数据，完成后会自动刷新。
+            </s-text>
+          </s-banner>
+        </s-section>
+      )}
+      {!pendingSync && missingCost?.orders > 0 && (
+        <s-section>
+          <s-banner tone="warning" title="部分订单缺少成本">
+            <s-text variation="subdued">
+              {`约 ${(missingCost.percent * 100).toFixed(1)}% 的订单缺少 SKU 成本，净利润可能被高估。`}
+            </s-text>
+            <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
+              去补成本
+            </s-button>
+          </s-banner>
+        </s-section>
+      )}
       <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_DATE_FILTERS)}>
         <Form method="get">
           {hostParam && <input type="hidden" name="host" value={hostParam} />}
@@ -97,71 +120,77 @@ export default function DashboardIndex() {
           </s-stack>
         </Form>
       </s-section>
-      <s-section heading={`${t(TRANSLATION_KEYS.DASHBOARD_PERFORMANCE)} (${overview.rangeLabel})`}>
-        <s-stack direction="inline" gap="base" wrap>
-          {localizedCards.map((card) => (
-            <MetricCard key={card.label} card={card} currency={overview.currency} />
-          ))}
-        </s-stack>
-      </s-section>
-
-      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_REVENUE_SECTION)}>
-        <s-stack direction="block" gap="base">
-          <TrendPreview
-            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE)}
-            data={overview.timeseries.revenue}
-          />
-          <TrendPreview
-            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT)}
-            data={overview.timeseries.netProfit}
-          />
-          <TrendPreview
-            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND)}
-            data={overview.timeseries.adSpend}
-          />
-        </s-stack>
-      </s-section>
-
-      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_COST_SECTION)}>
-        <CostCompositionChart
-          slices={overview.costBreakdown}
-          revenue={revenueBasis}
-          currency={overview.currency}
-        />
-      </s-section>
-
-      <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_TOP_PRODUCTS)}>
-        <s-data-table>
-          <table>
-            <thead>
-              <tr>
-                <th align="left">Product</th>
-                <th align="right">Units</th>
-                <th align="right">Revenue</th>
-                <th align="right">COGS</th>
-                <th align="right">Net profit</th>
-                <th align="right">Margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overview.topProducts.map((product) => (
-                <tr key={product.sku}>
-                  <td>
-                    <strong>{product.title}</strong>
-                    <br />
-                    <s-text variation="subdued">{product.sku}</s-text>
-                  </td>
-                  <td align="right">{product.units.toLocaleString()}</td>
-                  <td align="right">{formatCurrency(product.revenue, overview.currency)}</td>
-                  <td align="right">{formatCurrency(product.cogs ?? 0, overview.currency)}</td>
-                  <td align="right">{formatCurrency(product.netProfit, overview.currency)}</td>
-                  <td align="right">{formatPercent(product.margin)}</td>
-                </tr>
+      {pendingSync ? (
+        <DashboardPlaceholder />
+      ) : (
+        <>
+          <s-section heading={`${t(TRANSLATION_KEYS.DASHBOARD_PERFORMANCE)} (${overview.rangeLabel})`}>
+            <s-stack direction="inline" gap="base" wrap>
+              {localizedCards.map((card) => (
+                <MetricCard key={card.label} card={card} currency={overview.currency} />
               ))}
-            </tbody>
-          </table>
-        </s-data-table>
-      </s-section>
+            </s-stack>
+          </s-section>
+
+          <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_REVENUE_SECTION)}>
+            <s-stack direction="block" gap="base">
+              <TrendPreview
+                label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE)}
+                data={overview.timeseries.revenue}
+              />
+              <TrendPreview
+                label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT)}
+                data={overview.timeseries.netProfit}
+              />
+              <TrendPreview
+                label={t(TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND)}
+                data={overview.timeseries.adSpend}
+              />
+            </s-stack>
+          </s-section>
+
+          <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_COST_SECTION)}>
+            <CostCompositionChart
+              slices={overview.costBreakdown}
+              revenue={revenueBasis}
+              currency={overview.currency}
+            />
+          </s-section>
+
+          <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_TOP_PRODUCTS)}>
+            <s-data-table>
+              <table>
+                <thead>
+                  <tr>
+                    <th align="left">Product</th>
+                    <th align="right">Units</th>
+                    <th align="right">Revenue</th>
+                    <th align="right">COGS</th>
+                    <th align="right">Net profit</th>
+                    <th align="right">Margin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overview.topProducts.map((product) => (
+                    <tr key={product.sku}>
+                      <td>
+                        <strong>{product.title}</strong>
+                        <br />
+                        <s-text variation="subdued">{product.sku}</s-text>
+                      </td>
+                      <td align="right">{product.units.toLocaleString()}</td>
+                      <td align="right">{formatCurrency(product.revenue, overview.currency)}</td>
+                      <td align="right">{formatCurrency(product.cogs ?? 0, overview.currency)}</td>
+                      <td align="right">{formatCurrency(product.netProfit, overview.currency)}</td>
+                      <td align="right">{formatPercent(product.margin)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </s-data-table>
+          </s-section>
+        </>
+      )}
 
       <s-section slot="aside" heading="Plan usage">
         <PlanUsageCard planStatus={planStatus} currency={overview.currency} buildAppUrl={buildAppUrl} />
@@ -184,8 +213,8 @@ export default function DashboardIndex() {
 function CostCompositionChart({ slices, revenue, currency }) {
   const sanitized = (slices ?? []).map((slice) => ({
     label: slice.label,
-    amount: Math.max(0, Number(slice.value ?? 0)),
-    share: typeof slice.percentage === "number" ? Math.max(0, slice.percentage) : null,
+    amount: Math.max(0, Number(slice.amount ?? 0)),
+    share: Math.max(0, Number(slice.share ?? 0)),
   }));
   const totalAmount = sanitized.reduce((sum, slice) => sum + slice.amount, 0);
 
@@ -221,7 +250,7 @@ function CostCompositionChart({ slices, revenue, currency }) {
   ];
 
   let offset = 0;
-  const segments = normalized.map((slice, index) => {
+  const segments = sanitized.map((slice, index) => {
     const length = slice.share * circumference;
     const strokeDasharray = `${length} ${circumference - length}`;
     const strokeDashoffset = circumference * 0.25 - offset;
@@ -285,7 +314,7 @@ function CostCompositionChart({ slices, revenue, currency }) {
           </div>
         </div>
         <s-stack direction="block" gap="tight" align="start">
-          {normalized.map((slice, index) => (
+          {sanitized.map((slice, index) => (
             <s-stack
               key={`${slice.label}-legend-${index}`}
               direction="inline"
@@ -329,10 +358,16 @@ const CARD_LABEL_MAP = {
 
 function MetricCard({ card, currency }) {
   const trendEmoji = card.trend === "up" ? "↗︎" : "↘︎";
-  const value =
-    card.formatter === "percentage"
-      ? formatPercent(card.value)
-      : formatCurrency(card.value, currency);
+  let value;
+  if (card.formatter === "percentage") {
+    value = formatPercent(card.value);
+  } else if (card.formatter === "count") {
+    value = Number(card.value ?? 0).toLocaleString();
+  } else if (card.formatter === "multiple") {
+    value = `${(Number(card.value ?? 0)).toFixed(2)}×`;
+  } else {
+    value = formatCurrency(card.value, currency);
+  }
   const deltaText =
     typeof card.deltaPercentage === "number"
       ? `${card.deltaPercentage}% vs. prior period`
@@ -380,13 +415,6 @@ function PlanUsageCard({ planStatus, buildAppUrl }) {
     );
   }
   const usage = `${formatOrderCount(planStatus.orderUsage)} / ${formatOrderCount(planStatus.orderLimit)} orders`;
-  const tone =
-    planStatus.orderStatus === "danger"
-      ? "critical"
-      : planStatus.orderStatus === "warning"
-        ? "warning"
-        : "success";
-
   return (
     <s-card padding="base">
       <s-text variation="subdued">{planStatus.planName}</s-text>
@@ -394,7 +422,7 @@ function PlanUsageCard({ planStatus, buildAppUrl }) {
       <s-text variation="subdued">
         Status: {planStatus.planStatus ?? "UNKNOWN"}
       </s-text>
-      <s-button variant="secondary" href={buildAppUrl("/app/settings")} tone={tone}>
+      <s-button variant="secondary" href={buildAppUrl("/app/settings")}>
         Manage plan
       </s-button>
     </s-card>
@@ -403,6 +431,32 @@ function PlanUsageCard({ planStatus, buildAppUrl }) {
 
 function formatOrderCount(value) {
   return Number(value ?? 0).toLocaleString();
+}
+
+function DashboardPlaceholder() {
+  return (
+    <s-section heading="Demo preview">
+      <s-card padding="base">
+        <s-text variation="subdued">
+          数据正在同步，我们先展示一份示意图以便熟悉界面。完成同步后，所有指标会自动替换成真实数据。
+        </s-text>
+        <s-stack direction="inline" gap="base" wrap style={{ marginTop: "1rem" }}>
+          <s-card padding="base">
+            <s-text variation="subdued">Revenue</s-text>
+            <s-display-text size="small">—</s-display-text>
+          </s-card>
+          <s-card padding="base">
+            <s-text variation="subdued">Net profit</s-text>
+            <s-display-text size="small">—</s-display-text>
+          </s-card>
+          <s-card padding="base">
+            <s-text variation="subdued">ROAS</s-text>
+            <s-display-text size="small">—</s-display-text>
+          </s-card>
+        </s-stack>
+      </s-card>
+    </s-section>
+  );
 }
 
 function sparkline(values) {

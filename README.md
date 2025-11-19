@@ -2,6 +2,16 @@
 
 Profit Pulse is a profitability co-pilot for Shopify merchants. It ingests multi-store commerce data, enriches it with cost and attribution models, and surfaces real-time contribution margins so finance and operations teams can reconcile performance without spreadsheets.
 
+## V1 scope
+
+- **Who we serve** – Small and mid-sized Shopify brands that rely on paid social (Meta) and just want trustworthy profit + reconciliation.
+- **What V1 promises**  
+  1. Surface real net profit for the last 30–60 days (order & SKU level) with minimal configuration.  
+  2. Flag obvious Shopify ↔ Payments / Shopify ↔ Ads mismatches.  
+  3. Keep setup simple: OAuth, connect Meta, upload COGS, set currency, done.
+- **Intentionally out of scope for launch** – LTV/cohort views, complex accounting charts, advanced fixed-cost allocation, ERP/logistics integrations, additional ad networks, and full-blown team management. We call these out explicitly so expectations stay aligned.
+- **Language** – The UI is English-first with an experimental Chinese copy toggle for onboarding/help; we do not advertise multi-language support until feedback validates it.
+
 ## Key capabilities
 
 - **Shopify ingestion** – OAuth install flows sync Shopify orders, line items, refunds, shipping, taxes, and payouts. New installs backfill 60 days of orders and continue on a 10–15 minute cadence with webhooks for near real time updates.
