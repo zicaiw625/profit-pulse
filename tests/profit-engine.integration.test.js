@@ -351,3 +351,188 @@ test(
     assertClose(result.refunds[0].amount, 20, 1e-6, "result refund amount");
   },
 );
+
+test(
+  "processShopifyOrder allocates ad spend and tolerates missing SKU costs alongside refunds",
+  async (t) => {
+    const storeRecord = {
+      id: "store-integrated",
+      merchantId: "merchant-integrated",
+      merchant: { id: "merchant-integrated" },
+      shopDomain: "integrated.myshopify.com",
+      currency: "USD",
+      timezone: "UTC",
+    };
+
+    const recorder = createRecorder();
+    const metricsEvents = [];
+
+    const prismaStub = {
+      store: { findUnique: async () => storeRecord },
+      $transaction: async (callback) => callback(recorder.tx),
+    };
+
+    setProfitEngineDependenciesForTests({
+      prismaClient: prismaStub,
+      getActiveSkuCostMap: async () =>
+        new Map([
+          ["WITH-COST", 25],
+        ]),
+      getVariableCostTemplates: async () => [
+        {
+          id: "shipping",
+          name: "Shipping",
+          type: CostType.SHIPPING,
+          lines: [{ flatAmount: 5 }],
+        },
+      ],
+      ensureOrderCapacity: async () => undefined,
+      getAttributionRules: async () => [
+        {
+          provider: "META_ADS",
+          touches: [{ ruleType: "LAST_TOUCH", weight: 1 }],
+        },
+      ],
+      recordOrderProcessing: (event) => {
+        metricsEvents.push(event);
+      },
+    });
+
+    t.after(() => {
+      resetProfitEngineDependenciesForTests();
+    });
+
+    const processedAt = new Date("2024-02-24T13:00:00.000Z");
+    const metricDate = new Date(processedAt);
+    metricDate.setUTCHours(0, 0, 0, 0);
+
+    await recorder.tx.dailyMetric.create({
+      data: {
+        storeId: storeRecord.id,
+        channel: "TOTAL",
+        productSku: null,
+        date: metricDate,
+        currency: "USD",
+        orders: 0,
+        units: 0,
+        revenue: 1000,
+        adSpend: 200,
+        cogs: 0,
+        shippingCost: 0,
+        paymentFees: 0,
+        refundAmount: 0,
+        refunds: 0,
+        grossProfit: 0,
+        netProfit: 0,
+      },
+    });
+
+    await recorder.tx.dailyMetric.create({
+      data: {
+        storeId: storeRecord.id,
+        channel: "META_ADS",
+        productSku: null,
+        date: metricDate,
+        currency: "USD",
+        orders: 0,
+        units: 0,
+        revenue: 0,
+        adSpend: 200,
+        cogs: 0,
+        shippingCost: 0,
+        paymentFees: 0,
+        refundAmount: 0,
+        refunds: 0,
+        grossProfit: 0,
+        netProfit: 0,
+      },
+    });
+
+    const payload = {
+      id: "missing-cost-order",
+      name: "#1001",
+      currency: "USD",
+      current_total_price: "215.00",
+      current_total_tax: "5.00",
+      current_total_discounts: "0.00",
+      current_subtotal_price: "200.00",
+      source_name: "online",
+      processed_at: processedAt.toISOString(),
+      gateway: "shopify_payments",
+      line_items: [
+        {
+          product_id: 10,
+          variant_id: 11,
+          sku: "WITH-COST",
+          title: "Known SKU",
+          quantity: 1,
+          price: "120.00",
+          total_discount: "0.00",
+        },
+        {
+          product_id: 20,
+          variant_id: 21,
+          sku: "NO-COST",
+          title: "Missing SKU",
+          quantity: 1,
+          price: "80.00",
+          total_discount: "0.00",
+        },
+      ],
+      shipping_lines: [
+        {
+          title: "UPS Ground",
+          price: "10.00",
+        },
+      ],
+      refunds: [
+        {
+          id: "refund-1",
+          processed_at: processedAt.toISOString(),
+          transactions: [{ id: "t-1", amount: "-15.00", currency: "USD" }],
+          refund_line_items: [
+            {
+              line_item: { sku: "NO-COST" },
+              total_set: { shop_money: { amount: "15.00", currency_code: "USD" } },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await processShopifyOrder({
+      store: { id: storeRecord.id },
+      payload,
+    });
+
+    assert.equal(metricsEvents.length, 1);
+    assert.equal(metricsEvents[0].totals?.missingSkuCostCount, 1);
+
+    assert.equal(recorder.orderUpserts.length, 1);
+    const [costBatch] = recorder.orderCostBatches;
+    const cogsRow = costBatch.find((row) => row.type === CostType.COGS);
+    assert.ok(cogsRow, "expected COGS row");
+    assert.equal(cogsRow.amount, 25, "only known SKU contributes to COGS");
+
+    const totalMetric = Array.from(recorder.metricMap.values()).find(
+      (metric) => metric.channel === "TOTAL",
+    );
+    assert.ok(totalMetric, "should update TOTAL metric");
+    assert.equal(totalMetric.orders, 1);
+    assertClose(totalMetric.refundAmount, 15, 1e-6, "refund total recorded");
+
+    assert.equal(recorder.orderAttributionCreates.length, 1);
+    const [attributionRows] = recorder.orderAttributionCreates;
+    assert.equal(attributionRows.length, 1);
+    assert.equal(attributionRows[0].provider, "META_ADS");
+    assertClose(
+      attributionRows[0].amount,
+      43,
+      1e-3,
+      "ad attribution amount should reflect revenue share",
+    );
+
+    assert.equal(result.refunds.length, 1);
+    assertClose(result.refunds[0].amount, 15, 1e-6, "refund amount returned");
+  },
+);

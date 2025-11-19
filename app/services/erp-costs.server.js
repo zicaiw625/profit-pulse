@@ -1,4 +1,7 @@
+// TODO: enable when ERP cost imports are production ready.
 import prisma from "../db.server";
+import { ExternalServiceError } from "../errors/external-service-error.js";
+import { fetchWithTimeout } from "../utils/http.server.js";
 
 function toNumber(value) {
   if (value === null || value === undefined || value === "") {
@@ -23,12 +26,14 @@ export async function syncErpCosts({ storeId }) {
     throw new Error("ERP cost sync URL is not configured");
   }
 
-  const response = await fetch(`${url}?storeId=${storeId}`);
+  const response = await fetchWithTimeout("erp-costs", `${url}?storeId=${storeId}`);
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(
-      `ERP cost sync failed (${response.status}): ${message.slice(0, 200)}`,
-    );
+    throw new ExternalServiceError("erp-costs", {
+      status: response.status,
+      message: "ERP cost sync failed",
+      detail: message.slice(0, 200),
+    });
   }
 
   const payload = await response.json();

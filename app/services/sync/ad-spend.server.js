@@ -8,8 +8,10 @@ import {
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server";
 import { formatDateKey, startOfDay } from "../../utils/dates.server.js";
 import { getExchangeRate } from "../exchange-rates.server";
+import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
 
 const { CredentialProvider, SyncJobType } = pkg;
+const syncLogger = createScopedLogger({ service: "sync.ad-spend" });
 
 const CONNECTORS = {
   META_ADS: ({ credential, secret, days }) =>
@@ -77,6 +79,11 @@ export async function syncAdProvider({ store, provider, days = 7 }) {
       processed: records.length,
     };
   } catch (error) {
+    syncLogger.error("ad_provider_sync_failed", {
+      storeId: store.id,
+      provider,
+      error: serializeError(error),
+    });
     await failSyncJob(job.id, error);
     throw error;
   }

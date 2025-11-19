@@ -71,6 +71,20 @@ export default function DashboardIndex() {
               Shopify 订单与 Meta Ads 花费正在同步，通常需要几分钟。当前展示示意数据，完成后会自动刷新。
             </s-text>
           </s-banner>
+          <s-card padding="base">
+            <s-heading>下一步操作</s-heading>
+            <s-text variation="subdued">
+              导入 COGS、连接 Meta Ads，并等待 Shopify Webhook 生效即可看到真实利润。
+            </s-text>
+            <s-stack direction="inline" gap="base" wrap style={{ marginTop: "0.75rem" }}>
+              <s-button variant="primary" href={buildAppUrl("/app/onboarding")}>
+                查看 Onboarding
+              </s-button>
+              <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
+                上传 SKU 成本
+              </s-button>
+            </s-stack>
+          </s-card>
         </s-section>
       )}
       {!pendingSync && missingCost?.orders > 0 && (

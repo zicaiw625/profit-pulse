@@ -14,7 +14,7 @@ export const loader = async ({ request }) => {
   const endParam = url.searchParams.get("end");
   const sortParam = url.searchParams.get("sort") ?? "netProfit";
 
-  const products = await getProductProfitTable({
+  const { rows, hasMissingCost } = await getProductProfitTable({
     store,
     rangeStart: parseDateInput(startParam),
     rangeEnd: parseDateInput(endParam),
@@ -22,7 +22,8 @@ export const loader = async ({ request }) => {
   });
 
   return {
-    products,
+    products: rows,
+    hasMissingCost,
     currency: store.currency ?? "USD",
     filters: {
       start: startParam ?? "",
@@ -39,12 +40,12 @@ function parseDateInput(value) {
 }
 
 export default function ProductsPage() {
-  const { products, filters, currency } = useLoaderData();
+  const { products, filters, currency, hasMissingCost } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
-  const missingCostCount = products.filter((product) => product.missingCost).length;
+  const missingCostCount = products.filter((product) => product.hasMissingCost).length;
 
   return (
     <s-page heading="Product profitability" subtitle="SKU level sales, COGS, and net profit">
@@ -79,14 +80,16 @@ export default function ProductsPage() {
         </Form>
       </s-section>
 
-      {missingCostCount > 0 && (
+      {hasMissingCost && (
         <s-section>
-          <s-banner tone="warning" title="Some SKUs are missing costs">
+          <s-banner tone="warning" title="部分 SKU 未配置成本">
             <s-text variation="subdued">
-              {`${missingCostCount} SKU(s) have revenue but zero cost. Update their COGS to keep profit accurate.`}
+              {missingCostCount > 0
+                ? `${missingCostCount} 个 SKU 未配置成本，利润统计可能不准确。`
+                : "部分 SKU 未配置成本，利润统计可能不准确。`}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
-              Update costs
+              去补成本
             </s-button>
           </s-banner>
         </s-section>
@@ -112,10 +115,10 @@ export default function ProductsPage() {
                     <strong>{product.title}</strong>
                     <br />
                     <s-text variation="subdued">{product.sku}</s-text>
-                    {product.missingCost && (
+                    {product.hasMissingCost && (
                       <>
                         <br />
-                        <s-badge tone="critical">Missing cost</s-badge>
+                        <s-badge tone="critical">未配置成本，利润可能不准确</s-badge>
                       </>
                     )}
                   </td>
@@ -130,7 +133,14 @@ export default function ProductsPage() {
           </table>
         </s-data-table>
         {!products.length && (
-          <s-text variation="subdued">No products found within the selected window.</s-text>
+          <s-card padding="base" tone="info">
+            <s-text variation="subdued">
+              尚无商品利润数据，完成 Onboarding 或上传成本后即可看到排名。
+            </s-text>
+            <s-button variant="secondary" href={buildAppUrl("/app/onboarding")}>
+              查看 Onboarding 清单
+            </s-button>
+          </s-card>
         )}
       </s-section>
     </s-page>

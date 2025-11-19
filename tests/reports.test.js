@@ -161,3 +161,48 @@ test("getReportingOverview memoizes and applies fixed cost allocations", async (
     resetReportServiceDependenciesForTests();
   }
 });
+
+test("getProductProfitTable reports hasMissingCost flag", async () => {
+  setReportServiceDependenciesForTests({
+    prismaClient: {
+      orderLineItem: {
+        async groupBy() {
+          return [
+            {
+              sku: "SKU-MISS",
+              title: "Sample",
+              _sum: {
+                revenue: 200,
+                cogs: 0,
+                quantity: 4,
+              },
+            },
+            {
+              sku: "SKU-OK",
+              title: "Other",
+              _sum: {
+                revenue: 100,
+                cogs: 50,
+                quantity: 2,
+              },
+            },
+          ];
+        },
+      },
+    },
+  });
+
+  try {
+    const result = await getProductProfitTable({
+      store: buildStoreContext(),
+    });
+
+    assert.ok(result.hasMissingCost);
+    assert.equal(
+      result.rows.find((row) => row.sku === "SKU-MISS")?.hasMissingCost,
+      true,
+    );
+  } finally {
+    resetReportServiceDependenciesForTests();
+  }
+});

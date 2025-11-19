@@ -77,6 +77,7 @@ export const action = async ({ request }) => {
 export default function SettingsPage() {
   const { settings } = useLoaderData();
   const actionData = useActionData();
+  const missingCostSkuCount = settings.missingCostSkuCount ?? 0;
 
   return (
     <s-page heading="Workspace settings" subtitle="Plans, stores, integrations, and costs">
@@ -122,6 +123,15 @@ export default function SettingsPage() {
       </s-section>
 
       <div id="costs">
+        {missingCostSkuCount > 0 && (
+          <s-section>
+            <s-banner tone="warning" title="部分 SKU 未配置成本">
+              <s-text variation="subdued">
+                {`已检测到 ${missingCostSkuCount} 个 SKU 没有成本配置，利润统计可能不准确。`}
+              </s-text>
+            </s-banner>
+          </s-section>
+        )}
         <s-section heading="Cost configuration">
           <CostConfiguration costConfig={settings.costConfig} primaryCurrency={settings.primaryCurrency} />
         </s-section>

@@ -1,3 +1,4 @@
+// TODO: enable when logistics integrations are ready for public launch.
 const DEFAULT_BASE_URL = "https://ssapi.shipstation.com";
 
 function normalizeUrl(baseUrl) {

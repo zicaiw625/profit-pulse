@@ -1,3 +1,5 @@
+import { ExternalServiceError } from "../errors/external-service-error.js";
+import { fetchWithTimeout } from "../utils/http.server.js";
 import { getAccountingDetailRows } from "./accounting.server";
 
 const PROVIDER_ENDPOINTS = {
@@ -39,16 +41,19 @@ export async function syncAccountingProvider({ store, provider, rangeDays = 30 }
     rows: detail.rows,
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout("accounting-sync", endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Failed to sync ${normalizedProvider} data (${response.status}): ${await response.text()}`,
-    );
+    const detail = await response.text().catch(() => "");
+    throw new ExternalServiceError("accounting-sync", {
+      status: response.status,
+      message: `Failed to sync ${normalizedProvider} data`,
+      detail: detail.slice(0, 200),
+    });
   }
 
   return { count: detail.rows.length };

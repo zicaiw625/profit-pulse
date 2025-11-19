@@ -1,4 +1,4 @@
-import prisma from "../db.server.js";
+import defaultPrisma from "../db.server.js";
 import {
   resolveTimezone,
   startOfDay,
@@ -7,6 +7,20 @@ import {
 
 const DEFAULT_RANGE_DAYS = 14;
 
+const defaultDependencies = {
+  prismaClient: defaultPrisma,
+};
+
+let reportServiceDependencies = { ...defaultDependencies };
+
+export function setReportServiceDependenciesForTests(overrides = {}) {
+  reportServiceDependencies = { ...reportServiceDependencies, ...overrides };
+}
+
+export function resetReportServiceDependenciesForTests() {
+  reportServiceDependencies = { ...defaultDependencies };
+}
+
 export async function getOrderProfitTable({
   store,
   rangeStart,
@@ -14,6 +28,8 @@ export async function getOrderProfitTable({
   includeRefunds = true,
   limit = 200,
 }) {
+  const { prismaClient } = reportServiceDependencies;
+  const prisma = prismaClient;
   if (!store?.id) {
     throw new Error("Store is required to load order profit table");
   }
@@ -86,6 +102,8 @@ export async function getProductProfitTable({
   rangeEnd,
   sortBy = "netProfit",
 }) {
+  const { prismaClient } = reportServiceDependencies;
+  const prisma = prismaClient;
   if (!store?.id) {
     throw new Error("Store is required to load product profit table");
   }
@@ -112,7 +130,7 @@ export async function getProductProfitTable({
     const netProfit = revenue - cogs;
     const margin = revenue > 0 ? netProfit / revenue : 0;
     const units = Number(row._sum.quantity || 0);
-    const missingCost = revenue > 0 && cogs <= 0 && units > 0;
+    const hasMissingCost = revenue > 0 && cogs <= 0 && units > 0;
     return {
       sku: row.sku ?? "Unknown SKU",
       title: row.title ?? row.sku ?? "Unknown SKU",
@@ -121,12 +139,17 @@ export async function getProductProfitTable({
       cogs,
       netProfit,
       margin,
-      missingCost,
+      hasMissingCost,
     };
   });
 
   const sorter = buildProductSorter(sortBy);
-  return entries.sort(sorter).slice(0, 100);
+  const hasMissingCost = entries.some((entry) => entry.hasMissingCost);
+  const sorted = entries.sort(sorter).slice(0, 100);
+  return {
+    rows: sorted,
+    hasMissingCost,
+  };
 }
 
 function resolveRange({ store, rangeStart, rangeEnd }) {

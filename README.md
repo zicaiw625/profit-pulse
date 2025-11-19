@@ -10,6 +10,7 @@ Profit Pulse is a profitability co-pilot for Shopify merchants. It ingests multi
   2. Flag obvious Shopify ↔ Payments / Shopify ↔ Ads mismatches.  
   3. Keep setup simple: OAuth, connect Meta, upload COGS, set currency, done.
 - **Intentionally out of scope for launch** – LTV/cohort views, complex accounting charts, advanced fixed-cost allocation, ERP/logistics integrations, additional ad networks, and full-blown team management. We call these out explicitly so expectations stay aligned.
+- **Launch-day integrations** – Shopify orders + payouts, Meta Ads spend, manual COGS uploads, and the reconciliation workspace are the only production-ready connectors. Logistics providers, ERP cost sync, and fixed-cost allocators remain disabled behind feature flags until we have enough coverage for GA.
 - **Language** – The UI is English-first with an experimental Chinese copy toggle for onboarding/help; we do not advertise multi-language support until feedback validates it.
 
 ## Key capabilities

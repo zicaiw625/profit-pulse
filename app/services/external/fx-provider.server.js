@@ -1,3 +1,5 @@
+import { ExternalServiceError } from "../../errors/external-service-error.js";
+import { fetchWithTimeout } from "../../utils/http.server.js";
 import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
 
 const DEFAULT_ENDPOINT = "https://api.exchangerate.host/latest";
@@ -16,7 +18,7 @@ export async function fetchLatestRates(base = "USD") {
   }
 
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout("fx-provider", url, {
       headers: apiKey
         ? {
             Authorization: `Bearer ${apiKey}`,
@@ -24,9 +26,12 @@ export async function fetchLatestRates(base = "USD") {
         : undefined,
     });
     if (!response.ok) {
-      throw new Error(
-        `FX provider responded with ${response.status}: ${await response.text()}`,
-      );
+      const detail = await response.text().catch(() => "");
+      throw new ExternalServiceError("fx-provider", {
+        status: response.status,
+        message: "FX provider responded with an error",
+        detail: detail.slice(0, 200),
+      });
     }
     const payload = await response.json();
     const rates = payload?.rates;

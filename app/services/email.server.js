@@ -1,3 +1,5 @@
+import { ExternalServiceError } from "../errors/external-service-error.js";
+import { fetchWithTimeout } from "../utils/http.server.js";
 import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const emailLogger = createScopedLogger({ service: "email" });
@@ -20,11 +22,19 @@ export async function sendDigestEmail({ recipients, subject, body }) {
 
   if (endpoint) {
     try {
-      await fetch(endpoint, {
+      const response = await fetchWithTimeout("email", endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new ExternalServiceError("email", {
+          status: response.status,
+          message: "Email API rejected the digest payload",
+          detail: detail.slice(0, 200),
+        });
+      }
     } catch (error) {
       emailLogger.error("digest_email_failed", {
         context: {

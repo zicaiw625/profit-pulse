@@ -1,6 +1,12 @@
 import pkg from "@prisma/client";
-import prisma from "../db.server";
-import { RECONCILIATION_THRESHOLDS } from "../config/reconciliationThresholds.js";
+import defaultPrisma from "../db.server";
+import {
+  DEFAULT_AD_CONVERSION_MULTIPLE,
+  DEFAULT_AD_SPEND_HIGH,
+  DEFAULT_MIN_ORDERS_FOR_AD_CHECK,
+  DEFAULT_PAYMENT_DIFF_THRESHOLD,
+  DEFAULT_PAYMENT_PERCENT_THRESHOLD,
+} from "../config/reconciliation.js";
 import {
   startOfDay,
   shiftDays,
@@ -14,10 +20,25 @@ const { ReconciliationIssueType, IssueStatus } = pkg;
 const DEFAULT_RANGE_DAYS = 14;
 const reconciliationLogger = createScopedLogger({ service: "reconciliation" });
 
+const defaultDependencies = {
+  prismaClient: defaultPrisma,
+};
+
+let reconciliationDependencies = { ...defaultDependencies };
+
+export function setReconciliationDependenciesForTests(overrides = {}) {
+  reconciliationDependencies = { ...reconciliationDependencies, ...overrides };
+}
+
+export function resetReconciliationDependenciesForTests() {
+  reconciliationDependencies = { ...defaultDependencies };
+}
+
 export async function getReconciliationSnapshot({
   storeId,
   rangeDays = DEFAULT_RANGE_DAYS,
 }) {
+  const prisma = getPrisma();
   if (!storeId) {
     throw new Error("storeId is required for reconciliation snapshot");
   }
@@ -56,9 +77,10 @@ export async function getReconciliationSnapshot({
 }
 
 export async function detectPaymentDiscrepancies({ storeId, timezone }) {
+  const prisma = getPrisma();
   const tz = timezone ?? (await getStoreTimezone(storeId));
-  const amountThreshold = RECONCILIATION_THRESHOLDS.payment.amountDelta;
-  const percentThreshold = RECONCILIATION_THRESHOLDS.payment.percentDelta;
+  const amountThreshold = DEFAULT_PAYMENT_DIFF_THRESHOLD;
+  const percentThreshold = DEFAULT_PAYMENT_PERCENT_THRESHOLD;
   const payouts = await prisma.paymentPayout.findMany({
     where: { storeId },
     orderBy: { payoutDate: "desc" },
@@ -117,9 +139,10 @@ export async function detectPaymentDiscrepancies({ storeId, timezone }) {
 }
 
 export async function detectAdConversionAnomalies({ storeId, timezone }) {
+  const prisma = getPrisma();
   const tz = timezone ?? (await getStoreTimezone(storeId));
-  const conversionMultiple = RECONCILIATION_THRESHOLDS.ads.conversionMultiple;
-  const spendThreshold = RECONCILIATION_THRESHOLDS.ads.minSpendWithoutConversions;
+  const conversionMultiple = DEFAULT_AD_CONVERSION_MULTIPLE;
+  const spendThreshold = DEFAULT_AD_SPEND_HIGH;
   const adSpend = await prisma.adSpendRecord.groupBy({
     by: ["provider", "date"],
     where: {
@@ -171,7 +194,11 @@ export async function detectAdConversionAnomalies({ storeId, timezone }) {
           channel: row.provider,
         },
       });
-    } else if (orders > 5 && conversions === 0 && Number(row._sum.spend || 0) > spendThreshold) {
+    } else if (
+      orders > DEFAULT_MIN_ORDERS_FOR_AD_CHECK &&
+      conversions === 0 &&
+      Number(row._sum.spend || 0) > spendThreshold
+    ) {
       issues.push({
         storeId,
         issueType: ReconciliationIssueType.SHOPIFY_VS_ADS,
@@ -203,6 +230,7 @@ export async function runReconciliationChecks({ storeId }) {
 }
 
 async function persistIssues(storeId, issues, issueType) {
+  const prisma = getPrisma();
   // Mark previous open issues for this type as resolved if they weren't detected again.
   await prisma.reconciliationIssue.updateMany({
     where: {
@@ -231,6 +259,7 @@ async function persistIssues(storeId, issues, issueType) {
 }
 
 async function getStoreTimezone(storeId) {
+  const prisma = getPrisma();
   const store = await prisma.store.findUnique({
     where: { id: storeId },
     include: { merchant: true },
@@ -279,4 +308,8 @@ function mapTitle(issueType) {
     default:
       return issueType?.replace(/_/g, " ") ?? "Reconciliation";
   }
+}
+
+function getPrisma() {
+  return reconciliationDependencies.prismaClient;
 }

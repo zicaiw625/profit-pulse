@@ -40,7 +40,13 @@ export function recordOrderProcessing({
   totals = {},
   error,
 }) {
-  const { revenue, grossProfit, netProfit, refundCount } = totals;
+  const {
+    revenue,
+    grossProfit,
+    netProfit,
+    refundCount,
+    missingSkuCostCount,
+  } = totals;
   const meta = cleanMeta({
     storeId,
     merchantId,
@@ -52,6 +58,7 @@ export function recordOrderProcessing({
     grossProfit,
     netProfit,
     refundCount,
+    missing_sku_cost_count: missingSkuCostCount,
   });
 
   if (error) {

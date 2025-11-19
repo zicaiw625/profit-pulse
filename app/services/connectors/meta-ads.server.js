@@ -1,4 +1,8 @@
-import { requireAccessToken } from "../credentials.server";
+import { ExternalServiceError } from "../../errors/external-service-error.js";
+import { fetchWithTimeout } from "../../utils/http.server.js";
+import { requireAccessToken } from "../credentials.server.js";
+
+const META_SERVICE = "meta-ads";
 
 function formatDate(date) {
   return date.toISOString().slice(0, 10);
@@ -52,17 +56,19 @@ export async function fetchMetaAdMetrics({
     ].join(","),
   );
 
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(META_SERVICE, url, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
   });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(
-      `Meta Ads API error (${response.status}): ${text.slice(0, 200)}`,
-    );
+    const text = await response.text().catch(() => "");
+    throw new ExternalServiceError(META_SERVICE, {
+      status: response.status,
+      message: "Meta Ads API request failed",
+      detail: text.slice(0, 200),
+    });
   }
 
   const payload = await response.json();

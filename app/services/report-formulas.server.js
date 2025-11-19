@@ -1,7 +1,10 @@
+import { MAX_FORMULA_LENGTH } from "../constants/formulas.js";
 import { createScopedLogger } from "../utils/logger.server.js";
 
 const defaultLogger = createScopedLogger({ service: "report-formulas" });
 let formulaLogger = defaultLogger;
+const IDENTIFIER_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
+const VALID_CHAR_PATTERN = /^[-0-9A-Za-z_+*/%.()\s]+$/;
 
 export function setReportFormulaLoggerForTests(logger) {
   formulaLogger = logger ?? defaultLogger;
@@ -9,7 +12,7 @@ export function setReportFormulaLoggerForTests(logger) {
 
 /**
  * evaluateFormulaExpression intentionally supports only a minimal arithmetic grammar:
- * addition, subtraction, multiplication, division, parentheses, whitespace, and
+ * addition, subtraction, multiplication, division, modulo, parentheses, whitespace, and
  * identifiers that match `/[A-Za-z_][A-Za-z0-9_]*`. Do not expand this sanitizer to
  * admit broader JavaScript syntax (function calls, array literals, template strings,
  * etc.). If future requirements need richer expressions, swap this implementation for
@@ -21,12 +24,28 @@ export function evaluateFormulaExpression(expression, values = {}) {
     return null;
   }
 
-  const sanitized = expression.replace(/[^0-9a-zA-Z_+\-*/().\s]/g, "");
-  if (!sanitized.trim()) {
+  const trimmed = expression.trim();
+  if (!trimmed) {
     return null;
   }
 
-  const substituted = sanitized.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (token) => {
+  if (trimmed.length > MAX_FORMULA_LENGTH) {
+    formulaLogger?.warn?.("report_formulas.rejected", {
+      reason: "length_exceeded",
+      length: trimmed.length,
+    });
+    return null;
+  }
+
+  if (!VALID_CHAR_PATTERN.test(trimmed)) {
+    formulaLogger?.warn?.("report_formulas.rejected", {
+      reason: "invalid_characters",
+    });
+    return null;
+  }
+
+  const sanitized = trimmed;
+  const substituted = sanitized.replace(IDENTIFIER_PATTERN, (token) => {
     if (Object.prototype.hasOwnProperty.call(values, token)) {
       const numeric = Number(values[token] ?? 0);
       return Number.isFinite(numeric) ? String(numeric) : "0";

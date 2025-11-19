@@ -161,3 +161,42 @@ test("processShopifyOrder notifies when plan limits are exceeded", async (t) => 
     usage: 120,
   });
 });
+
+test("processShopifyOrder records missing SKU cost metrics", async (t) => {
+  const storeRecord = {
+    id: "store-3",
+    merchantId: "merchant-3",
+    merchant: { id: "merchant-3" },
+    shopDomain: "demo.myshopify.com",
+  };
+  const tx = createTransactionStub();
+  const prismaStub = createPrismaStub(storeRecord, tx);
+  const recordCalls = [];
+
+  setProfitEngineDependenciesForTests({
+    prismaClient: prismaStub,
+    getActiveSkuCostMap: async () =>
+      new Map([
+        ["HD-0001", 0],
+        ["TR-441", 50],
+      ]),
+    getVariableCostTemplates: async () => [],
+    ensureOrderCapacity: async () => undefined,
+    getAttributionRules: async () => [],
+    recordOrderProcessing: (args) => {
+      recordCalls.push(args);
+    },
+  });
+
+  t.after(() => {
+    resetProfitEngineDependenciesForTests();
+  });
+
+  await processShopifyOrder({
+    store: { id: storeRecord.id },
+    payload: buildDemoOrder(),
+  });
+
+  assert.equal(recordCalls.length, 1);
+  assert.equal(recordCalls[0].totals?.missingSkuCostCount, 1);
+});

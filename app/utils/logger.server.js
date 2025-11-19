@@ -147,6 +147,15 @@ export function serializeError(error) {
       name: error.name,
       message: error.message,
     };
+    if ("service" in error && error.service) {
+      serialized.service = error.service;
+    }
+    if ("status" in error && error.status !== undefined && error.status !== null) {
+      serialized.status = error.status;
+    }
+    if ("detail" in error && error.detail) {
+      serialized.detail = error.detail;
+    }
     if (error.stack) {
       serialized.stack = error.stack;
     }

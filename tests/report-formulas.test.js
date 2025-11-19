@@ -5,6 +5,7 @@ import {
   evaluateFormulaExpression,
   setReportFormulaLoggerForTests,
 } from '../app/services/report-formulas.server.js';
+import { MAX_FORMULA_LENGTH } from '../app/constants/formulas.js';
 
 describe('evaluateFormulaExpression', () => {
   let loggerMock;
@@ -42,12 +43,13 @@ describe('evaluateFormulaExpression', () => {
     assert.equal(empty, null);
   });
 
-  it('strips unsupported characters entirely before evaluation', () => {
-    const result = evaluateFormulaExpression('$$$ ???', {
+  it('rejects expressions that contain unsupported characters', () => {
+    const result = evaluateFormulaExpression('netProfit + alert(1);', {
       netProfit: 120,
     });
 
     assert.equal(result, null);
+    assert.equal(loggerMock.warn.mock.callCount(), 1);
   });
 
   it('returns null for non-finite results such as division by zero', () => {
@@ -71,6 +73,22 @@ describe('evaluateFormulaExpression', () => {
     assert.equal(logMessage, 'report_formulas.compute_failed');
     assert.ok(logMeta.expression.includes('globalThis.process.exit'));
     assert.equal(/[A-Za-z]/.test(logMeta.substituted), false);
+  });
+
+  it('rejects formulas that exceed the max length', () => {
+    const longExpression = '1+'.repeat(Math.ceil((MAX_FORMULA_LENGTH + 1) / 2));
+    const result = evaluateFormulaExpression(longExpression, {});
+
+    assert.equal(result, null);
+    assert.equal(loggerMock.warn.mock.callCount(), 1);
+  });
+
+  it('supports modulo operations within formulas', () => {
+    const result = evaluateFormulaExpression('netProfit % 3', {
+      netProfit: 10,
+    });
+
+    assert.equal(result, 1);
   });
 
   it('ignores non-string expressions', () => {

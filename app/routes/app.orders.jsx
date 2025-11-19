@@ -111,7 +111,14 @@ export default function OrdersPage() {
           </table>
         </s-data-table>
         {!orders.length && (
-          <s-text variation="subdued">No orders within the selected window.</s-text>
+          <s-card padding="base" tone="info">
+            <s-text variation="subdued">
+              尚无订单数据，完成 Onboarding 或稍等同步即可看到结果。
+            </s-text>
+            <s-button variant="secondary" href={buildAppUrl("/app/onboarding")}>
+              查看 Onboarding 清单
+            </s-button>
+          </s-card>
         )}
       </s-section>
     </s-page>

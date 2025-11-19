@@ -1,3 +1,5 @@
+import { ExternalServiceError } from "../errors/external-service-error.js";
+import { fetchWithTimeout } from "../utils/http.server.js";
 import { createScopedLogger } from "../utils/logger.server.js";
 
 const cacheLogger = createScopedLogger({ service: "cache" });
@@ -69,16 +71,18 @@ function createUpstashCacheBackend({ url, token }) {
   const inflight = new Map();
 
   async function execute(command) {
-    const response = await fetch(endpoint, {
+    const response = await fetchWithTimeout("upstash-cache", endpoint, {
       method: "POST",
       headers,
       body: JSON.stringify([command]),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(
-        `Upstash request failed with ${response.status}: ${text?.slice(0, 200) ?? ""}`,
-      );
+      throw new ExternalServiceError("upstash-cache", {
+        status: response.status,
+        message: "Upstash cache request failed",
+        detail: text?.slice(0, 200) ?? "",
+      });
     }
     const payload = await response.json();
     const [result] = Array.isArray(payload) ? payload : [];

@@ -1,5 +1,6 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
+// TODO: enable when logistics integrations are ready for public launch.
 import { parseLogisticsCredentialSecret } from "./logistics-credentials.server";
 import { replaceLogisticsRulesFromRates } from "./logistics.server";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./sync/jobs.server";

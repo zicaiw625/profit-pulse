@@ -1,3 +1,6 @@
+import { ExternalServiceError } from "../../errors/external-service-error.js";
+import { fetchWithTimeout } from "../../utils/http.server.js";
+
 const META_AUTH_URL = "https://www.facebook.com/v20.0/dialog/oauth";
 const META_TOKEN_URL = "https://graph.facebook.com/v20.0/oauth/access_token";
 export const META_ADS_SCOPE = "ads_read,ads_management";
@@ -42,7 +45,7 @@ export async function exchangeMetaAdsCode({ code, redirectUri }) {
     throw new Error("Meta Ads redirectUri missing");
   }
 
-  const response = await fetch(META_TOKEN_URL + `?` + new URLSearchParams({
+  const response = await fetchWithTimeout("meta-ads-oauth", META_TOKEN_URL + `?` + new URLSearchParams({
     client_id: clientId,
     client_secret: clientSecret,
     redirect_uri: redirectUri,
@@ -52,7 +55,10 @@ export async function exchangeMetaAdsCode({ code, redirectUri }) {
   const payload = await response.json();
   if (!response.ok) {
     const message = payload?.error?.message || response.statusText;
-    throw new Error(`Meta token exchange failed: ${message}`);
+    throw new ExternalServiceError("meta-ads-oauth", {
+      status: response.status,
+      message: `Meta token exchange failed: ${message}`,
+    });
   }
 
   return extendMetaAccessToken(payload.access_token);
@@ -65,7 +71,7 @@ export async function extendMetaAccessToken(accessToken) {
     throw new Error("Meta access token missing for extension");
   }
 
-  const response = await fetch(META_TOKEN_URL + `?` + new URLSearchParams({
+  const response = await fetchWithTimeout("meta-ads-oauth", META_TOKEN_URL + `?` + new URLSearchParams({
     grant_type: "fb_exchange_token",
     client_id: clientId,
     client_secret: clientSecret,
@@ -75,7 +81,10 @@ export async function extendMetaAccessToken(accessToken) {
   const payload = await response.json();
   if (!response.ok) {
     const message = payload?.error?.message || response.statusText;
-    throw new Error(`Meta access token extension failed: ${message}`);
+    throw new ExternalServiceError("meta-ads-oauth", {
+      status: response.status,
+      message: `Meta access token extension failed: ${message}`,
+    });
   }
 
   const expiresIn = Number(payload.expires_in ?? 0);

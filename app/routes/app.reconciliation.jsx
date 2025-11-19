@@ -6,7 +6,7 @@ import {
   runReconciliationChecks,
 } from "../services/reconciliation.server";
 import { formatCurrency } from "../utils/formatting";
-import { RECONCILIATION_THRESHOLDS } from "../config/reconciliationThresholds.js";
+import { RECONCILIATION_RULE_DEFAULTS } from "../config/reconciliation.js";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -17,7 +17,7 @@ export const loader = async ({ request }) => {
   });
   return {
     snapshot,
-    rules: RECONCILIATION_THRESHOLDS,
+    rules: RECONCILIATION_RULE_DEFAULTS,
     currency: store.currency ?? "USD",
   };
 };

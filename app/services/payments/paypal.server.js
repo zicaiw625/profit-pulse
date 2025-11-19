@@ -1,3 +1,6 @@
+import { ExternalServiceError } from "../../errors/external-service-error.js";
+import { fetchWithTimeout } from "../../utils/http.server.js";
+
 const DEFAULT_PAYPAL_API_BASE =
   process.env.PAYPAL_API_BASE_URL || "https://api-m.paypal.com";
 
@@ -9,7 +12,7 @@ async function getPaypalAccessToken() {
   }
   const tokenUrl = new URL("/v1/oauth2/token", DEFAULT_PAYPAL_API_BASE);
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const response = await fetch(tokenUrl, {
+  const response = await fetchWithTimeout("paypal", tokenUrl, {
     method: "POST",
     headers: {
       Authorization: `Basic ${credentials}`,
@@ -18,7 +21,12 @@ async function getPaypalAccessToken() {
     body: "grant_type=client_credentials",
   });
   if (!response.ok) {
-    throw new Error(`PayPal auth failed (${response.status}): ${await response.text()}`);
+    const detail = await response.text().catch(() => "");
+    throw new ExternalServiceError("paypal", {
+      status: response.status,
+      message: "PayPal auth failed",
+      detail: detail.slice(0, 200),
+    });
   }
   const payload = await response.json();
   if (!payload?.access_token) {
@@ -42,16 +50,19 @@ export async function fetchPaypalPayouts({
   url.searchParams.set("start_date", start);
   url.searchParams.set("end_date", end);
   url.searchParams.set("transaction_type", transactionType);
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout("paypal", url, {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
   });
   if (!response.ok) {
-    throw new Error(
-      `PayPal reporting failed (${response.status}): ${await response.text()}`,
-    );
+    const detail = await response.text().catch(() => "");
+    throw new ExternalServiceError("paypal", {
+      status: response.status,
+      message: "PayPal reporting API failed",
+      detail: detail.slice(0, 200),
+    });
   }
   const payload = await response.json();
   const details = payload?.transaction_details ?? [];

@@ -70,3 +70,13 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
 - Keep Meta Ads and PayPal variables scoped to each environment; restarting the app refreshes tokens if credentials become invalid.
 - For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.
+- Run `npm test` locally (or `node --test`) to verify profit engine and reporting logic whenever you touch services. The suites rely on the same `.env` configuration as `npm run dev`, so make sure the keys above are populated first.
+- Seed demo data from the Settings page (“Seed demo costs”) after installing the embedded app on a development store—this loads SKU costs so dashboards/product tables light up immediately.
+
+## First-time developer & testing flow
+
+1. Copy `.env.example` to `.env` and fill the mandatory keys (`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL`, and `CREDENTIAL_ENCRYPTION_KEY`). Optional integrations (Meta Ads, PayPal, Upstash) can be added later.
+2. Run `npm install` (requires network access) and `npx prisma migrate deploy` to prepare the database.
+3. Start the embedded app with `npm run dev` via the Shopify CLI, install it on a development store, and complete the onboarding checklist (connect Meta Ads, import/seed COGS).
+4. Use the Settings page “Seed demo costs” button to hydrate SKU costs, then verify dashboards/orders/products have data.
+5. Execute `npm test` before pushing changes to ensure profit engine, reconciliation, and reporting suites pass.

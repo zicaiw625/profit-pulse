@@ -23,13 +23,21 @@ export async function getAccountSettings({ store }) {
   });
   const primaryCurrency = merchant?.primaryCurrency ?? store.currency ?? "USD";
 
-  const [costConfig, planOptions, integrations, planUsage, shopifyData] =
+  const [
+    costConfig,
+    planOptions,
+    integrations,
+    planUsage,
+    shopifyData,
+    missingCostSkuCount,
+  ] =
     await Promise.all([
       getCostConfiguration(store.id),
       Promise.resolve(getPlanOptions()),
       getIntegrationStatus(store.id),
       getPlanUsage({ merchantId: store.merchantId }),
       getShopifySyncStatus(store.id),
+      countMissingCostSkus(store.id),
     ]);
 
   const subscription = merchant?.subscription;
@@ -68,6 +76,7 @@ export async function getAccountSettings({ store }) {
     primaryCurrency,
     planUsage: planUsage.usage,
     shopifyData,
+    missingCostSkuCount,
   };
 }
 
@@ -87,4 +96,15 @@ async function getShopifySyncStatus(storeId) {
     totalOrders: orderCount,
     totalRefunds: refundCount,
   };
+}
+
+async function countMissingCostSkus(storeId) {
+  return prisma.orderLineItem.count({
+    where: {
+      order: { storeId },
+      sku: { not: null },
+      revenue: { gt: 0 },
+      cogs: { lte: 0 },
+    },
+  });
 }
