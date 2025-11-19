@@ -91,7 +91,7 @@ async function buildDashboardOverview({ store, timezone, range, rangeDays }) {
           processedAt: { gte: range.start, lte: range.end },
           lineItems: {
             some: {
-              OR: [{ cogs: null }, { cogs: 0 }],
+              cogs: { lte: 0 },
             },
           },
         },
