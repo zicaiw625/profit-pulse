@@ -39,7 +39,7 @@ export const action = async ({ request }) => {
         await seedDemoCostConfiguration({ storeId: store.id, currency: store.currency });
         return json({ success: true, message: "Demo cost templates imported." });
       case "sync-shopify-orders":
-        await syncShopifyOrders({ store, days: 30 });
+        await syncShopifyOrders({ store, session, days: 30 });
         return json({ success: true, message: "Shopify orders queued for sync." });
       case "sync-shopify-payments":
         await syncShopifyPayments({ store, session });
