@@ -1,6 +1,5 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server";
-import { sendSlackNotification } from "./notifications.server";
 import {
   startOfDay,
   shiftDays,
@@ -214,13 +213,6 @@ async function persistIssues(storeId, issues, issueType) {
     })),
   });
 
-  const store = await prisma.store.findUnique({ where: { id: storeId }, select: { merchantId: true, shopDomain: true } });
-  if (store?.merchantId) {
-    await sendSlackNotification({
-      merchantId: store.merchantId,
-      text: formatSlackAlert(issueType, issues, store.shopDomain),
-    });
-  }
 }
 
 async function getStoreTimezone(storeId) {
@@ -232,12 +224,6 @@ async function getStoreTimezone(storeId) {
     return "UTC";
   }
   return resolveTimezone({ store });
-}
-
-function formatSlackAlert(issueType, issues, shopDomain) {
-  const title = mapTitle(issueType);
-  const lines = issues.map((issue) => `• ${issue.details?.message ?? formatIssueDescription(issue)}`);
-  return `⚠️ ${shopDomain ?? "Store"} ${title} detected (${issues.length} issue${issues.length > 1 ? "s" : ""}):\n${lines.join("\n")}`;
 }
 
 function summarizeIssues(issues) {

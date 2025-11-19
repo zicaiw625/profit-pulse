@@ -55,11 +55,11 @@ export default function App() {
           <LinkWithQuery to="/app">
             {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/reports">
-            {t(TRANSLATION_KEYS.NAV_REPORTS)}
+          <LinkWithQuery to="/app/orders">
+            {t(TRANSLATION_KEYS.NAV_ORDERS)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/refunds">
-            {t(TRANSLATION_KEYS.NAV_REFUNDS)}
+          <LinkWithQuery to="/app/products">
+            {t(TRANSLATION_KEYS.NAV_PRODUCTS)}
           </LinkWithQuery>
           <LinkWithQuery to="/app/reconciliation">
             {t(TRANSLATION_KEYS.NAV_RECONCILIATION)}

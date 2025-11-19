@@ -70,7 +70,7 @@ export default function ReconciliationPage() {
       <s-section slot="aside" heading="Upcoming automation">
         <s-unordered-list>
           <s-list-item>Auto-close resolved payout diffs</s-list-item>
-          <s-list-item>Notify Slack when net profit spikes/drops</s-list-item>
+          <s-list-item>Email digest of large discrepancies</s-list-item>
           <s-list-item>Sync adjustments to accounting export</s-list-item>
         </s-unordered-list>
       </s-section>

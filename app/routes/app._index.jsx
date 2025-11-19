@@ -45,21 +45,7 @@ export default function DashboardIndex() {
   const { t } = useLocale();
   const hostParam = searchParams.get("host");
   const shopParam = searchParams.get("shop");
-  const merchantSummary = overview.merchantSummary ?? null;
-  const overviewTimezone = overview.timezone ?? "UTC";
-  const aggregateRangeLabel =
-    merchantSummary?.rangeLabel ??
-    (merchantSummary?.range
-      ? `${formatDateShort(
-          merchantSummary.range.start,
-          merchantSummary.timezone ?? overviewTimezone,
-        )} – ${formatDateShort(
-          merchantSummary.range.end,
-          merchantSummary.timezone ?? overviewTimezone,
-        )}`
-      : null);
   const planStatus = overview.planStatus ?? null;
-  const planWarning = planStatus ? buildPlanWarning(planStatus, t) : null;
   const localizedCards = overview.summaryCards.map((card) => ({
     ...card,
     label: CARD_LABEL_MAP[card.key]
@@ -74,20 +60,8 @@ export default function DashboardIndex() {
   return (
     <s-page
       heading={t(TRANSLATION_KEYS.DASHBOARD_HEADING)}
-      subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)}: ${overview.shopDomain}`}
+      subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)} · ${overview.shopDomain}`}
     >
-      {planWarning && (
-        <s-section>
-          <s-banner tone={planWarning.tone} title={planWarning.title}>
-            <s-stack direction="block" gap="tight">
-              <s-text variation="subdued">{planWarning.message}</s-text>
-              <s-button variant="secondary" href={buildAppUrl("/app/settings")}>
-                Manage plan
-              </s-button>
-            </s-stack>
-          </s-banner>
-        </s-section>
-      )}
       <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_DATE_FILTERS)}>
         <Form method="get">
           {hostParam && <input type="hidden" name="host" value={hostParam} />}
@@ -138,12 +112,12 @@ export default function DashboardIndex() {
             data={overview.timeseries.revenue}
           />
           <TrendPreview
-            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND)}
-            data={overview.timeseries.adSpend}
-          />
-          <TrendPreview
             label={t(TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT)}
             data={overview.timeseries.netProfit}
+          />
+          <TrendPreview
+            label={t(TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND)}
+            data={overview.timeseries.adSpend}
           />
         </s-stack>
       </s-section>
@@ -162,10 +136,11 @@ export default function DashboardIndex() {
             <thead>
               <tr>
                 <th align="left">Product</th>
+                <th align="right">Units</th>
                 <th align="right">Revenue</th>
+                <th align="right">COGS</th>
                 <th align="right">Net profit</th>
                 <th align="right">Margin</th>
-                <th align="right">Refund rate</th>
               </tr>
             </thead>
             <tbody>
@@ -176,10 +151,11 @@ export default function DashboardIndex() {
                     <br />
                     <s-text variation="subdued">{product.sku}</s-text>
                   </td>
+                  <td align="right">{product.units.toLocaleString()}</td>
                   <td align="right">{formatCurrency(product.revenue, overview.currency)}</td>
+                  <td align="right">{formatCurrency(product.cogs ?? 0, overview.currency)}</td>
                   <td align="right">{formatCurrency(product.netProfit, overview.currency)}</td>
                   <td align="right">{formatPercent(product.margin)}</td>
-                  <td align="right">{formatPercent(product.refunds)}</td>
                 </tr>
               ))}
             </tbody>
@@ -187,107 +163,33 @@ export default function DashboardIndex() {
         </s-data-table>
       </s-section>
 
-      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_LIVE_ALERTS)}>
-        {overview.alerts.map((alert) => (
-          <s-card key={alert.title} padding="base" subdued>
-            <s-heading>{alert.title}</s-heading>
-            <s-paragraph>{alert.message}</s-paragraph>
-          </s-card>
-        ))}
+      <s-section slot="aside" heading="Plan usage">
+        <PlanUsageCard planStatus={planStatus} currency={overview.currency} buildAppUrl={buildAppUrl} />
       </s-section>
 
-      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_NEXT_ACTIONS)}>
-        <s-unordered-list>
-          <s-list-item>Connect Google Ads for blended ROAS</s-list-item>
-          <s-list-item>Upload COGS CSV for Winter SKUs</s-list-item>
-          <s-list-item>Create daily email digest</s-list-item>
-        </s-unordered-list>
-      </s-section>
-
-      <s-section slot="aside" heading={t(TRANSLATION_KEYS.DASHBOARD_MULTI_STORE)}>
-        {merchantSummary ? (
-          <>
-            <s-stack direction="inline" gap="base" wrap>
-              <AggregateMetric
-                label="Net revenue"
-                value={merchantSummary.summary.revenue}
-                currency={merchantSummary.currency}
-              />
-              <AggregateMetric
-                label="Net profit"
-                value={merchantSummary.summary.netProfit}
-                currency={merchantSummary.currency}
-              />
-              <AggregateMetric
-                label="Ad spend"
-                value={merchantSummary.summary.adSpend}
-                currency={merchantSummary.currency}
-              />
-              <AggregateMetric
-                label="Refund rate"
-                value={merchantSummary.summary.refundRate}
-                variant="percentage"
-              />
-            </s-stack>
-            <s-text variation="subdued">
-              {merchantSummary.storeCount.toLocaleString()} stores ·{" "}
-              {aggregateRangeLabel ?? "aggregated range"}
-            </s-text>
-          </>
-        ) : (
+      <s-section slot="aside" heading="Data coverage">
+        <s-card padding="base">
+          <s-text variation="subdued">Reporting window</s-text>
+          <s-display-text size="small">{overview.rangeLabel}</s-display-text>
           <s-text variation="subdued">
-            Aggregated metrics will appear once other stores sync orders.
+            Updated in {overview.timezone ?? "UTC"}
           </s-text>
-        )}
+        </s-card>
       </s-section>
     </s-page>
   );
 }
 
-function buildPlanWarning(planStatus, translate) {
-  if (!planStatus) return null;
-  const orderUsage = `${formatOrderCount(planStatus.orderCount)} / ${formatOrderCount(
-    planStatus.orderLimit,
-  )}`;
-  if (planStatus.orderStatus === "danger") {
-    return {
-      tone: "critical",
-      title: "Order ingestion paused",
-      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_DANGER).replace("{usage}", orderUsage),
-    };
-  }
-  if (planStatus.orderStatus === "warning") {
-    return {
-      tone: "warning",
-      title: "Order allowance approaching limit",
-      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_ORDER).replace("{usage}", orderUsage),
-    };
-  }
-  if (planStatus.planStatus && planStatus.planStatus !== "ACTIVE") {
-    return {
-      tone: "critical",
-      title: "Billing action required",
-      message: translate(TRANSLATION_KEYS.DASHBOARD_PLAN_WARNING_BILLING).replace(
-        "{status}",
-        planStatus.planStatus,
-      ),
-    };
-  }
-  return null;
-}
-
-function formatOrderCount(value) {
-  return Number(value ?? 0).toLocaleString();
-}
 
 function CostCompositionChart({ slices, revenue, currency }) {
   const sanitized = (slices ?? []).map((slice) => ({
-    ...slice,
-    value: Math.max(0, Number(slice.value ?? 0)),
+    label: slice.label,
+    amount: Math.max(0, Number(slice.value ?? 0)),
+    share: typeof slice.percentage === "number" ? Math.max(0, slice.percentage) : null,
   }));
-  const totalShare = sanitized.reduce((sum, slice) => sum + slice.value, 0);
+  const totalAmount = sanitized.reduce((sum, slice) => sum + slice.amount, 0);
 
-  if (!sanitized.length || totalShare <= 0) {
+  if (!sanitized.length || totalAmount <= 0) {
     return (
       <s-card padding="base">
         <s-text variation="subdued">No cost data available for this range.</s-text>
@@ -297,8 +199,12 @@ function CostCompositionChart({ slices, revenue, currency }) {
 
   const normalized = sanitized.map((slice) => ({
     ...slice,
-    share: slice.value / totalShare,
-    amount: revenue > 0 ? revenue * slice.value : null,
+    share:
+      slice.share != null
+        ? slice.share
+        : totalAmount > 0
+          ? slice.amount / totalAmount
+          : 0,
   }));
 
   const chartSize = 200;
@@ -399,13 +305,11 @@ function CostCompositionChart({ slices, revenue, currency }) {
               />
               <s-text strong>{slice.label}</s-text>
               <s-text variation="subdued">
-                {formatPercent(slice.value)} of revenue
+                {formatPercent(slice.share)} of revenue
               </s-text>
-              {slice.amount !== null && (
-                <s-text variation="subdued">
-                  {formatCurrency(slice.amount, currency)}
-                </s-text>
-              )}
+              <s-text variation="subdued">
+                {formatCurrency(slice.amount, currency)}
+              </s-text>
             </s-stack>
           ))}
         </s-stack>
@@ -415,14 +319,12 @@ function CostCompositionChart({ slices, revenue, currency }) {
 }
 
 const CARD_LABEL_MAP = {
-  netRevenue: TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE,
+  revenue: TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE,
+  orders: TRANSLATION_KEYS.DASHBOARD_CARD_ORDERS,
   adSpend: TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND,
   netProfit: TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT,
-  profitOnAdSpend: TRANSLATION_KEYS.DASHBOARD_CARD_POAS,
-  fixedCosts: TRANSLATION_KEYS.DASHBOARD_CARD_FIXED,
-  netProfitAfterFixed: TRANSLATION_KEYS.DASHBOARD_CARD_NET_AFTER_FIXED,
-  refundRate: TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_RATE,
-  refundImpact: TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_IMPACT,
+  netMargin: TRANSLATION_KEYS.DASHBOARD_CARD_NET_MARGIN,
+  roas: TRANSLATION_KEYS.DASHBOARD_CARD_ROAS,
 };
 
 function MetricCard({ card, currency }) {
@@ -469,20 +371,38 @@ function TrendPreview({ label, data }) {
   );
 }
 
-function AggregateMetric({ label, value, currency = "USD", variant = "currency" }) {
-  let displayValue;
-  if (variant === "percentage") {
-    displayValue = formatPercent(value);
-  } else {
-    displayValue = formatCurrency(value, currency);
+function PlanUsageCard({ planStatus, buildAppUrl }) {
+  if (!planStatus) {
+    return (
+      <s-card padding="base">
+        <s-text variation="subdued">No subscription detected for this store.</s-text>
+      </s-card>
+    );
   }
+  const usage = `${formatOrderCount(planStatus.orderUsage)} / ${formatOrderCount(planStatus.orderLimit)} orders`;
+  const tone =
+    planStatus.orderStatus === "danger"
+      ? "critical"
+      : planStatus.orderStatus === "warning"
+        ? "warning"
+        : "success";
 
   return (
     <s-card padding="base">
-      <s-text variation="subdued">{label}</s-text>
-      <s-display-text size="small">{displayValue}</s-display-text>
+      <s-text variation="subdued">{planStatus.planName}</s-text>
+      <s-display-text size="small">{usage}</s-display-text>
+      <s-text variation="subdued">
+        Status: {planStatus.planStatus ?? "UNKNOWN"}
+      </s-text>
+      <s-button variant="secondary" href={buildAppUrl("/app/settings")} tone={tone}>
+        Manage plan
+      </s-button>
     </s-card>
   );
+}
+
+function formatOrderCount(value) {
+  return Number(value ?? 0).toLocaleString();
 }
 
 function sparkline(values) {

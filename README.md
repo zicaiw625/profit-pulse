@@ -4,21 +4,22 @@ Profit Pulse is a profitability co-pilot for Shopify merchants. It ingests multi
 
 ## Key capabilities
 
-- **Order & payout ingestion** – Sync Shopify orders, settlements, logistics data, and third-party ad spend into a unified workspace with currency/timezone normalization.
-- **Profit engine** – Decompose revenue, COGS, shipping, payment, platform, and custom costs per order and aggregate daily KPIs for dashboards and profit/loss statements.
-- **Advertising attribution** – Join paid media data (Google Ads, Meta, Bing, TikTok) to order cohorts to quantify blended ROAS and POAS.
-- **Alerts & notifications** – Dispatch Slack/Teams/Zapier/Make alerts when margins degrade, refunds spike, or attribution rules detect anomalies.
-- **Report scheduling** – Email or webhook recurring digests with calendar-aware frequencies and strict webhook allowlisting to prevent SSRF (extendable via `WEBHOOK_HOST_ALLOWLIST`).
-- **Plan enforcement & overages** – Track monthly order usage, pause ingestion when limits are hit, and bill overage charges safely inside transactions.
+- **Shopify ingestion** – OAuth install flows sync Shopify orders, line items, refunds, shipping, taxes, and payouts. New installs backfill 60 days of orders and continue on a 10–15 minute cadence with webhooks for near real time updates.
+- **Meta Ads integration** – Merchants connect a single Meta Ads account to bring in daily spend, clicks, and attributed conversions. Matching order IDs are attributed automatically; duplicates are averaged across rows per the V1 spec.
+- **Cost templates & COGS** – Upload CSV files or seed demo data to maintain SKU/variant costs. Payment fee templates cover Shopify Payments and PayPal, and a global platform fee handles marketplace commissions.
+- **Profit engine & currency** – Every order is revalued into the workspace currency using live FX rates (with manual overrides). Net revenue, direct costs, advertising spend, and net profit roll up into daily metrics and time-series dashboards.
+- **Dashboards & reports** – Merchants get a single-page dashboard with metric cards, trends, cost composition, and top SKU tables plus dedicated order and product profit tables with filters and sorting.
+- **Reconciliation** – Daily summaries compare Shopify vs. payment gateways and Shopify vs. Meta conversions to highlight variances above configurable thresholds.
+- **Shopify Billing** – Basic (single store, 1,000 orders) and Pro (multi-store, higher limits) plans with a shared 14-day trial. Usage monitoring pauses ingestion when limits are hit.
 
 ## Architecture overview
 
 | Layer | Tech | Notes |
 | --- | --- | --- |
 | UI | Remix + Polaris | The front-end shell originates from Shopify’s Remix template, with custom routes under `/app/routes/app*.jsx` for the merchant console. |
-| Services | Node/TypeScript modules | Domain logic for profits, plan limits, reporting, alerts, and integrations lives in `/app/services` (custom to Profit Pulse). |
+| Services | Node/TypeScript modules | Domain logic for profits, plan limits, Shopify + Meta sync, reconciliation, and billing lives in `/app/services`. |
 | Persistence | Prisma + PostgreSQL | Schema stored in `prisma/schema.prisma`; migrations ensure quota and cost integrity. |
-| Background work | Scripts & scheduled runners | Report schedule runner (`app/services/report-schedules-runner.server.js`) and sync jobs in `/scripts` extend the template for long-running tasks. |
+| Background work | Scripts & scheduled runners | Sync jobs under `/app/services/sync` power Shopify orders, Meta Ads, and Shopify Payments/PayPal payout refreshes. |
 
 The `app` directory retains Shopify’s Vite build tooling and auth scaffolding, while services/tests/documentation are bespoke for Profit Pulse.
 
@@ -48,7 +49,7 @@ Copy `.env.example` to `.env` and populate the required fields. At minimum you m
 - `DATABASE_URL`
 - `CREDENTIAL_ENCRYPTION_KEY`
 
-Profit Pulse validates these on boot and points to [ENVIRONMENT.md](ENVIRONMENT.md) when anything is missing. Consult that document for optional knobs (ads, payments, accounting, Upstash cache, etc.).
+Profit Pulse validates these on boot and points to [ENVIRONMENT.md](ENVIRONMENT.md) when anything is missing. Consult that document for optional knobs (Meta Ads, PayPal payouts, caching).
 
 ### Database migrations
 
@@ -69,10 +70,10 @@ The development server relies on the Shopify CLI tunnel. Press `p` in the CLI ou
 ### Project structure primer
 
 - `app/routes/*` – Remix route modules. Files prefixed with `app.` extend Shopify’s admin template, while `auth.*` and `webhooks.*` handle OAuth and platform callbacks.
-- `app/services/*` – Profit Pulse domain services (profit engine, reporting, plan limits, notifications, sync jobs).
+- `app/services/*` – Profit Pulse domain services (profit engine, daily metrics, plan limits, Meta Ads + payout sync, reconciliation).
 - `app/utils/*` – Shared utilities including logging, caching, metrics, and environment validation.
 - `prisma/` – Database schema and migrations. Seed scripts inject demo costs and metrics for new stores.
-- `tests/` – Node test suites covering the profit engine, plan limits, notifications, scheduling, and integrations.
+- `tests/` – Node test suites covering the profit engine, plan limits, and credential refresh routines.
 
 ## Testing
 
@@ -86,9 +87,9 @@ npm test
 
 ## Security hardening highlights
 
-- Report schedule webhooks, notification channels, and test dispatches are restricted to HTTPS endpoints on vetted hosts (Slack, Teams, Zapier, Make) plus allowlisted overrides.
-- Sensitive API credentials are encrypted with `CREDENTIAL_ENCRYPTION_KEY` before persistence.
+- Sensitive API credentials (Meta Ads, PayPal) are encrypted with `CREDENTIAL_ENCRYPTION_KEY` before persistence.
 - Plan limit enforcement locks monthly usage rows with `FOR UPDATE` semantics to prevent double counting under concurrency.
+- Webhook handlers validate Shopify HMAC headers and bail fast when mandatory scopes or shop domains are missing.
 
 ## Caching and scale-out
 

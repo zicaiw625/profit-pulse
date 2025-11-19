@@ -1,11 +1,6 @@
 import pkg from "@prisma/client";
 import prisma from "../../db.server";
-import { fetchAmazonAdMetrics } from "../connectors/amazon-ads.server";
 import { fetchMetaAdMetrics } from "../connectors/meta-ads.server";
-import { fetchGoogleAdMetrics } from "../connectors/google-ads.server";
-import { fetchTikTokAdMetrics } from "../connectors/tiktok-ads.server";
-import { fetchBingAdMetrics } from "../connectors/bing-ads.server";
-import { fetchSnapchatAdMetrics } from "../connectors/snapchat-ads.server";
 import {
   parseCredentialSecret,
   ensureFreshAdAccessToken,
@@ -19,36 +14,6 @@ const { CredentialProvider, SyncJobType } = pkg;
 const CONNECTORS = {
   META_ADS: ({ credential, secret, days }) =>
     fetchMetaAdMetrics({
-      accountId: credential.accountId,
-      secret,
-      days,
-    }),
-  GOOGLE_ADS: ({ credential, secret, days }) =>
-    fetchGoogleAdMetrics({
-      accountId: credential.accountId,
-      secret,
-      days,
-    }),
-  TIKTOK_ADS: ({ credential, secret, days }) =>
-    fetchTikTokAdMetrics({
-      accountId: credential.accountId,
-      secret,
-      days,
-    }),
-  BING_ADS: ({ credential, secret, days }) =>
-    fetchBingAdMetrics({
-      accountId: credential.accountId,
-      secret,
-      days,
-    }),
-  AMAZON_ADS: ({ credential, secret, days }) =>
-    fetchAmazonAdMetrics({
-      accountId: credential.accountId,
-      secret,
-      days,
-    }),
-  SNAPCHAT_ADS: ({ credential, secret, days }) =>
-    fetchSnapchatAdMetrics({
       accountId: credential.accountId,
       secret,
       days,
@@ -275,14 +240,10 @@ async function applyAdSpendToMetrics({
 }
 
 function toChannel(provider) {
-  switch (provider) {
-    case CredentialProvider.META_ADS:
-      return "META_ADS";
-    case CredentialProvider.GOOGLE_ADS:
-      return "GOOGLE_ADS";
-    default:
-      return provider;
+  if (provider === CredentialProvider.META_ADS) {
+    return "META_ADS";
   }
+  return provider;
 }
 
 function buildCompositeKey(storeId, provider, record) {

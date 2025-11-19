@@ -3,8 +3,6 @@ import prisma from "../../db.server.js";
 import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server.js";
 import { mapWithConcurrency } from "../../utils/concurrency.server.js";
 import { fetchPaypalPayouts } from "../payments/paypal.server.js";
-import { fetchStripePayouts } from "../payments/stripe.server.js";
-import { fetchKlarnaPayouts } from "../payments/klarna.server.js";
 import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
 
 const { CredentialProvider, SyncJobType } = pkg;
@@ -28,8 +26,6 @@ let externalPayoutConcurrency = DEFAULT_EXTERNAL_PAYOUT_CONCURRENCY;
 
 const defaultDependencies = {
   fetchPaypalPayouts,
-  fetchStripePayouts,
-  fetchKlarnaPayouts,
   persistExternalPayout: persistExternalPayoutRecord,
   startSyncJob,
   finishSyncJob,
@@ -176,112 +172,6 @@ export async function syncPaypalPayments({ store, days = 7 }) {
       payouts,
       resolveExternalPayoutConcurrency(),
       (payout) => persistPayout(store.id, CredentialProvider.PAYPAL, payout),
-    );
-    await finishJob(job.id, {
-      processedCount: payouts.length,
-    });
-
-    payoutLogger.info("payments.sync.completed", {
-      context: { provider, storeId: store.id },
-      days,
-      processed: payouts.length,
-    });
-    return { processed: payouts.length };
-  } catch (error) {
-    payoutLogger.error("payments.sync.failed", {
-      context: { provider, storeId: store.id },
-      days,
-      error: serializeError(error),
-    });
-    await failJob(job.id, error);
-    throw error;
-  }
-}
-
-export async function syncStripePayments({ store, days = 7 }) {
-  if (!store?.id) {
-    throw new Error("Store is required for Stripe sync");
-  }
-
-  const {
-    fetchStripePayouts: fetchStripe,
-    persistExternalPayout: persistPayout,
-    startSyncJob: startJob,
-    finishSyncJob: finishJob,
-    failSyncJob: failJob,
-  } = getPaymentSyncDependencies();
-
-  const provider = CredentialProvider.STRIPE;
-  const job = await startJob({
-    storeId: store.id,
-    jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider,
-    metadata: { days },
-  });
-
-  try {
-    payoutLogger.info("payments.sync.started", {
-      context: { provider, storeId: store.id },
-      days,
-    });
-    const payouts = await fetchStripe({ days });
-    await mapWithConcurrency(
-      payouts,
-      resolveExternalPayoutConcurrency(),
-      (payout) => persistPayout(store.id, CredentialProvider.STRIPE, payout),
-    );
-    await finishJob(job.id, {
-      processedCount: payouts.length,
-    });
-
-    payoutLogger.info("payments.sync.completed", {
-      context: { provider, storeId: store.id },
-      days,
-      processed: payouts.length,
-    });
-    return { processed: payouts.length };
-  } catch (error) {
-    payoutLogger.error("payments.sync.failed", {
-      context: { provider, storeId: store.id },
-      days,
-      error: serializeError(error),
-    });
-    await failJob(job.id, error);
-    throw error;
-  }
-}
-
-export async function syncKlarnaPayments({ store, days = 7 }) {
-  if (!store?.id) {
-    throw new Error("Store is required for Klarna sync");
-  }
-
-  const {
-    fetchKlarnaPayouts: fetchKlarna,
-    persistExternalPayout: persistPayout,
-    startSyncJob: startJob,
-    finishSyncJob: finishJob,
-    failSyncJob: failJob,
-  } = getPaymentSyncDependencies();
-
-  const provider = CredentialProvider.KLARNA;
-  const job = await startJob({
-    storeId: store.id,
-    jobType: SyncJobType.PAYMENT_PAYOUT,
-    provider,
-    metadata: { days },
-  });
-
-  try {
-    payoutLogger.info("payments.sync.started", {
-      context: { provider, storeId: store.id },
-      days,
-    });
-    const payouts = await fetchKlarna({ days });
-    await mapWithConcurrency(
-      payouts,
-      resolveExternalPayoutConcurrency(),
-      (payout) => persistPayout(store.id, CredentialProvider.KLARNA, payout),
     );
     await finishJob(job.id, {
       processedCount: payouts.length,

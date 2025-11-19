@@ -38,8 +38,8 @@ export const TRANSLATION_KEYS = {
   REPORTS_FORMULA_EXPRESSION: "reports.builder.formulaExpression",
   REPORTS_FORMULA_HELP: "reports.builder.formulaHelp",
   NAV_OVERVIEW: "nav.overview",
-  NAV_REPORTS: "nav.reports",
-  NAV_REFUNDS: "nav.refunds",
+  NAV_ORDERS: "nav.orders",
+  NAV_PRODUCTS: "nav.products",
   NAV_RECONCILIATION: "nav.reconciliation",
   NAV_SETTINGS: "nav.settings",
   NAV_HELP: "nav.help",
@@ -57,6 +57,9 @@ export const TRANSLATION_KEYS = {
   DASHBOARD_CARD_AD_SPEND: "dashboard.card.adSpend",
   DASHBOARD_CARD_NET_PROFIT: "dashboard.card.netProfit",
   DASHBOARD_CARD_POAS: "dashboard.card.profitOnAdSpend",
+  DASHBOARD_CARD_ORDERS: "dashboard.card.orders",
+  DASHBOARD_CARD_NET_MARGIN: "dashboard.card.netMargin",
+  DASHBOARD_CARD_ROAS: "dashboard.card.roas",
   DASHBOARD_CARD_FIXED: "dashboard.card.fixedCosts",
   DASHBOARD_CARD_NET_AFTER_FIXED: "dashboard.card.netAfterFixed",
   DASHBOARD_CARD_REFUND_RATE: "dashboard.card.refundRate",
@@ -74,11 +77,11 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
       "1. Connect Shopify store and verify OAuth permissions for orders, refunds, and customers.",
     [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
-      "2. Upload SKU cost CSV or seed demo templates to make COGS and shipping estimates accurate.",
+      "2. Upload SKU cost CSV or seed demo templates so COGS stay accurate.",
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
-      "3. Connect Meta/Google Ads to feed spend into the attribution pipeline and track ROAS.",
+      "3. Connect Meta Ads to feed spend into the attribution pipeline and track ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Save a Slack/Teams webhook, set alerts and scheduled digests to monitor anomalies.",
+      "4. Set the workspace currency and exchange-rate mode for multi-currency orders.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Advanced report builder",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Choose a dimension and metrics to slice revenue, profit, and spend across time.",
@@ -117,8 +120,8 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.REPORTS_FORMULA_HELP]:
       "Use metric keys (e.g., revenue, netProfit) with + - * / to define a derived metric.",
     [TRANSLATION_KEYS.NAV_OVERVIEW]: "Dashboard",
-    [TRANSLATION_KEYS.NAV_REPORTS]: "Reports",
-    [TRANSLATION_KEYS.NAV_REFUNDS]: "Refunds",
+    [TRANSLATION_KEYS.NAV_ORDERS]: "Orders",
+    [TRANSLATION_KEYS.NAV_PRODUCTS]: "Products",
     [TRANSLATION_KEYS.NAV_RECONCILIATION]: "Reconciliation",
     [TRANSLATION_KEYS.NAV_SETTINGS]: "Settings",
     [TRANSLATION_KEYS.NAV_HELP]: "Help",
@@ -136,6 +139,9 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND]: "Ad spend",
     [TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT]: "Net profit",
     [TRANSLATION_KEYS.DASHBOARD_CARD_POAS]: "Net profit % of ad spend",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_ORDERS]: "Orders",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_NET_MARGIN]: "Net margin",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_ROAS]: "ROAS",
     [TRANSLATION_KEYS.DASHBOARD_CARD_FIXED]: "Fixed cost burn",
     [TRANSLATION_KEYS.DASHBOARD_CARD_NET_AFTER_FIXED]: "Net profit after fixed",
     [TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_RATE]: "Refund rate",
@@ -154,11 +160,11 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
       "1. 连接 Shopify 店铺，授权订单、退款与客户数据。",
     [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
-      "2. 上传 SKU 成本 CSV 或使用演示模板，确保 COGS 与运费估算准确。",
+      "2. 上传 SKU 成本 CSV 或使用演示模板，让 COGS 保持准确。",
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
-      "3. 连接 Meta/Google 广告，花费数据即时进入归因与 ROAS 追踪。",
+      "3. 连接 Meta 广告，花费数据即时进入归因与 ROAS 追踪。",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. 保存 Slack/Teams Webhook，配置告警与定时报表，随时掌握异常。",
+      "4. 设置主记账货币与汇率模式，统一多币种订单。",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "高级报表构建器",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "选择维度与指标，按时间段切割营收、利润和花费。",
@@ -196,8 +202,8 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.REPORTS_FORMULA_HELP]:
       "使用指标键（如 revenue、netProfit）和 + - * / 组合出新的指标。",
     [TRANSLATION_KEYS.NAV_OVERVIEW]: "总览",
-    [TRANSLATION_KEYS.NAV_REPORTS]: "报表",
-    [TRANSLATION_KEYS.NAV_REFUNDS]: "退款",
+    [TRANSLATION_KEYS.NAV_ORDERS]: "订单",
+    [TRANSLATION_KEYS.NAV_PRODUCTS]: "商品",
     [TRANSLATION_KEYS.NAV_RECONCILIATION]: "对账",
     [TRANSLATION_KEYS.NAV_SETTINGS]: "设置",
     [TRANSLATION_KEYS.NAV_HELP]: "帮助",
@@ -215,6 +221,9 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.DASHBOARD_CARD_AD_SPEND]: "广告花费",
     [TRANSLATION_KEYS.DASHBOARD_CARD_NET_PROFIT]: "净利润",
     [TRANSLATION_KEYS.DASHBOARD_CARD_POAS]: "净利/广告花费",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_ORDERS]: "订单数",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_NET_MARGIN]: "净利率",
+    [TRANSLATION_KEYS.DASHBOARD_CARD_ROAS]: "ROAS",
     [TRANSLATION_KEYS.DASHBOARD_CARD_FIXED]: "固定成本",
     [TRANSLATION_KEYS.DASHBOARD_CARD_NET_AFTER_FIXED]: "扣除固定后的净利",
     [TRANSLATION_KEYS.DASHBOARD_CARD_REFUND_RATE]: "退款率",
@@ -233,11 +242,11 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
       "1. Conecta la tienda de Shopify y concede permisos para pedidos, reembolsos y clientes.",
     [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
-      "2. Sube el CSV de costos por SKU o utiliza plantillas demo para obtener COGS y envíos precisos.",
+      "2. Sube el CSV de costos por SKU o usa plantillas demo para mantener COGS preciso.",
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
-      "3. Vincula Meta/Google Ads para incorporar el gasto publicitario en la atribución y vigilar el ROAS.",
+      "3. Vincula Meta Ads para incorporar el gasto publicitario en la atribución y vigilar el ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Añade un webhook de Slack/Teams y configura alertas y resúmenes programados para detectar anomalías.",
+      "4. Define la moneda principal y el modo de tipo de cambio para unificar pedidos en varias divisas.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Constructor avanzado de informes",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Elige una dimensión y métricas para analizar ingresos, beneficios y gasto en distintos periodos.",
@@ -275,11 +284,11 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
       "1. Connectez la boutique Shopify et autorisez l’accès aux commandes, remboursements et clients.",
     [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
-      "2. Importez un CSV de coûts par SKU ou utilisez les modèles de démonstration pour fiabiliser COGS et frais d’expédition.",
+      "2. Importez un CSV de coûts par SKU ou utilisez les modèles de démonstration pour garder des COGS fiables.",
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
-      "3. Connectez Meta/Google Ads afin d’injecter les dépenses dans l’attribution et suivre le ROAS.",
+      "3. Connectez Meta Ads afin d’injecter les dépenses dans l’attribution et suivre le ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Ajoutez un webhook Slack/Teams et paramétrez alertes et rapports planifiés pour détecter les anomalies.",
+      "4. Définissez la devise principale et la stratégie de change pour normaliser les commandes multi-devises.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Générateur de rapports avancé",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Choisissez une dimension et des métriques pour analyser revenus, profits et dépenses dans le temps.",
@@ -317,11 +326,11 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_CONNECT_STORE]:
       "1. Shopify-Store verbinden und Berechtigungen für Bestellungen, Rückerstattungen und Kunden erteilen.",
     [TRANSLATION_KEYS.STEP_IMPORT_COSTS]:
-      "2. SKU-Kosten per CSV importieren oder Demo-Vorlagen nutzen, damit COGS und Versandkosten stimmen.",
+      "2. SKU-Kosten per CSV importieren oder Demo-Vorlagen nutzen, damit COGS aktuell bleibt.",
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
-      "3. Meta/Google Ads verknüpfen, um Werbeausgaben in die Attribution einzuspeisen und ROAS zu verfolgen.",
+      "3. Meta Ads verknüpfen, um Werbeausgaben in die Attribution einzuspeisen und ROAS zu verfolgen.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Slack/Teams-Webhook hinterlegen und Alarme sowie geplante Berichte für Anomalien einrichten.",
+      "4. Hauptwährung und Wechselkursmodus festlegen, um Mehrwährungsbestellungen zu vereinheitlichen.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Erweiterter Report-Builder",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Wählen Sie Dimension und Kennzahlen, um Umsatz, Profit und Ausgaben zeitlich auszuwerten.",

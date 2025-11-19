@@ -15,21 +15,13 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `OAUTH_STATE_SECRET` | ⚠️ | Optional override for OAuth state signing. Falls back to `SHOPIFY_API_SECRET` when omitted. |
 | `SHOP_CUSTOM_DOMAIN` | ⚠️ | If set, restricts installs to a single custom shop domain. Useful for pilot rollouts. |
 
-## Email & notifications
+## Background sync tuning
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `PROFIT_PULSE_EMAIL_ENDPOINT` | ⚠️ | HTTPS endpoint that accepts POST requests for outbound email. Required to enable scheduled email reports. |
-| `WEBHOOK_HOST_ALLOWLIST` | ⚠️ | Comma-separated list of additional webhook hosts or wildcards (e.g. `analytics.example.com,*.reports.internal`). Entries extend the built-in Slack/Teams/Zapier/Make allowlist. |
-
-## Reporting & scheduling
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `REPORT_SCHEDULE_CRON` | ⚠️ | Custom cron expression for report runner scripts. Defaults to the interval logic defined in `report-schedules-runner`. |
 | `ORDER_SYNC_CONCURRENCY` | ⚠️ | Maximum number of Shopify orders processed in parallel during backfills. Defaults to 5. |
 | `CREDENTIAL_REFRESH_CONCURRENCY` | ⚠️ | Upper bound on parallel ad credential refreshes. Defaults to 5. |
-| `PAYOUT_SYNC_CONCURRENCY` | ⚠️ | Caps the number of simultaneous payout upserts across PayPal/Stripe/Klarna syncs. Defaults to 5 with a hard ceiling of 10. |
+| `PAYOUT_SYNC_CONCURRENCY` | ⚠️ | Caps the number of simultaneous payout upserts when syncing PayPal settlements. Defaults to 5 with a hard ceiling of 10. |
 
 ## Caching
 
@@ -49,39 +41,16 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `GOOGLE_ADS_CLIENT_ID` | ⚠️ | Google Ads OAuth client ID. Required to sync Google Ads spend. |
-| `GOOGLE_ADS_CLIENT_SECRET` | ⚠️ | Google Ads OAuth client secret. |
-| `GOOGLE_ADS_DEVELOPER_TOKEN` | ⚠️ | Developer token for Google Ads API access. |
 | `META_ADS_APP_ID` | ⚠️ | Meta Ads application ID. |
-| `META_ADS_APP_SECRET` | ⚠️ | Meta Ads application secret. |
-| `BING_ADS_CLIENT_ID` | ⚠️ | Microsoft Advertising OAuth client ID. Enables Bing Ads spend sync. |
-| `BING_ADS_CLIENT_SECRET` | ⚠️ | Microsoft Advertising OAuth client secret. |
-| `TIKTOK_ADS_CLIENT_ID` | ⚠️ | TikTok Ads OAuth client ID for paid social spend imports. |
-| `TIKTOK_ADS_CLIENT_SECRET` | ⚠️ | TikTok Ads OAuth client secret. |
+| `META_ADS_APP_SECRET` | ⚠️ | Meta Ads application secret used during token exchange. |
 
 ## Payment provider integrations
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `STRIPE_SECRET_KEY` | ⚠️ | Stripe secret key used to reconcile payouts. |
-| `STRIPE_API_BASE_URL` | ⚠️ | Optional override for Stripe API base (defaults to `https://api.stripe.com/v1`). |
 | `PAYPAL_CLIENT_ID` | ⚠️ | PayPal REST client ID for payout sync. |
 | `PAYPAL_CLIENT_SECRET` | ⚠️ | PayPal REST client secret. |
 | `PAYPAL_API_BASE_URL` | ⚠️ | Optional override for PayPal API base (defaults to `https://api-m.paypal.com`). |
-| `KLARNA_USERNAME` | ⚠️ | Klarna API username for settlement reconciliation. |
-| `KLARNA_PASSWORD` | ⚠️ | Klarna API password. |
-| `KLARNA_API_BASE_URL` | ⚠️ | Optional override for Klarna API base (defaults to `https://api-na.klarna.com`). |
-| `ADYEN_API_KEY` | ⚠️ | Optional Adyen API key for settlements if that provider is enabled. |
-| `ADYEN_MERCHANT_ACCOUNT` | ⚠️ | Adyen merchant account identifier paired with the API key. |
-
-## ERP & accounting integrations
-
-| Variable | Required | Description |
-| --- | --- | --- |
-| `ERP_COST_SYNC_URL` | ⚠️ | Endpoint for syncing ERP-sourced cost adjustments. |
-| `QUICKBOOKS_SYNC_URL` | ⚠️ | Webhook or API endpoint for pushing accounting entries to QuickBooks. Enables QuickBooks toggle in settings. |
-| `XERO_SYNC_URL` | ⚠️ | Endpoint for Xero accounting sync. Enables Xero toggle in settings. |
-| `NETSUITE_SYNC_URL` | ⚠️ | Optional endpoint for NetSuite journal exports. |
 
 ## Billing & monetization
 
@@ -99,5 +68,5 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 ## Operational tips
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
-- Review webhook allowlists whenever you onboard a new notification destination. Only domains enumerated in `notifications.server.js` or `WEBHOOK_HOST_ALLOWLIST` will receive payloads.
+- Keep Meta Ads and PayPal variables scoped to each environment; restarting the app refreshes tokens if credentials become invalid.
 - For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.

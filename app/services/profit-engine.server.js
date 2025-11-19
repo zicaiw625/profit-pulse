@@ -4,25 +4,15 @@ import {
   getActiveSkuCostMap,
   getVariableCostTemplates,
 } from "./costs.server.js";
-import { getLogisticsCost } from "./logistics.server.js";
 import { ensureOrderCapacity } from "./plan-limits.server.js";
-import { notifyPlanOverage, processPlanOverageCharge } from "./overages.server.js";
 import { isPlanLimitError } from "../errors/plan-limit-error.js";
 import { getAttributionRules as defaultGetAttributionRules } from "./attribution.server.js";
 import { startOfDay } from "../utils/dates.server.js";
 import { createScopedLogger, serializeError } from "../utils/logger.server.js";
-import {
-  recordOrderProcessing,
-  recordPlanLimitError,
-} from "./metrics.server.js";
+import { recordOrderProcessing } from "./metrics.server.js";
 
 const { CostType, CredentialProvider } = pkg;
-const ATTRIBUTION_CHANNELS = [
-  CredentialProvider.META_ADS,
-  CredentialProvider.GOOGLE_ADS,
-  CredentialProvider.BING_ADS,
-  CredentialProvider.TIKTOK_ADS,
-];
+const ATTRIBUTION_CHANNELS = [CredentialProvider.META_ADS];
 
 const profitEngineLogger = createScopedLogger({ service: "profit-engine" });
 
@@ -30,13 +20,9 @@ const defaultDependencies = {
   prismaClient: defaultPrisma,
   getActiveSkuCostMap,
   getVariableCostTemplates,
-  getLogisticsCost,
   ensureOrderCapacity,
-  notifyPlanOverage,
-  processPlanOverageCharge,
   getAttributionRules: defaultGetAttributionRules,
   recordOrderProcessing,
-  recordPlanLimitError,
 };
 
 let profitEngineDependencies = { ...defaultDependencies };
@@ -54,13 +40,9 @@ export async function processShopifyOrder({ store, payload }) {
     prismaClient,
     getActiveSkuCostMap: getActiveSkuCostMapImpl,
     getVariableCostTemplates: getVariableCostTemplatesImpl,
-    getLogisticsCost: getLogisticsCostImpl,
     ensureOrderCapacity: ensureOrderCapacityImpl,
-    notifyPlanOverage: notifyPlanOverageImpl,
-    processPlanOverageCharge: processPlanOverageChargeImpl,
     getAttributionRules: getAttributionRulesImpl,
     recordOrderProcessing: recordOrderProcessingImpl,
-    recordPlanLimitError: recordPlanLimitErrorImpl,
   } = profitEngineDependencies;
 
   const startedAt = Date.now();
@@ -165,42 +147,11 @@ export async function processShopifyOrder({ store, payload }) {
 
     const shippingAddress =
       payload.shipping_address ?? payload.customer?.default_address ?? null;
-    const destinationCountry =
-      shippingAddress?.country_code ??
-      customerCountry ??
-      undefined;
-    const destinationRegion =
-      shippingAddress?.province_code ??
-      shippingAddress?.province ??
-      undefined;
-    const totalWeightGrams =
-      toNumber(payload.total_weight ?? 0) ||
-      lineItems.reduce(
-        (sum, item) =>
-          sum + toNumber(item.grams ?? 0) * (item.quantity ?? 0),
-        0,
-      );
-    const weightKg = totalWeightGrams / 1000;
-    const shippingCarrier =
-      shippingLines[0]?.carrier_identifier ??
-      shippingLines[0]?.carrier ??
-      shippingLines[0]?.title ??
-      undefined;
-    const logisticsCost = await getLogisticsCostImpl({
-      storeId: store.id,
-      country: destinationCountry,
-      region: destinationRegion,
-      weightKg,
-      provider: shippingCarrier,
-      date: orderDate,
-      currency,
-    });
-
     const refunds = extractRefunds(payload, currency);
 
     const costTotals = aggregateCostTotals(variableCosts);
     const shippingTemplateCost = costTotals[CostType.SHIPPING] ?? 0;
-    const shippingCost = shippingTemplateCost + logisticsCost;
+    const shippingCost = shippingTemplateCost;
     const paymentFees = costTotals[CostType.PAYMENT_FEE] ?? 0;
     const platformFees = costTotals[CostType.PLATFORM_FEE] ?? 0;
     const customCosts = costTotals[CostType.CUSTOM] ?? 0;
@@ -230,8 +181,6 @@ export async function processShopifyOrder({ store, payload }) {
       netProfit,
     };
 
-    const pendingOverageRecordIds = [];
-
     const transactionResult = await prismaClient.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { shopifyOrderId: orderPayload.shopifyOrderId },
@@ -252,15 +201,12 @@ export async function processShopifyOrder({ store, payload }) {
 
       const isNewOrder = !existingOrder;
       if (isNewOrder && storeRecord?.merchantId) {
-        const capacityResult = await ensureOrderCapacityImpl({
+        await ensureOrderCapacityImpl({
           merchantId: storeRecord.merchantId,
           incomingOrders: 1,
           tx,
           shopDomain: storeRecord.shopDomain,
         });
-        if (capacityResult?.overageRecord?.id) {
-          pendingOverageRecordIds.push(capacityResult.overageRecord.id);
-        }
       }
 
       const order = await tx.order.upsert({
@@ -286,8 +232,7 @@ export async function processShopifyOrder({ store, payload }) {
           orderId: order.id,
           currency,
           cogsTotal,
-          shippingTemplateCost,
-          logisticsCost,
+          shippingCost,
           paymentFees,
           platformFees,
           customCosts,
@@ -345,21 +290,6 @@ export async function processShopifyOrder({ store, payload }) {
         refunds,
       };
     });
-    for (const overageId of pendingOverageRecordIds) {
-      try {
-        await processPlanOverageChargeImpl(overageId);
-      } catch (billingError) {
-        profitEngineLogger.error("plan_overage_charge_failed", {
-          context: {
-            overageRecordId: overageId,
-            storeId: store.id,
-            merchantId: storeRecord?.merchantId ?? initialMerchantId,
-          },
-          error: serializeError(billingError),
-        });
-      }
-    }
-
     recordOrderProcessingImpl({
       storeId: store.id,
       merchantId: storeRecord.merchantId,
@@ -385,17 +315,11 @@ export async function processShopifyOrder({ store, payload }) {
       merchantId &&
       error.detail?.limit !== undefined
     ) {
-      await notifyPlanOverageImpl({
-        merchantId,
-        limit: error.detail.limit,
-        usage: error.detail.usage ?? 0,
-      });
-      recordPlanLimitErrorImpl({
+      profitEngineLogger.warn("order_plan_limit_reached", {
         merchantId,
         storeId,
         limit: error.detail.limit,
         usage: error.detail.usage ?? 0,
-        source: "processShopifyOrder",
       });
     }
 
@@ -511,8 +435,7 @@ function buildOrderCostRows({
   orderId,
   currency,
   cogsTotal,
-  shippingTemplateCost,
-  logisticsCost,
+  shippingCost,
   paymentFees,
   platformFees,
   customCosts,
@@ -527,22 +450,13 @@ function buildOrderCostRows({
       source: "SKU cost",
     });
   }
-  if (shippingTemplateCost > 0) {
+  if (shippingCost > 0) {
     rows.push({
       orderId,
       type: CostType.SHIPPING,
-      amount: shippingTemplateCost,
+      amount: shippingCost,
       currency,
       source: "Template",
-    });
-  }
-  if (logisticsCost > 0) {
-    rows.push({
-      orderId,
-      type: CostType.SHIPPING,
-      amount: logisticsCost,
-      currency,
-      source: "Logistics rule",
     });
   }
   if (paymentFees > 0) {
@@ -940,7 +854,6 @@ function resolveRefundForLine(sku, refundBySku, totalRefundAmount, revenueShare)
 
 const ORDER_CHANNEL_OVERRIDES = [
   { pattern: /(facebook|meta|instagram)/i, channel: "META_ADS" },
-  { pattern: /(google|adwords|youtube)/i, channel: "GOOGLE_ADS" },
   { pattern: /pos/i, channel: "POS" },
 ];
 

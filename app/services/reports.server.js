@@ -1,1189 +1,155 @@
-import defaultPrisma from "../db.server.js";
-import { getFixedCostBreakdown as defaultGetFixedCostBreakdown } from "./fixed-costs.server.js";
-import { getExchangeRate as defaultGetExchangeRate } from "./exchange-rates.server.js";
+import prisma from "../db.server.js";
 import {
+  resolveTimezone,
   startOfDay,
   shiftDays,
-  resolveTimezone,
-  formatDateKey,
 } from "../utils/dates.server.js";
-import {
-  buildCacheKey as defaultBuildCacheKey,
-  memoizeAsync as defaultMemoizeAsync,
-} from "./cache.server.js";
-import { evaluateFormulaExpression as defaultEvaluateFormulaExpression } from "./report-formulas.server.js";
 
-/**
- * NOTE: `evaluateFormulaExpression` only accepts identifiers comprised of
- * letters/numbers/underscores alongside the arithmetic operators `+`, `-`,
- * `*`, `/`, parentheses, and whitespace. Do not loosen those constraints or
- * attempt to execute arbitrary JavaScript—if requirements grow beyond this
- * grammar, replace the evaluator with a purpose-built parser instead.
- */
+const DEFAULT_RANGE_DAYS = 14;
 
-const defaultDependencies = {
-  prismaClient: defaultPrisma,
-  getFixedCostBreakdown: defaultGetFixedCostBreakdown,
-  getExchangeRate: defaultGetExchangeRate,
-  memoizeAsync: defaultMemoizeAsync,
-  buildCacheKey: defaultBuildCacheKey,
-  evaluateFormulaExpression: defaultEvaluateFormulaExpression,
-};
-
-let reportServiceDependencies = { ...defaultDependencies };
-
-export function setReportServiceDependenciesForTests(overrides = {}) {
-  reportServiceDependencies = { ...reportServiceDependencies, ...overrides };
-}
-
-export function resetReportServiceDependenciesForTests() {
-  reportServiceDependencies = { ...defaultDependencies };
-}
-
-function getReportServiceDependencies() {
-  return reportServiceDependencies;
-}
-
-const DEFAULT_RANGE_DAYS = 30;
-const DAY_MS = 1000 * 60 * 60 * 24;
-const CACHE_TTL_MS = 30 * 1000;
-
-const DIMENSION_DEFINITIONS = {
-  channel: {
-    field: "channel",
-    label: "Channel",
-    where: { channel: { not: "PRODUCT" } },
-    format: (value) => value ?? "Unassigned",
-    source: "dailyMetric",
-  },
-  product: {
-    field: "productSku",
-    label: "Product SKU",
-    where: { channel: "PRODUCT", productSku: { not: null } },
-    format: (value) => value ?? "Unknown SKU",
-    source: "dailyMetric",
-  },
-  date: {
-    field: "date",
-    label: "Date",
-    format: (value) => (value ? value.toISOString().slice(0, 10) : "No date"),
-    source: "dailyMetric",
-  },
-  country: {
-    label: "Country / Region",
-    format: (value) => value ?? "Unknown",
-    source: "orders",
-  },
-  customer: {
-    label: "Customer",
-    format: (value) => value ?? "Guest",
-    source: "orders",
-  },
-};
-
-const METRIC_COLUMNS = {
-  revenue: { field: "revenue", label: "Revenue", isCurrency: true },
-  netProfit: { field: "netProfit", label: "Net profit", isCurrency: true },
-  adSpend: { field: "adSpend", label: "Ad spend", isCurrency: true },
-  cogs: { field: "cogs", label: "COGS", isCurrency: true },
-  shippingCost: { field: "shippingCost", label: "Shipping", isCurrency: true },
-  paymentFees: { field: "paymentFees", label: "Payment fees", isCurrency: true },
-  refundAmount: { field: "refundAmount", label: "Refund amount", isCurrency: true },
-  orders: { field: "orders", label: "Orders", isCurrency: false },
-  ltv: { label: "Lifetime net profit", isCurrency: true },
-  repeatOrders: { label: "Repeat purchases", isCurrency: false },
-};
-
-const METRIC_KEY_LOOKUP = new Map(
-  Object.keys(METRIC_COLUMNS).map((key) => [key.toLowerCase(), key]),
-);
-
-const DEFAULT_CUSTOM_METRICS = ["revenue", "netProfit"];
-
-export async function getReportingOverview({
-  storeId,
-  rangeDays = DEFAULT_RANGE_DAYS,
+export async function getOrderProfitTable({
+  store,
   rangeStart,
   rangeEnd,
+  includeRefunds = true,
+  limit = 200,
 }) {
-  if (!storeId) {
-    throw new Error("storeId is required for reporting overview");
+  if (!store?.id) {
+    throw new Error("Store is required to load order profit table");
   }
+  const { start, end } = resolveRange({ store, rangeStart, rangeEnd });
 
-  const context = await loadStoreContext(storeId);
-  const { start, end, resolvedDays } = resolveRange({
-    rangeDays,
-    rangeStart,
-    rangeEnd,
-    timezone: context.timezone,
-  });
-  const { memoizeAsync: memoizeAsyncImpl, buildCacheKey: buildCacheKeyImpl } =
-    getReportServiceDependencies();
-  const cacheKey = buildCacheKeyImpl(
-    "reporting-overview",
-    storeId,
-    `${context.timezone}|${start.toISOString()}|${end.toISOString()}`,
-  );
-  return memoizeAsyncImpl(cacheKey, CACHE_TTL_MS, () =>
-    buildReportingOverview({
-      storeId,
-      rangeDays: resolvedDays,
-      range: { start, end },
-      context,
-    }),
-  );
-}
-
-export async function getCustomReportData({
-  storeId,
-  dimension = "channel",
-  metrics = DEFAULT_CUSTOM_METRICS,
-  start,
-  end,
-  rangeDays = DEFAULT_RANGE_DAYS,
-  limit = 25,
-  formula,
-  formulaLabel,
-}) {
-  if (!storeId) {
-    throw new Error("storeId is required for custom reports");
-  }
-
-  const {
-    prismaClient,
-    getExchangeRate: getExchangeRateImpl,
-    evaluateFormulaExpression: evaluateFormulaExpressionImpl,
-  } = getReportServiceDependencies();
-
-  const normalizedDimension = DIMENSION_DEFINITIONS[dimension]
-    ? dimension
-    : "channel";
-  const dimensionDef = DIMENSION_DEFINITIONS[normalizedDimension];
-
-  const context = await loadStoreContext(storeId);
-  const timezone = context.timezone;
-  const today = startOfDay(new Date(), { timezone });
-  const rangeEnd = end ? startOfDay(new Date(end), { timezone }) : today;
-  const rangeStart = start
-    ? startOfDay(new Date(start), { timezone })
-    : shiftDays(rangeEnd, -Math.max(rangeDays, 1) + 1, { timezone });
-
-  const { storeCurrency, masterCurrency } = context;
-  const conversionRate = await getExchangeRateImpl({
-    base: storeCurrency,
-    quote: masterCurrency,
-  });
-
-  const selectedMetrics = Array.from(
-    new Set(
-      (Array.isArray(metrics) ? metrics : [metrics])
-        .map((name) => {
-          const trimmed = name?.toString().trim();
-          if (!trimmed) return null;
-          const lookupKey = trimmed.toLowerCase();
-          return METRIC_KEY_LOOKUP.get(lookupKey) ?? trimmed;
-        })
-        .filter((name) => name && METRIC_COLUMNS[name]),
-    ),
-  );
-  const metricsToUse =
-    selectedMetrics.length > 0 ? selectedMetrics : DEFAULT_CUSTOM_METRICS;
-
-  let rows = [];
-  if (dimensionDef.source === "orders") {
-    rows = await buildOrderDimensionRows({
-      storeId,
-      dimension: normalizedDimension,
-      metrics: metricsToUse,
-      rangeStart,
-      rangeEnd,
-      masterCurrency,
-      limit: Math.max(1, Math.min(limit ?? 25, 200)),
-    });
-  } else {
-    const sumSelect = metricsToUse.reduce((acc, metric) => {
-      const column = METRIC_COLUMNS[metric];
-      if (column?.field) {
-        acc[column.field] = true;
-      }
-      return acc;
-    }, {});
-    if (!sumSelect.revenue) {
-      sumSelect.revenue = true;
-      if (!metricsToUse.includes("revenue")) {
-        metricsToUse.unshift("revenue");
-      }
-    }
-
-    const whereClause = {
-      storeId,
-      date: { gte: rangeStart, lte: rangeEnd },
-      ...dimensionDef.where,
-    };
-
-    const firstMetricField =
-      METRIC_COLUMNS[metricsToUse[0]]?.field ?? "revenue";
-    const groupedRows = await prismaClient.dailyMetric.groupBy({
-      by: [dimensionDef.field],
-      where: whereClause,
-      _sum: sumSelect,
-      orderBy: {
-        _sum: {
-          [firstMetricField]: "desc",
-        },
-      },
-      take: Math.max(1, Math.min(limit ?? 25, 200)),
-    });
-
-    rows = groupedRows.map((row) => {
-      const value = row[dimensionDef.field];
-      return {
-        dimensionValue: dimensionDef.format(value),
-        metrics: metricsToUse.map((metric) => {
-          const column = METRIC_COLUMNS[metric];
-          const baseValue = Number(row._sum[column.field] ?? 0);
-          const normalized = column.isCurrency
-            ? baseValue * conversionRate
-            : baseValue;
-          return {
-            key: metric,
-            label: column.label,
-            value: normalized,
-            isCurrency: column.isCurrency,
-          };
-        }),
-      };
-    });
-  }
-
-  const normalizedFormula = typeof formula === "string" ? formula.trim() : "";
-  const customFormula = normalizedFormula
-    ? {
-        label: (formulaLabel ?? "Custom").toString().trim() || "Custom",
-        expression: normalizedFormula,
-      }
-    : null;
-
-  if (customFormula) {
-    rows = rows.map((row) => {
-      const valueMap = row.metrics.reduce((acc, metric) => {
-        acc[metric.key] = metric.value;
-        return acc;
-      }, {});
-      const computed = evaluateFormulaExpressionImpl(
-        customFormula.expression,
-        valueMap,
-      );
-      if (computed === null) {
-        return row;
-      }
-      return {
-        ...row,
-        metrics: [
-          ...row.metrics,
-          {
-            key: `custom_${customFormula.label.replace(/\s+/g, "_").toLowerCase()}`,
-            label: customFormula.label,
-            value: computed,
-            isCurrency: false,
-          },
-        ],
-      };
-    });
-  }
-
-  const responseMetrics = metricsToUse.map((metric) => ({
-    key: metric,
-    label: METRIC_COLUMNS[metric].label,
-    isCurrency: METRIC_COLUMNS[metric].isCurrency,
-  }));
-  if (customFormula) {
-    responseMetrics.push({
-      key: `custom_${customFormula.label.replace(/\s+/g, "_").toLowerCase()}`,
-      label: customFormula.label,
-      isCurrency: false,
-    });
-  }
-
-  return {
-    range: { start: rangeStart, end: rangeEnd },
-    dimension: {
-      key: normalizedDimension,
-      label: dimensionDef.label,
-    },
-    metrics: responseMetrics,
-    rows,
-    currency: masterCurrency,
-    timezone,
-    rangeLabel: `${formatDateKey(rangeStart, { timezone })} – ${formatDateKey(rangeEnd, {
-      timezone,
-    })}`,
-    rangeInput: {
-      start: formatDateKey(rangeStart, { timezone }),
-      end: formatDateKey(rangeEnd, { timezone }),
-    },
-    customFormula,
+  const whereClause = {
+    storeId: store.id,
+    processedAt: { gte: start, lte: end },
   };
+  if (!includeRefunds) {
+    whereClause.refunds = { none: {} };
+  }
+
+  const orders = await prisma.order.findMany({
+    where: whereClause,
+    orderBy: { processedAt: "desc" },
+    take: limit,
+    include: {
+      store: { select: { shopDomain: true } },
+      lineItems: { select: { cogs: true } },
+      costs: true,
+      attributions: true,
+    },
+  });
+
+  return orders.map((order) => {
+    const revenue =
+      Number(order.subtotal || 0) -
+      Number(order.discount || 0) +
+      Number(order.shipping || 0) +
+      Number(order.tax || 0);
+    const cogs = order.lineItems.reduce(
+      (sum, line) => sum + Number(line.cogs || 0),
+      0,
+    );
+    const paymentFees = sumCosts(order.costs, "PAYMENT_FEE");
+    const shippingCost = sumCosts(order.costs, "SHIPPING");
+    const platformFees = sumCosts(order.costs, "PLATFORM_FEE");
+    const adSpend = order.attributions.reduce(
+      (sum, attr) => sum + Number(attr.amount || 0),
+      0,
+    );
+    const netProfit =
+      revenue - (cogs + paymentFees + platformFees + shippingCost + adSpend);
+    const margin = revenue > 0 ? netProfit / revenue : 0;
+
+    return {
+      id: order.id,
+      shopifyOrderId: order.shopifyOrderId,
+      orderNumber: order.orderNumber,
+      processedAt: order.processedAt,
+      storeDomain: order.store?.shopDomain ?? store.shopDomain,
+      currency: order.currency ?? store.currency ?? "USD",
+      revenue,
+      cogs,
+      paymentFees,
+      platformFees,
+      shippingCost,
+      adSpend,
+      netProfit,
+      margin,
+      financialStatus: order.financialStatus,
+    };
+  });
 }
 
-async function buildOrderDimensionRows({
-  storeId,
-  dimension,
-  metrics,
+export async function getProductProfitTable({
+  store,
   rangeStart,
   rangeEnd,
-  masterCurrency,
-  limit = 25,
+  sortBy = "netProfit",
 }) {
-  const { prismaClient } = getReportServiceDependencies();
+  if (!store?.id) {
+    throw new Error("Store is required to load product profit table");
+  }
+  const { start, end } = resolveRange({ store, rangeStart, rangeEnd });
 
-  const orders = await prismaClient.order.findMany({
+  const rows = await prisma.orderLineItem.groupBy({
+    by: ["sku", "title"],
     where: {
-      storeId,
-      processedAt: { gte: rangeStart, lte: rangeEnd },
-    },
-    select: {
-      id: true,
-      total: true,
-      netProfit: true,
-      grossProfit: true,
-      currency: true,
-      customerCountry: true,
-      customerEmail: true,
-      customerName: true,
-      customerId: true,
-    },
-  });
-
-  if (!orders.length) {
-    return [];
-  }
-
-  const orderIds = orders.map((order) => order.id);
-  const [costs, refunds, attributions] = await Promise.all([
-    prismaClient.orderCost.findMany({
-      where: { orderId: { in: orderIds } },
-      select: {
-        orderId: true,
-        amount: true,
-        currency: true,
-        type: true,
+      order: {
+        storeId: store.id,
+        processedAt: { gte: start, lte: end },
       },
-    }),
-    prismaClient.refundRecord.findMany({
-      where: { orderId: { in: orderIds } },
-      select: {
-        orderId: true,
-        amount: true,
-        currency: true,
-      },
-    }),
-    prismaClient.orderAttribution.findMany({
-      where: { orderId: { in: orderIds } },
-      select: {
-        orderId: true,
-        amount: true,
-        currency: true,
-      },
-    }),
-  ]);
-
-  const currencies = new Set(
-    [
-      ...orders.map((order) => order.currency ?? masterCurrency),
-      ...costs.map((cost) => cost.currency ?? masterCurrency),
-      ...refunds.map((refund) => refund.currency ?? masterCurrency),
-      ...attributions.map((attr) => attr.currency ?? masterCurrency),
-    ].filter(Boolean),
-  );
-  const rateCache = await buildRateCache(currencies, masterCurrency);
-
-  const orderMap = new Map(orders.map((order) => [order.id, order]));
-  const bucketMap = new Map();
-
-  const ensureBucket = (order) => {
-    const key = getOrderDimensionKey(order, dimension);
-    if (!key) return null;
-    if (!bucketMap.has(key)) {
-      const identifier =
-        dimension === "customer"
-          ? getOrderCustomerIdentifier(order)
-          : null;
-      bucketMap.set(key, {
-        key,
-        label: getOrderDimensionLabel(order, dimension, key),
-        identifier,
-        revenue: 0,
-        netProfit: 0,
-        adSpend: 0,
-        orders: 0,
-        cogs: 0,
-        shippingCost: 0,
-        paymentFees: 0,
-        refundAmount: 0,
-        lifetimeNetProfit: 0,
-        lifetimeOrders: 0,
-        repeatOrders: 0,
-      });
-    }
-    return bucketMap.get(key);
-  };
-
-  orders.forEach((order) => {
-    const bucket = ensureBucket(order);
-    if (!bucket) return;
-    bucket.orders += 1;
-    bucket.revenue += convertAmount(order.total, order.currency, rateCache);
-    bucket.netProfit += convertAmount(order.netProfit, order.currency, rateCache);
-  });
-
-  const costMap = new Map();
-  costs.forEach((cost) => {
-    const entry = costMap.get(cost.orderId) ?? {
-      COGS: 0,
-      SHIPPING: 0,
-      PAYMENT_FEE: 0,
-      PLATFORM_FEE: 0,
-      CUSTOM: 0,
-      currency: cost.currency ?? masterCurrency,
-    };
-    entry[cost.type] = (entry[cost.type] ?? 0) + Number(cost.amount ?? 0);
-    costMap.set(cost.orderId, entry);
-  });
-
-  costMap.forEach((value, orderId) => {
-    const order = orderMap.get(orderId);
-    if (!order) return;
-    const bucket = ensureBucket(order);
-    if (!bucket) return;
-    bucket.cogs += convertAmount(value.COGS, value.currency, rateCache);
-    bucket.shippingCost += convertAmount(value.SHIPPING, value.currency, rateCache);
-    bucket.paymentFees += convertAmount(value.PAYMENT_FEE, value.currency, rateCache);
-  });
-
-  refunds.forEach((refund) => {
-    const order = orderMap.get(refund.orderId);
-    if (!order) return;
-    const bucket = ensureBucket(order);
-    if (!bucket) return;
-    bucket.refundAmount += convertAmount(refund.amount, refund.currency, rateCache);
-  });
-
-  attributions.forEach((attribution) => {
-    const order = orderMap.get(attribution.orderId);
-    if (!order) return;
-    const bucket = ensureBucket(order);
-    if (!bucket) return;
-    bucket.adSpend += convertAmount(attribution.amount, attribution.currency, rateCache);
-  });
-
-  if (dimension === "customer") {
-    await populateCustomerLifetimeMetrics({
-      bucketMap,
-      storeId,
-      masterCurrency,
-      rateCache,
-    });
-  }
-
-  const metricRows = Array.from(bucketMap.values())
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, limit)
-    .map((bucket) => ({
-      dimensionValue: bucket.label,
-      metrics: metrics.map((metricKey) => {
-        const column = METRIC_COLUMNS[metricKey];
-        const value = resolveBucketMetric(bucket, metricKey);
-        return {
-          key: metricKey,
-          label: column.label,
-          value,
-          isCurrency: column.isCurrency,
-        };
-      }),
-    }));
-
-  return metricRows;
-}
-
-async function buildRateCache(currencies, masterCurrency) {
-  const { getExchangeRate: getExchangeRateImpl } = getReportServiceDependencies();
-  const cache = new Map();
-  for (const currency of currencies) {
-    if (!currency || cache.has(currency)) {
-      continue;
-    }
-    if (currency === masterCurrency) {
-      cache.set(currency, 1);
-      continue;
-    }
-    const rate = await getExchangeRateImpl({
-      base: currency,
-      quote: masterCurrency,
-    });
-    cache.set(currency, rate || 1);
-  }
-  if (!cache.has(masterCurrency)) {
-    cache.set(masterCurrency, 1);
-  }
-  return cache;
-}
-
-function convertAmount(amount, currency, cache) {
-  const numeric = Number(amount ?? 0);
-  if (!numeric) return 0;
-  const rate = cache.get(currency) ?? 1;
-  return numeric * rate;
-}
-
-function getOrderDimensionKey(order, dimension) {
-  if (dimension === "country") {
-    return order.customerCountry ?? "Unknown";
-  }
-  if (dimension === "customer") {
-    return (
-      order.customerEmail ??
-      order.customerName ??
-      order.customerId ??
-      "Guest"
-    );
-  }
-  return "Unknown";
-}
-
-function getOrderDimensionLabel(order, dimension, fallback) {
-  if (dimension === "customer") {
-    return (
-      order.customerName ??
-      order.customerEmail ??
-      order.customerId ??
-      fallback ??
-      "Guest"
-    );
-  }
-  if (dimension === "country") {
-    return fallback ?? "Unknown";
-  }
-  return fallback ?? "Unknown";
-}
-
-function resolveBucketMetric(bucket, metricKey) {
-  switch (metricKey) {
-    case "revenue":
-      return bucket.revenue;
-    case "netProfit":
-      return bucket.netProfit;
-    case "adSpend":
-      return bucket.adSpend;
-    case "cogs":
-      return bucket.cogs;
-    case "shippingCost":
-      return bucket.shippingCost;
-    case "paymentFees":
-      return bucket.paymentFees;
-    case "refundAmount":
-      return bucket.refundAmount;
-    case "orders":
-      return bucket.orders;
-    case "ltv":
-      return bucket.lifetimeNetProfit ?? 0;
-    case "repeatOrders":
-      return bucket.repeatOrders ?? 0;
-    default:
-      return 0;
-  }
-}
-
-function getOrderCustomerIdentifier(order) {
-  if (order.customerEmail) {
-    return { type: "email", value: order.customerEmail };
-  }
-  if (order.customerName) {
-    return { type: "name", value: order.customerName };
-  }
-  if (order.customerId) {
-    return { type: "id", value: order.customerId };
-  }
-  return { type: "guest", value: "Guest" };
-}
-
-function buildCustomerFilter(identifier) {
-  if (!identifier) return null;
-  switch (identifier.type) {
-    case "email":
-      return identifier.value ? { customerEmail: identifier.value } : null;
-    case "name":
-      return identifier.value ? { customerName: identifier.value } : null;
-    case "id":
-      return identifier.value ? { customerId: identifier.value } : null;
-    case "guest":
-      return { customerId: null, customerEmail: null };
-    default:
-      return null;
-  }
-}
-
-async function ensureRateCache(cache, currencies, masterCurrency) {
-  const { getExchangeRate: getExchangeRateImpl } = getReportServiceDependencies();
-  const missing = Array.from(currencies).filter(
-    (currency) => currency && !cache.has(currency),
-  );
-  for (const currency of missing) {
-    if (currency === masterCurrency) {
-      cache.set(currency, 1);
-      continue;
-    }
-    const rate = await getExchangeRateImpl({ base: currency, quote: masterCurrency });
-    cache.set(currency, rate || 1);
-  }
-  if (!cache.has(masterCurrency)) {
-    cache.set(masterCurrency, 1);
-  }
-}
-
-async function populateCustomerLifetimeMetrics({
-  bucketMap,
-  storeId,
-  masterCurrency,
-  rateCache,
-}) {
-  if (!bucketMap?.size) return;
-
-  const { prismaClient } = getReportServiceDependencies();
-
-  const identifiers = Array.from(bucketMap.values())
-    .map((bucket) => bucket.identifier)
-    .filter(Boolean);
-
-  if (!identifiers.length) {
-    return;
-  }
-
-  const seen = new Set();
-  const orFilters = [];
-  for (const identifier of identifiers) {
-    const key = `${identifier.type}:${identifier.value ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const filter = buildCustomerFilter(identifier);
-    if (filter) {
-      orFilters.push(filter);
-    }
-  }
-
-  if (!orFilters.length) {
-    return;
-  }
-
-  const lifetimeOrders = await prismaClient.order.findMany({
-    where: {
-      storeId,
-      OR: orFilters,
     },
-    select: {
-      id: true,
-      netProfit: true,
-      currency: true,
-      customerEmail: true,
-      customerName: true,
-      customerId: true,
+    _sum: {
+      revenue: true,
+      cogs: true,
+      quantity: true,
     },
   });
 
-  if (!lifetimeOrders.length) {
-    return;
-  }
-
-  const lifetimeCurrencies = new Set(
-    lifetimeOrders.map((order) => order.currency).filter(Boolean),
-  );
-  await ensureRateCache(rateCache, lifetimeCurrencies, masterCurrency);
-
-  const lifetimeMap = new Map();
-  lifetimeOrders.forEach((order) => {
-    const key = getOrderDimensionKey(order, "customer");
-    if (!key) return;
-    const entry = lifetimeMap.get(key) ?? { netProfit: 0, orders: 0 };
-    entry.netProfit += convertAmount(order.netProfit, order.currency, rateCache);
-    entry.orders += 1;
-    lifetimeMap.set(key, entry);
-  });
-
-  bucketMap.forEach((bucket, key) => {
-    const lifetime = lifetimeMap.get(key);
-    if (!lifetime) return;
-    bucket.lifetimeNetProfit = lifetime.netProfit;
-    bucket.lifetimeOrders = lifetime.orders;
-    bucket.repeatOrders = Math.max(0, lifetime.orders - 1);
-  });
-}
-
-async function buildReportingOverview({ storeId, rangeDays, range, context }) {
-  const { store, storeCurrency, masterCurrency, timezone } = context;
-  const {
-    prismaClient,
-    getExchangeRate: getExchangeRateImpl,
-    getFixedCostBreakdown: getFixedCostBreakdownImpl,
-  } = getReportServiceDependencies();
-  const [channelRows, productRows, aggregateMetrics] =
-    await Promise.all([
-      prismaClient.dailyMetric.groupBy({
-        by: ["channel"],
-        where: {
-          storeId,
-          date: { gte: range.start, lte: range.end },
-          channel: { not: "PRODUCT" },
-        },
-        _sum: {
-          revenue: true,
-          adSpend: true,
-          netProfit: true,
-          orders: true,
-        },
-      }),
-      prismaClient.dailyMetric.groupBy({
-        by: ["productSku"],
-        where: {
-          storeId,
-          channel: "PRODUCT",
-          productSku: { not: null },
-          date: { gte: range.start, lte: range.end },
-        },
-        _sum: {
-          revenue: true,
-          netProfit: true,
-          orders: true,
-          units: true,
-          adSpend: true,
-          refundAmount: true,
-          refunds: true,
-        },
-        orderBy: {
-          _sum: {
-            revenue: "desc",
-          },
-        },
-        take: 15,
-      }),
-      prismaClient.dailyMetric.aggregate({
-        where: { storeId, date: { gte: range.start, lte: range.end } },
-        _sum: {
-          revenue: true,
-          netProfit: true,
-          adSpend: true,
-          orders: true,
-          refundAmount: true,
-          refunds: true,
-          cogs: true,
-          shippingCost: true,
-          paymentFees: true,
-        },
-      }),
-    ]);
-
-  const conversionRate = await getExchangeRateImpl({
-    base: storeCurrency,
-    quote: masterCurrency,
-  });
-
-  const channelStats = channelRows.reduce((acc, row) => {
-    acc[row.channel] = {
-      revenue: Number(row._sum.revenue || 0),
-      orders: Number(row._sum.orders || 0),
-    };
-    return acc;
-  }, {});
-  const fixedCostStore = store?.merchantId
-    ? await getFixedCostBreakdownImpl({
-        merchantId: store.merchantId,
-        rangeDays,
-        rangeStart: range.start,
-        rangeEnd: range.end,
-        channelStats,
-      })
-    : { total: 0, allocations: { perChannel: {}, unassigned: 0 }, items: [] };
-  const fixedCostTotal = fixedCostStore.total * conversionRate;
-  const fixedCostPerChannel = Object.entries(
-    fixedCostStore.allocations?.perChannel ?? {},
-  ).reduce((acc, [channel, value]) => {
-    acc[channel] = Number(value || 0) * conversionRate;
-    return acc;
-  }, {});
-  const fixedCostUnassigned =
-    Number(fixedCostStore.allocations?.unassigned || 0) * conversionRate;
-
-  const channels = channelRows
-    .map((row) => {
-      const revenue = Number(row._sum.revenue || 0) * conversionRate;
-      const adSpend = Number(row._sum.adSpend || 0) * conversionRate;
-      const netProfit = Number(row._sum.netProfit || 0) * conversionRate;
-      const orders = Number(row._sum.orders || 0);
-      const margin = revenue > 0 ? netProfit / revenue : 0;
-      const mer = adSpend > 0 ? revenue / adSpend : null;
-      const npas = adSpend > 0 ? netProfit / adSpend : null;
-      const fixedShare = fixedCostPerChannel[row.channel] ?? 0;
-      const netAfterFixed = netProfit - fixedShare;
-      return {
-        channel: row.channel,
-        revenue,
-        adSpend,
-        netProfit,
-        netProfitAfterFixed: netAfterFixed,
-        orders,
-        mer,
-        npas,
-        margin,
-        breakEvenRoas: margin > 0 ? 1 / margin : null,
-        fixedCosts: fixedShare,
-      };
-    })
-    .sort((a, b) => b.revenue - a.revenue);
-
-  const products = productRows.map((row) => {
-    const revenue = Number(row._sum.revenue || 0) * conversionRate;
-    const netProfit = Number(row._sum.netProfit || 0) * conversionRate;
-    const orders = Number(row._sum.orders || 0);
-    const units = Number(row._sum.units || 0);
-    const adSpend = Number(row._sum.adSpend || 0) * conversionRate;
-    const refundAmount = Number(row._sum.refundAmount || 0) * conversionRate;
-    const refunds = Number(row._sum.refunds || 0);
+  const entries = rows.map((row) => {
+    const revenue = Number(row._sum.revenue || 0);
+    const cogs = Number(row._sum.cogs || 0);
+    const netProfit = revenue - cogs;
     const margin = revenue > 0 ? netProfit / revenue : 0;
     return {
-      sku: row.productSku,
+      sku: row.sku ?? "Unknown SKU",
+      title: row.title ?? row.sku ?? "Unknown SKU",
+      units: Number(row._sum.quantity || 0),
       revenue,
+      cogs,
       netProfit,
-      orders,
-      units,
-      adSpend,
       margin,
-      refundRate: orders > 0 ? refunds / orders : 0,
-      refundAmount,
     };
   });
 
-  const summary = {
-    revenue: Number(aggregateMetrics._sum.revenue || 0) * conversionRate,
-    netProfit: Number(aggregateMetrics._sum.netProfit || 0) * conversionRate,
-    adSpend: Number(aggregateMetrics._sum.adSpend || 0) * conversionRate,
-    orders: Number(aggregateMetrics._sum.orders || 0),
-    refundAmount:
-      Number(aggregateMetrics._sum.refundAmount || 0) * conversionRate,
-    refunds: Number(aggregateMetrics._sum.refunds || 0),
-    cogs: Number(aggregateMetrics._sum.cogs || 0) * conversionRate,
-    shippingCost:
-      Number(aggregateMetrics._sum.shippingCost || 0) * conversionRate,
-    paymentFees:
-      Number(aggregateMetrics._sum.paymentFees || 0) * conversionRate,
-  };
-
-  summary.netMargin =
-    summary.revenue > 0 ? summary.netProfit / summary.revenue : 0;
-  summary.mer =
-    summary.adSpend > 0 ? summary.revenue / summary.adSpend : null;
-  summary.npas =
-    summary.adSpend > 0 ? summary.netProfit / summary.adSpend : null;
-  summary.grossProfit =
-    summary.revenue -
-    summary.cogs -
-    summary.shippingCost -
-    summary.paymentFees;
-  summary.fixedCosts = fixedCostTotal;
-  summary.netProfitAfterFixed = summary.netProfit - fixedCostTotal;
-  summary.netMarginAfterFixed =
-    summary.revenue > 0 ? summary.netProfitAfterFixed / summary.revenue : 0;
-  summary.refundRate = summary.orders > 0 ? summary.refunds / summary.orders : 0;
-  summary.breakEvenRoas =
-    summary.netMargin > 0 ? 1 / summary.netMargin : null;
-
-  return {
-    range,
-    rangeLabel: `${formatDateKey(range.start, { timezone })} – ${formatDateKey(range.end, {
-      timezone,
-    })}`,
-    rangeInput: {
-      start: formatDateKey(range.start, { timezone }),
-      end: formatDateKey(range.end, { timezone }),
-    },
-    summary,
-    channels,
-    products,
-    currency: masterCurrency,
-    timezone,
-    fixedCostAllocations: {
-      perChannel: fixedCostPerChannel,
-      unassigned: fixedCostUnassigned,
-    },
-  };
-}
-export async function getNetProfitVsSpendSeries({
-  storeId,
-  rangeDays = DEFAULT_RANGE_DAYS,
-  rangeStart,
-  rangeEnd,
-}) {
-  if (!storeId) {
-    throw new Error("storeId is required for performance timeseries");
-  }
-
-  const context = await loadStoreContext(storeId);
-  const { timezone, storeCurrency, masterCurrency } = context;
-  const { prismaClient, getExchangeRate: getExchangeRateImpl } =
-    getReportServiceDependencies();
-  const { start, end, resolvedDays } = resolveRange({
-    rangeDays,
-    rangeStart,
-    rangeEnd,
-    timezone,
-  });
-  const conversionRate = await getExchangeRateImpl({
-    base: storeCurrency,
-    quote: masterCurrency,
-  });
-
-  const rows = await prismaClient.dailyMetric.findMany({
-    where: {
-      storeId,
-      channel: "TOTAL",
-      productSku: null,
-      date: { gte: start, lte: end },
-    },
-    orderBy: { date: "asc" },
-  });
-
-  const map = new Map();
-  rows.forEach((row) => {
-    const key = formatDateKey(row.date, { timezone });
-    map.set(key, {
-      date: key,
-      revenue: Number(row.revenue || 0) * conversionRate,
-      adSpend: Number(row.adSpend || 0) * conversionRate,
-      netProfit: Number(row.netProfit || 0) * conversionRate,
-    });
-  });
-
-  const series = [];
-  for (let i = 0; i < resolvedDays; i += 1) {
-    const date = shiftDays(start, i, { timezone });
-    const key = formatDateKey(date, { timezone });
-    series.push(
-      map.get(key) ?? {
-        date: key,
-        revenue: 0,
-        adSpend: 0,
-        netProfit: 0,
-      },
-    );
-  }
-
-  return {
-    range: { start, end },
-    points: series,
-    currency: masterCurrency,
-    timezone,
-  };
+  const sorter = buildProductSorter(sortBy);
+  return entries.sort(sorter).slice(0, 100);
 }
 
-export async function getAdPerformanceBreakdown({
-  storeId,
-  rangeDays = DEFAULT_RANGE_DAYS,
-  rangeStart,
-  rangeEnd,
-}) {
-  if (!storeId) {
-    throw new Error("storeId is required for ad performance report");
-  }
-
-  const context = await loadStoreContext(storeId);
-  const { timezone, storeCurrency, masterCurrency, store } = context;
-  const { prismaClient, getExchangeRate: getExchangeRateImpl } =
-    getReportServiceDependencies();
-  const { start, end } = resolveRange({
-    rangeDays,
-    rangeStart,
-    rangeEnd,
-    timezone,
-  });
-
-  const [adSpendRows, channelMetrics] = await Promise.all([
-    prismaClient.adSpendRecord.findMany({
-      where: {
-        storeId,
-        date: { gte: start, lte: end },
-      },
-    }),
-    prismaClient.dailyMetric.findMany({
-      where: {
-        storeId,
-        channel: { in: ["META_ADS", "GOOGLE_ADS"] },
-        productSku: null,
-        date: { gte: start, lte: end },
-      },
-    }),
-  ]);
-
-  const conversionRate = await getExchangeRateImpl({
-    base: storeCurrency,
-    quote: masterCurrency,
-  });
-
-  const providerTotals = new Map();
-  for (const metric of channelMetrics) {
-    const key = metric.channel;
-    const totals = providerTotals.get(key) || {
-      revenue: 0,
-      netProfit: 0,
-      adSpend: 0,
-    };
-    totals.revenue += Number(metric.revenue || 0);
-    totals.netProfit += Number(metric.netProfit || 0);
-    totals.adSpend += Number(metric.adSpend || 0);
-    providerTotals.set(key, totals);
-  }
-
-  const providerRows = new Map();
-  for (const record of adSpendRows) {
-    const provider = record.provider;
-    const key = [
-      provider,
-      record.campaignId ?? "campaign",
-      record.adSetId ?? "adset",
-      record.adId ?? "ad",
-    ].join(":");
-
-    const group = providerRows.get(key) || {
-      provider,
-      campaignId: record.campaignId,
-      campaignName: record.campaignName,
-      adSetId: record.adSetId,
-      adSetName: record.adSetName,
-      adId: record.adId,
-      adName: record.adName,
-      spend: 0,
-      impressions: 0,
-      clicks: 0,
-      conversions: 0,
-    };
-
-    group.spend += Number(record.spend || 0);
-    group.impressions += Number(record.impressions || 0);
-    group.clicks += Number(record.clicks || 0);
-    group.conversions += Number(record.conversions || 0);
-    providerRows.set(key, group);
-  }
-
-  const byProvider = new Map();
-  for (const group of providerRows.values()) {
-    const list = byProvider.get(group.provider) || [];
-    list.push(group);
-    byProvider.set(group.provider, list);
-  }
-
-  const providers = Array.from(byProvider.entries()).map(([provider, rows]) => {
-    const totals = providerTotals.get(provider) || {
-      revenue: 0,
-      netProfit: 0,
-      adSpend: 0,
-    };
-    const providerSpend = rows.reduce((sum, row) => sum + row.spend, 0);
-
-    const enrichedRows = rows
-      .map((row) => {
-        const weight = providerSpend > 0 ? row.spend / providerSpend : 0;
-        const estimatedRevenue = totals.revenue * weight * conversionRate;
-        const estimatedNetProfit = totals.netProfit * weight * conversionRate;
-        return {
-          ...row,
-          estimatedRevenue,
-          estimatedNetProfit,
-          mer:
-            row.spend > 0
-              ? (estimatedRevenue / (row.spend * conversionRate))
-              : null,
-          npas:
-            row.spend > 0
-              ? (estimatedNetProfit / (row.spend * conversionRate))
-              : null,
-          cpa:
-            row.conversions > 0
-              ? (row.spend * conversionRate) / row.conversions
-              : null,
-          spendConverted: row.spend * conversionRate,
-        };
-      })
-      .sort((a, b) => b.spend - a.spend)
-      .slice(0, 25);
-
-    return {
-      provider,
-      label: formatProvider(provider),
-      spend: providerSpend * conversionRate,
-      revenue: totals.revenue * conversionRate,
-      netProfit: totals.netProfit * conversionRate,
-      rows: enrichedRows,
-    };
-  });
-
-  return {
-    range: { start, end },
-    merchantId: store?.merchantId ?? null,
-    providers,
-    currency: masterCurrency,
-    timezone,
-  };
-}
-
-function formatProvider(provider) {
-  switch (provider) {
-    case "META_ADS":
-      return "Meta Ads";
-    case "GOOGLE_ADS":
-      return "Google Ads";
-    default:
-      return provider;
-  }
-}
-
-function resolveRange({
-  rangeStart,
-  rangeEnd,
-  rangeDays = DEFAULT_RANGE_DAYS,
-  timezone = "UTC",
-}) {
-  const today = startOfDay(new Date(), { timezone });
-  const computedEnd = rangeEnd
-    ? startOfDay(rangeEnd, { timezone })
-    : today;
-  let computedStart = rangeStart
-    ? startOfDay(rangeStart, { timezone })
-    : shiftDays(computedEnd, -(rangeDays - 1), { timezone });
-  if (computedStart > computedEnd) {
-    const tmp = computedStart;
-    computedStart = computedEnd;
-    computedEnd = tmp;
-  }
-  const resolvedDays = Math.max(
-    1,
-    Math.round((computedEnd - computedStart) / DAY_MS) + 1,
-  );
-  return { start: computedStart, end: computedEnd, resolvedDays };
-}
-
-async function loadStoreContext(storeId) {
-  const { prismaClient } = getReportServiceDependencies();
-  const store = await prismaClient.store.findUnique({
-    where: { id: storeId },
-    include: { merchant: true },
-  });
-  if (!store) {
-    throw new Error("Store not found");
-  }
+function resolveRange({ store, rangeStart, rangeEnd }) {
   const timezone = resolveTimezone({ store });
-  const storeCurrency = store.currency ?? "USD";
-  const masterCurrency = store.merchant?.primaryCurrency ?? storeCurrency;
-  return {
-    store,
-    timezone,
-    storeCurrency,
-    masterCurrency,
-  };
+  const today = startOfDay(new Date(), { timezone });
+  const end = rangeEnd ? startOfDay(rangeEnd, { timezone }) : today;
+  const start = rangeStart
+    ? startOfDay(rangeStart, { timezone })
+    : shiftDays(end, -(DEFAULT_RANGE_DAYS - 1), { timezone });
+  return { start, end };
+}
+
+function sumCosts(costs, type) {
+  return costs
+    .filter((cost) => cost.type === type)
+    .reduce((sum, cost) => sum + Number(cost.amount || 0), 0);
+}
+
+function buildProductSorter(sortBy) {
+  switch (sortBy) {
+    case "revenue":
+      return (a, b) => b.revenue - a.revenue;
+    case "margin":
+      return (a, b) => b.margin - a.margin;
+    case "netProfit":
+    default:
+      return (a, b) => b.netProfit - a.netProfit;
+  }
 }

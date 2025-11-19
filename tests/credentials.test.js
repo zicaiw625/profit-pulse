@@ -22,7 +22,7 @@ test("refreshExpiringAdCredentials refreshes eligible credentials and logs failu
   const fakeCredentials = [
     {
       id: "cred-1",
-      provider: "GOOGLE_ADS",
+      provider: "META_ADS",
       merchantId: "m-1",
       storeId: "s-1",
       expiresAt: new Date().toISOString(),
@@ -33,13 +33,6 @@ test("refreshExpiringAdCredentials refreshes eligible credentials and logs failu
       merchantId: "m-1",
       storeId: "s-1",
       expiresAt: null,
-    },
-    {
-      id: "cred-3",
-      provider: "GOOGLE_ADS",
-      merchantId: "m-2",
-      storeId: "s-2",
-      expiresAt: new Date(Date.now() - 1).toISOString(),
     },
   ];
 
@@ -77,12 +70,10 @@ test("refreshExpiringAdCredentials refreshes eligible credentials and logs failu
 
   const refreshed = await refreshExpiringAdCredentials({ marginMinutes: 30 });
 
-  assert.equal(refreshed, 2);
-  assert.deepEqual(refreshCalls, ["cred-1", "cred-2", "cred-3"]);
+  assert.equal(refreshed, 1);
+  assert.deepEqual(refreshCalls, ["cred-1", "cred-2"]);
   assert.equal(logs.length, 1);
   assert.equal(logs[0].meta.context.credentialId, "cred-2");
   assert.ok(capturedFindManyArgs.length >= 1);
-  assert.ok(capturedFindManyArgs[0].where.provider.in.includes("GOOGLE_ADS"));
   assert.ok(capturedFindManyArgs[0].where.provider.in.includes("META_ADS"));
-
 });

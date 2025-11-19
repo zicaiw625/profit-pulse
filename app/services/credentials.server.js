@@ -5,9 +5,6 @@ import {
   decryptSensitiveString,
   encryptSensitiveString,
 } from "../utils/security.server.js";
-import {
-  refreshGoogleAdsAccessToken,
-} from "./oauth/google-ads.server.js";
 import { extendMetaAccessToken, META_ADS_SCOPE } from "./oauth/meta-ads.server.js";
 
 const { CredentialProvider } = pkg;
@@ -132,22 +129,6 @@ function needsTokenRefresh(credential) {
 }
 
 const REFRESH_HANDLERS = {
-  [CredentialProvider.GOOGLE_ADS]: async ({ credential, secret }) => {
-    if (!secret.refreshToken) {
-      throw new Error("Google Ads credential is missing refresh token");
-    }
-    const refreshed = await refreshGoogleAdsAccessToken(secret.refreshToken);
-    return {
-      secret: {
-        ...secret,
-        accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
-        tokenType: refreshed.tokenType ?? secret.tokenType,
-      },
-      expiresAt: refreshed.expiresAt ?? null,
-      scopes: refreshed.scope ?? credential.scopes,
-    };
-  },
   [CredentialProvider.META_ADS]: async ({ secret, credential }) => {
     const currentToken = secret.accessToken;
     if (!currentToken) {
@@ -202,7 +183,7 @@ export async function refreshExpiringAdCredentials({ marginMinutes = 60 } = {}) 
 
   const candidates = await credentialPrisma.adAccountCredential.findMany({
     where: {
-      provider: { in: [CredentialProvider.GOOGLE_ADS, CredentialProvider.META_ADS] },
+      provider: { in: [CredentialProvider.META_ADS] },
       OR: [
         { expiresAt: null },
         { expiresAt: { lte: threshold } },

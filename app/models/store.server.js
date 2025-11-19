@@ -1,15 +1,11 @@
 import pkg from "@prisma/client";
 import prisma from "../db.server.js";
-import { PLAN_DEFINITIONS } from "../config/billing.js";
+import { DEFAULT_PLAN, PLAN_DEFINITIONS } from "../config/billing.js";
 import { PlanLimitError } from "../errors/plan-limit-error.js";
-import {
-  processPlanOverageCharge,
-  schedulePlanOverageRecord,
-} from "../services/overages.server.js";
-import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+import { createScopedLogger } from "../utils/logger.server.js";
 
 const { PlanTier, Prisma } = pkg;
-const defaultPlan = PLAN_DEFINITIONS.FREE;
+const defaultPlan = DEFAULT_PLAN;
 const storeLogger = createScopedLogger({ service: "store" });
 
 export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
@@ -67,9 +63,7 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
     where: { merchantId: merchant.id },
   });
   const nextStoreCount = currentStoreCount + 1;
-  const storeOverageConfig = planDefinition?.overages?.stores ?? null;
-
-  if (nextStoreCount > storeLimit && !storeOverageConfig) {
+  if (nextStoreCount > storeLimit) {
     throw new PlanLimitError({
       code: "STORE_LIMIT_REACHED",
       message: "Store limit reached for current plan. Upgrade to add more stores.",
@@ -100,38 +94,6 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
     }
 
     throw error;
-  }
-
-  if (nextStoreCount > storeLimit && storeOverageConfig) {
-    const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
-    const blockSize = storeOverageConfig.blockSize && storeOverageConfig.blockSize > 0
-      ? storeOverageConfig.blockSize
-      : 1;
-    const unitsRequired = Math.ceil((nextStoreCount - storeLimit) / blockSize);
-    const overageRecord = await schedulePlanOverageRecord({
-      merchantId: merchant.id,
-      metric: "stores",
-      unitsRequired,
-      unitAmount: storeOverageConfig.price,
-      currency: storeOverageConfig.currency ?? planDefinition?.currency ?? "USD",
-      description:
-        storeOverageConfig.description ?? "Additional store overage charge",
-      year,
-      month,
-      shopDomain,
-    });
-    if (overageRecord?.id) {
-      try {
-        await processPlanOverageCharge(overageRecord.id);
-      } catch (error) {
-        storeLogger.error("store_overage_charge_failed", {
-          overageRecordId: overageRecord.id,
-          error: serializeError(error),
-        });
-      }
-    }
   }
 
   return store;

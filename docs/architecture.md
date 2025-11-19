@@ -21,9 +21,9 @@ Shopify Admin <iframe> ──App Bridge──> React Router frontend
             │
             ├─ Shopify Admin GraphQL/REST
             ├─ Billing API
-            ├─ Ad APIs (Meta, Google) via worker
-            ├─ Payment APIs (Shopify Payments, PayPal, Stripe…)
-            └─ Storage/Queue for data sync + reports
+            ├─ Ad API (Meta) via worker
+            ├─ Payment APIs (Shopify Payments, PayPal)
+            └─ Storage/Queue for data sync
 ```
 
 ## Module Breakdown
@@ -35,20 +35,19 @@ Shopify Admin <iframe> ──App Bridge──> React Router frontend
 
 ### 2. Data Sources
 - **Shopify**: Webhooks (orders/create, orders/updated, refunds, fulfillments) push deltas; nightly backfill job to ensure completeness. Normalized entities: `Order`, `OrderLine`, `Transaction`, `ShippingLine`, `Discount`.
-- **Ads**: OAuth tokens per provider saved in `AdAccountCredential`. Workers fetch spend & conversions at Campaign/AdSet/Ad granularity.
-- **Payments**: Shopify Payments via Admin APIs; PayPal/Stripe via native APIs when configured. Store fees per transaction for reconciliation.
+- **Ads**: Only Meta Ads is supported in V1. OAuth tokens live in `AdAccountCredential` and workers fetch spend/conversion totals per day.
+- **Payments**: Shopify Payments via Admin REST + payouts API; PayPal via native REST. Fee data is persisted per transaction for reconciliation.
 
 The codebase now includes a sync framework:
 - `AdSpendRecord`, `PaymentPayout`, `SyncJob` tables capture normalized data and job telemetry.
-- Connectors (`app/services/sync/*.server.js`) orchestrate provider-specific fetchers, persist aggregates, and update `DailyMetric` ad spend.
+- Connectors (`app/services/sync/*.server.js`) orchestrate provider-specific fetchers, persist aggregates, and update `DailyMetric`.
 - Settings UI exposes manual "Sync now" actions per provider until background schedulers are wired up.
-- **Logistics/COGS Inputs**: CSV uploads or API connectors populate `SkuCost`, `ShippingRule`, `CustomCostItem`.
-- **Exchange Rates/Tax Rates**: Daily fetch from fixer.io/ECB (pluggable provider) + merchant overrides.
+- **COGS Inputs**: CSV uploads or demo seeds populate `SkuCost`. Variable cost templates cover payment/platform fees.
+- **Exchange Rates**: Daily fetch from the bundled FX provider with manual override per merchant.
 
 ### 3. Cost Configuration
-- SKU/variant level cost table with effective date ranges (batch support) plus optional ERP sync.
-- Variable cost templates applied per order (payment fees, platform commissions, customizable formulas).
-- Fixed costs recorded monthly and allocated across stores by rule (orders, revenue, channel weight).
+- SKU/variant level cost table with effective date ranges and CSV import.
+- Variable cost templates applied per order (payment fees, platform commissions).
 
 ### 4. Profit Engine
 - Order pipeline calculates: revenue, direct costs (COGS, shipping, payment, platform), allocated ad spend, resulting gross/net profit & margin.
@@ -58,19 +57,18 @@ The codebase now includes a sync framework:
 
 ### 5. Reporting & Dashboards
 - Home dashboard cards + line/pie charts sourced from pre-aggregated metrics with flexible date filters.
-- Product profitability table, channel/ad reports with ROAS & Net Profit on Ad Spend.
-- Refund analytics, variance explanations, CSV export endpoints. Later phases add custom report builder.
+- Order and product profitability tables with filters/sorting.
+- Later phases can extend to channel/ad reports, refund analytics, and custom report builders.
 
 ### 6. Reconciliation & Alerts
-- Automated checks between Shopify orders vs. payment processor payouts, and Shopify vs. ad-reported conversions. Diff records stored for UI.
-- Current build runs payout/ad conversion detectors on-demand (and eventually via cron) to populate `ReconciliationIssue`.
-- Alerting rules engine monitors profitability drops, negative ROAS, fee anomalies. Notifications via email (phase 1) and Slack/Teams later.
-- Accounting export service emits monthly P&L CSV formatted for bookkeeping systems, extensible to QuickBooks/Xero integrations.
+- Automated checks between Shopify orders vs. payment processor payouts, and Shopify vs. Meta-reported conversions. Diff records stored for UI (`ReconciliationIssue`).
+- Current build runs payout/ad conversion detectors on-demand (and eventually via cron) to populate issues shown in `/app/reconciliation`.
+- Alerting/notification pipelines are deferred to later phases; V1 focuses on surfaced lists inside the app.
 
 ### 7. Onboarding & Help
-- Post-install wizard drives store connection, ad auth, COGS import, base currency/timezone selection.
-- Mock data preview available until first sync completes.
-- Tooltips reference formula definitions; embedded FAQ/help center page for troubleshooting.
+- Post-install wizard drives store connection, Meta Ads auth, COGS import, and currency/exchange selection.
+- When data is still syncing, a mock dashboard is shown so merchants understand expected output.
+- Tooltips reference formula definitions; embedded FAQ/help center page for troubleshooting plus Privacy/Terms routes.
 
 ### 8. Security & Compliance
 - Sessions stored via Prisma `Session` table; scoped JWT cookies for internal APIs.
@@ -83,10 +81,10 @@ The codebase now includes a sync framework:
    - Shopify order sync (webhook + nightly backfill), Shopify Payments fees ingestion.
    - COGS + variable cost templates; base currency/timezone settings.
    - Profit calculation service + metric aggregation.
-   - Core dashboard, product & channel reports, Shopify vs. payments reconciliation, email summaries.
+   - Core dashboard plus order & product profit tables; Shopify vs. payments & Meta reconciliation UI.
 2. **Phase 2 - Advanced**
-   - Team roles/permissions, trials & overage billing, PayPal/Stripe fees, Meta/Google ad connectors, fixed cost allocation, refund deep dives, Slack/Zapier notifications.
+   - Additional ad networks, proactive notifications, scheduled digest emails/webhooks, fixed cost allocation, richer refund analysis.
 3. **Phase 3 - Premium**
-   - Additional ad networks, logistics provider integrations, advanced anomaly detection, accounting software sync, drag-and-drop custom reporting, multi-language UX.
+   - Logistics provider integrations, advanced anomaly detection, accounting software sync, drag-and-drop custom reporting, multi-language UX.
 
 This architecture doc anchors implementation priorities and ensures new modules map cleanly onto the data model and worker topology as we begin coding Phase 1.

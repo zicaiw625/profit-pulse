@@ -8,25 +8,6 @@ const DEFAULT_TOUCHES = {
     { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
     { ruleType: AttributionRuleType.FIRST_TOUCH, weight: 0.25, windowHours: 72 },
   ],
-  [CredentialProvider.GOOGLE_ADS]: [
-    { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
-    { ruleType: AttributionRuleType.FIRST_TOUCH, weight: 0.2, windowHours: 72 },
-  ],
-  [CredentialProvider.BING_ADS]: [
-    { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
-  ],
-  [CredentialProvider.TIKTOK_ADS]: [
-    { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
-    { ruleType: AttributionRuleType.FIRST_TOUCH, weight: 0.15, windowHours: 48 },
-  ],
-  [CredentialProvider.AMAZON_ADS]: [
-    { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
-    { ruleType: AttributionRuleType.FIRST_TOUCH, weight: 0.2, windowHours: 72 },
-  ],
-  [CredentialProvider.SNAPCHAT_ADS]: [
-    { ruleType: AttributionRuleType.LAST_TOUCH, weight: 1, windowHours: 24 },
-    { ruleType: AttributionRuleType.FIRST_TOUCH, weight: 0.15, windowHours: 48 },
-  ],
 };
 
 const DEFAULT_PROVIDER_LIST = Object.keys(DEFAULT_TOUCHES);

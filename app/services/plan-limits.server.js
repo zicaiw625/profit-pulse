@@ -1,7 +1,6 @@
 import prisma from "../db.server.js";
 import { getPlanDefinitionByTier } from "./billing.server.js";
 import { PlanLimitError } from "../errors/plan-limit-error.js";
-import { schedulePlanOverageRecord } from "./overages.server.js";
 import {
   getMonthKey,
   startOfMonth,
@@ -10,19 +9,13 @@ import {
 
 const DEFAULT_ALLOWANCES = {
   stores: 1,
-  orders: 500,
-  adAccounts: 2,
+  orders: 1000,
 };
 
 let planLimitsPrisma = prisma;
-let schedulePlanOverageRecordImpl = schedulePlanOverageRecord;
 
 export function setPlanLimitsPrismaForTests(testClient) {
   planLimitsPrisma = testClient ?? prisma;
-}
-
-export function setPlanOverageSchedulerForTests(fn) {
-  schedulePlanOverageRecordImpl = fn ?? schedulePlanOverageRecord;
 }
 
 export async function getPlanUsage({ merchantId, referenceDate } = {}) {
@@ -49,17 +42,12 @@ export async function getPlanUsage({ merchantId, referenceDate } = {}) {
       planLimitsPrisma,
     ));
 
-  const [storeCount, adAccountCount] = await Promise.all([
-    planLimitsPrisma.store.count({ where: { merchantId } }),
-    planLimitsPrisma.adAccountCredential.count({ where: { merchantId } }),
-  ]);
+  const storeCount = await planLimitsPrisma.store.count({
+    where: { merchantId },
+  });
 
   const usage = {
     stores: buildUsage(storeCount, subscription?.storeLimit ?? allowances.stores),
-    adAccounts: buildUsage(
-      adAccountCount,
-      allowances.adAccounts ?? DEFAULT_ALLOWANCES.adAccounts,
-    ),
     orders: buildUsage(monthlyOrderCount, limit ?? allowances.orders),
   };
 
@@ -70,13 +58,12 @@ export async function ensureOrderCapacity({
   merchantId,
   incomingOrders = 1,
   tx,
-  shopDomain,
 } = {}) {
   if (!merchantId) {
     throw new Error("merchantId is required to ensure order capacity");
   }
   const db = tx ?? planLimitsPrisma;
-  const { limit, planDefinition } = await getPlanLimitInfo(merchantId, db);
+  const { limit } = await getPlanLimitInfo(merchantId, db);
   if (!limit) return { overageRecord: null };
 
   const monthContext = await getCurrentMonthContext({ merchantId, db });
@@ -93,34 +80,15 @@ export async function ensureOrderCapacity({
       ));
     const nextOrders = currentOrders + incomingOrders;
     if (nextOrders > limit) {
-      const overageConfig = planDefinition?.overages?.orders ?? null;
-      if (!overageConfig) {
-        throw new PlanLimitError({
-          code: "ORDER_LIMIT_REACHED",
-          message:
-            "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
-          detail: {
-            limit,
-            usage: currentOrders,
-            incomingOrders,
-          },
-        });
-      }
-      const unitsRequired = calculateUnitsRequired({
-        overLimit: nextOrders - limit,
-        blockSize: overageConfig.blockSize,
-      });
-      await schedulePlanOverageRecordImpl({
-        merchantId,
-        metric: "orders",
-        unitsRequired,
-        unitAmount: overageConfig.price,
-        currency: overageConfig.currency ?? planDefinition?.currency ?? "USD",
-        description:
-          overageConfig.description ?? "Additional order volume overage charge",
-        year,
-        month,
-        shopDomain,
+      throw new PlanLimitError({
+        code: "ORDER_LIMIT_REACHED",
+        message:
+          "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
+        detail: {
+          limit,
+          usage: currentOrders,
+          incomingOrders,
+        },
       });
     }
     return { overageRecord: null };
@@ -139,44 +107,23 @@ export async function ensureOrderCapacity({
   `;
   const currentOrders = Number(row?.orders ?? 0);
   const nextOrders = currentOrders + incomingOrders;
-  let overageRecord = null;
   if (nextOrders > limit) {
-    const overageConfig = planDefinition?.overages?.orders ?? null;
-    if (!overageConfig) {
-      throw new PlanLimitError({
-        code: "ORDER_LIMIT_REACHED",
-        message:
-          "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
-        detail: {
-          limit,
-          usage: currentOrders,
-          incomingOrders,
-        },
-      });
-    }
-    const unitsRequired = calculateUnitsRequired({
-      overLimit: nextOrders - limit,
-      blockSize: overageConfig.blockSize,
-    });
-    overageRecord = await schedulePlanOverageRecordImpl({
-      merchantId,
-      metric: "orders",
-      unitsRequired,
-      unitAmount: overageConfig.price,
-      currency: overageConfig.currency ?? planDefinition?.currency ?? "USD",
-      description:
-        overageConfig.description ?? "Additional order volume overage charge",
-      year,
-      month,
-      shopDomain,
-      tx,
+    throw new PlanLimitError({
+      code: "ORDER_LIMIT_REACHED",
+      message:
+        "Monthly order allowance reached. Upgrade plan to continue syncing orders.",
+      detail: {
+        limit,
+        usage: currentOrders,
+        incomingOrders,
+      },
     });
   }
   await tx.monthlyOrderUsage.update({
     where: { merchantId_year_month: { merchantId, year, month } },
     data: { orders: { increment: incomingOrders } },
   });
-  return { overageRecord };
+  return { overageRecord: null };
 }
 
 function buildUsage(count, limit) {
@@ -255,9 +202,4 @@ async function resolveMerchantTimezone(merchantId, db = planLimitsPrisma) {
     select: { primaryTimezone: true },
   });
   return merchant?.primaryTimezone ?? "UTC";
-}
-
-function calculateUnitsRequired({ overLimit, blockSize }) {
-  const normalizedBlock = blockSize && blockSize > 0 ? blockSize : 1;
-  return Math.ceil(overLimit / normalizedBlock);
 }

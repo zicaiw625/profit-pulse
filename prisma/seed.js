@@ -160,7 +160,7 @@ async function main() {
         orderId: "#1038",
         amountDelta: 18.32,
         details: {
-          message: "Google Ads shows two conversions for one order",
+          message: "Meta Ads shows two conversions for one order",
         },
       },
     ],
@@ -229,62 +229,43 @@ async function seedIntegrations(store) {
     },
   });
 
-  const googleCredential = await prisma.adAccountCredential.create({
-    data: {
-      merchantId: store.merchantId,
-      storeId: store.id,
-      provider: CredentialProvider.GOOGLE_ADS,
-      accountName: "Google Ads EMEA",
-      accountId: "act_google_demo",
-      encryptedSecret: "demo",
-      lastSyncedAt: shiftDays(today, -1),
-    },
-  });
-
   const adRecords = [];
   const campaigns = [
     { id: "cmp-retarget", name: "Retargeting" },
     { id: "cmp-prospect", name: "Prospecting" },
   ];
 
-  [CredentialProvider.META_ADS, CredentialProvider.GOOGLE_ADS].forEach(
-    (provider) => {
-      for (let i = 0; i < 5; i += 1) {
-        const date = shiftDays(today, -i);
-        campaigns.forEach((campaign, idx) => {
-          const spend = randomInRange(180, 420);
-          adRecords.push({
-            storeId: store.id,
-            provider,
-            accountId:
-              provider === CredentialProvider.META_ADS
-                ? metaCredential.accountId
-                : googleCredential.accountId,
-            campaignId: campaign.id,
-            campaignName: campaign.name,
-            adSetId: `adset-${idx}`,
-            adSetName: `Ad set ${idx + 1}`,
-            adId: `ad-${idx}`,
-            adName: `Creative ${idx + 1}`,
-            date,
-            currency: store.currency,
-            spend,
-            impressions: Math.round(spend * randomInRange(50, 80)),
-            clicks: Math.round(spend * randomInRange(1, 3)),
-            conversions: Math.round(spend * randomInRange(0.3, 0.8)),
-            compositeKey: buildCompositeKey(
-              store.id,
-              provider,
-              date,
-              campaign.id,
-              `adset-${idx}`,
-              `ad-${idx}`,
-            ),
-          });
-        });
-      }
-    },
-  );
+  for (let i = 0; i < 5; i += 1) {
+    const date = shiftDays(today, -i);
+    campaigns.forEach((campaign, idx) => {
+      const spend = randomInRange(180, 420);
+      adRecords.push({
+        storeId: store.id,
+        provider: CredentialProvider.META_ADS,
+        accountId: metaCredential.accountId,
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        adSetId: `adset-${idx}`,
+        adSetName: `Ad set ${idx + 1}`,
+        adId: `ad-${idx}`,
+        adName: `Creative ${idx + 1}`,
+        date,
+        currency: store.currency,
+        spend,
+        impressions: Math.round(spend * randomInRange(50, 80)),
+        clicks: Math.round(spend * randomInRange(1, 3)),
+        conversions: Math.round(spend * randomInRange(0.3, 0.8)),
+        compositeKey: buildCompositeKey(
+          store.id,
+          CredentialProvider.META_ADS,
+          date,
+          campaign.id,
+          `adset-${idx}`,
+          `ad-${idx}`,
+        ),
+      });
+    });
+  }
 
   if (adRecords.length) {
     await prisma.adSpendRecord.createMany({
@@ -324,15 +305,6 @@ async function seedIntegrations(store) {
       {
         storeId: store.id,
         provider: CredentialProvider.META_ADS,
-        jobType: SyncJobType.AD_SPEND,
-        status: SyncJobStatus.SUCCESS,
-        processedCount: adRecords.length,
-        startedAt: shiftDays(today, -1),
-        completedAt: shiftDays(today, -1),
-      },
-      {
-        storeId: store.id,
-        provider: CredentialProvider.GOOGLE_ADS,
         jobType: SyncJobType.AD_SPEND,
         status: SyncJobStatus.SUCCESS,
         processedCount: adRecords.length,

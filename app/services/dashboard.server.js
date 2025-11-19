@@ -1,24 +1,20 @@
 import prisma from "../db.server";
-import { getFixedCostBreakdown, getFixedCostTotal } from "./fixed-costs.server";
-import { checkNetProfitAlert, checkRefundSpikeAlert } from "./alerts.server";
-import { getExchangeRate } from "./exchange-rates.server";
 import { getPlanUsage } from "./plan-limits.server";
-import { getMerchantPerformanceSummary } from "./merchant-performance.server";
-import {
-  startOfDay,
-  shiftDays,
-  resolveTimezone,
-  formatDateKey,
-} from "../utils/dates.server.js";
+import { getExchangeRate } from "./exchange-rates.server";
 import { buildCacheKey, memoizeAsync } from "./cache.server";
+import {
+  formatDateKey,
+  resolveTimezone,
+  shiftDays,
+  startOfDay,
+} from "../utils/dates.server.js";
 
-const DEFAULT_RANGE = 14;
-const DAY_MS = 1000 * 60 * 60 * 24;
+const DEFAULT_RANGE_DAYS = 14;
 const CACHE_TTL_MS = 15 * 1000;
 
 export async function getDashboardOverview({
   store,
-  rangeDays = DEFAULT_RANGE,
+  rangeDays = DEFAULT_RANGE_DAYS,
   rangeStart,
   rangeEnd,
 }) {
@@ -33,17 +29,17 @@ export async function getDashboardOverview({
     ? startOfDay(rangeStart, { timezone })
     : shiftDays(computedEnd, -(rangeDays - 1), { timezone });
   if (computedStart > computedEnd) {
-    const temp = computedStart;
+    const tmp = computedStart;
     computedStart = computedEnd;
-    // ensure at least one day window
-    computedEnd = temp;
+    rangeEnd = tmp;
   }
-  const computedRangeDays = Math.max(
+  const normalizedDays = Math.max(
     1,
-    Math.round((computedEnd - computedStart) / DAY_MS) + 1,
+    Math.round((computedEnd - computedStart) / (1000 * 60 * 60 * 24)) + 1,
   );
+
   const cacheKey = buildCacheKey(
-    "dashboard",
+    "dashboard.v1",
     store.id,
     `${timezone}|${computedStart.toISOString()}|${computedEnd.toISOString()}`,
   );
@@ -51,295 +47,174 @@ export async function getDashboardOverview({
   return memoizeAsync(cacheKey, CACHE_TTL_MS, () =>
     buildDashboardOverview({
       store,
-      rangeDays: computedRangeDays,
-      range: { start: computedStart, end: computedEnd },
       timezone,
+      range: { start: computedStart, end: computedEnd },
+      rangeDays: normalizedDays,
     }),
   );
 }
 
-async function buildDashboardOverview({ store, rangeDays, range, timezone }) {
+async function buildDashboardOverview({ store, timezone, range, rangeDays }) {
   const previousStart = shiftDays(range.start, -rangeDays, { timezone });
   const previousEnd = shiftDays(range.start, -1, { timezone });
 
-  const [currentMetrics, previousMetrics, openIssues, storeRecord] =
-    await Promise.all([
-      prisma.dailyMetric.findMany({
-        where: {
-          storeId: store.id,
-          date: { gte: range.start, lte: range.end },
-        },
-        orderBy: { date: "asc" },
-      }),
-      prisma.dailyMetric.findMany({
-        where: {
-          storeId: store.id,
-          date: { gte: previousStart, lt: range.start },
-        },
-      }),
-      prisma.reconciliationIssue.findMany({
-        where: { storeId: store.id, status: "OPEN" },
-        orderBy: { issueDate: "desc" },
-        take: 3,
-      }),
-      prisma.store.findUnique({
-        where: { id: store.id },
-        include: { merchant: true },
-      }),
-    ]);
+  const [currentMetrics, previousMetrics, storeRecord] = await Promise.all([
+    prisma.dailyMetric.findMany({
+      where: { storeId: store.id, date: { gte: range.start, lte: range.end } },
+      orderBy: { date: "asc" },
+    }),
+    prisma.dailyMetric.findMany({
+      where: { storeId: store.id, date: { gte: previousStart, lte: previousEnd } },
+    }),
+    prisma.store.findUnique({
+      where: { id: store.id },
+      include: { merchant: true },
+    }),
+  ]);
 
-  const merchantId = storeRecord?.merchantId ?? store.merchantId;
-  const resolvedTimezone = resolveTimezone({
-    store: storeRecord ?? store,
-    defaultTimezone: timezone,
-  });
   const storeCurrency = storeRecord?.currency ?? "USD";
-  const masterCurrency =
-    storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
+  const masterCurrency = storeRecord?.merchant?.primaryCurrency ?? storeCurrency;
   const conversionRate = await getExchangeRate({
     base: storeCurrency,
     quote: masterCurrency,
   });
-  const channelStats = summarizeChannelStats(currentMetrics);
-  let fixedCostBreakdownStore = {
-    total: 0,
-    allocations: { perChannel: {}, unassigned: 0 },
-    items: [],
-  };
-  let previousFixedCostTotalRaw = 0;
-
-  if (merchantId) {
-    [fixedCostBreakdownStore, previousFixedCostTotalRaw] = await Promise.all([
-      getFixedCostBreakdown({
-        merchantId,
-        rangeDays,
-        rangeStart: range.start,
-        rangeEnd: range.end,
-        channelStats,
-      }),
-      getFixedCostTotal({
-        merchantId,
-        rangeDays,
-        rangeStart: previousStart,
-        rangeEnd: previousEnd,
-      }),
-    ]);
-  }
-
-  const fixedCostTotal = Number(fixedCostBreakdownStore.total || 0) * conversionRate;
-  const previousFixedCostTotal = Number(previousFixedCostTotalRaw || 0) * conversionRate;
-  const fixedCostAllocations = {
-    perChannel: Object.entries(
-      fixedCostBreakdownStore.allocations?.perChannel ?? {},
-    ).reduce((acc, [channel, value]) => {
-      acc[channel] = Number(value || 0) * conversionRate;
-      return acc;
-    }, {}),
-    unassigned:
-      Number(fixedCostBreakdownStore.allocations?.unassigned || 0) *
-      conversionRate,
-  };
-
-  const summary = buildSummary(
-    currentMetrics,
-    previousMetrics,
-    fixedCostTotal,
-    conversionRate,
-    previousFixedCostTotal,
-  );
-  const netProfitAfterFixedCard = summary.find(
-    (card) => card.key === "netProfitAfterFixed",
-  );
-  const refundRateCard = summary.find((card) => card.key === "refundRate");
-  const timeSeries = buildTimeSeries(
-    range.start,
-    rangeDays,
-    currentMetrics,
-    conversionRate,
-    resolvedTimezone,
-  );
-  const costBreakdown = buildCostBreakdown(
-    currentMetrics,
-    fixedCostTotal,
-    conversionRate,
-  );
-  const topProducts = await loadTopProducts(
-    store.id,
-    range.start,
-    range.end,
-    conversionRate,
-  );
-  const alerts = openIssues.map(issueToAlert);
-
-  const planUsageResult =
+  const planUsage =
     storeRecord?.merchantId != null
       ? await getPlanUsage({ merchantId: storeRecord.merchantId })
       : null;
 
-  if (storeRecord) {
-    await checkNetProfitAlert({
-      store: storeRecord,
-      netProfitAfterFixed:
-        netProfitAfterFixedCard?.value ??
-        sumField(currentMetrics, "netProfit") * conversionRate - fixedCostTotal,
-    });
+  const summaryCards = buildSummaryCards({
+    current: currentMetrics,
+    previous: previousMetrics,
+    conversionRate,
+  });
 
-    if (refundRateCard) {
-      await checkRefundSpikeAlert({
-        store: storeRecord,
-        refundRate: refundRateCard.value ?? 0,
-        refundCount: sumField(currentMetrics, "refunds"),
-        orderCount: sumField(currentMetrics, "orders"),
-      });
-    }
-  }
-
-  const merchantSummary = merchantId
-    ? await getMerchantPerformanceSummary({
-        merchantId,
-        rangeDays,
-      })
-    : null;
+  const topProducts = await loadTopProducts({
+    storeId: store.id,
+    range,
+    conversionRate,
+    currency: masterCurrency,
+  });
 
   return {
     shopDomain: storeRecord?.shopDomain ?? store.shopDomain,
-    rangeLabel: formatRangeLabel(range, rangeDays, resolvedTimezone),
-    summaryCards: summary,
-    timeseries: timeSeries,
-    costBreakdown,
+    rangeLabel: `${range.start.toISOString().slice(0, 10)} – ${range.end
+      .toISOString()
+      .slice(0, 10)}`,
+    summaryCards,
+    timeseries: buildTimeSeries({
+      metrics: currentMetrics,
+      rangeStart: range.start,
+      rangeDays,
+      conversionRate,
+      timezone,
+    }),
+    costBreakdown: buildCostBreakdown({
+      metrics: currentMetrics,
+      conversionRate,
+    }),
     topProducts,
-    alerts,
-    fixedCosts: fixedCostTotal,
-    fixedCostAllocations,
     currency: masterCurrency,
-    merchantSummary,
-    planStatus: buildPlanStatus(planUsageResult),
-    timezone: resolvedTimezone,
+    planStatus: buildPlanStatus(planUsage),
+    timezone,
   };
 }
 
-function buildSummary(
-  currentMetrics,
-  previousMetrics,
-  fixedCostTotal = 0,
-  conversionRate = 1,
-  previousFixedCostTotal = fixedCostTotal,
-) {
-  const netRevenue = sumField(currentMetrics, "revenue") * conversionRate;
-  const adSpend = sumField(currentMetrics, "adSpend") * conversionRate;
-  const netProfit = sumField(currentMetrics, "netProfit") * conversionRate;
-  const refundAmount = sumField(currentMetrics, "refundAmount") * conversionRate;
-  const refunds = sumField(currentMetrics, "refunds");
-  const prevRevenue = sumField(previousMetrics, "revenue") * conversionRate;
-  const prevAdSpend = sumField(previousMetrics, "adSpend") * conversionRate;
-  const prevNetProfit = sumField(previousMetrics, "netProfit") * conversionRate;
-  const prevRefundAmount =
-    sumField(previousMetrics, "refundAmount") * conversionRate;
-  const prevRefunds = sumField(previousMetrics, "refunds");
-  const profitOnAdSpend = adSpend > 0 ? netProfit / adSpend : 0;
-  const prevProfitOnAdSpend =
-    prevAdSpend > 0 ? prevNetProfit / prevAdSpend : 0;
-  const netProfitAfterFixed = netProfit - fixedCostTotal;
-  const prevNetProfitAfterFixed = prevNetProfit - previousFixedCostTotal;
-  const currentOrders = sumField(currentMetrics, "orders");
-  const previousOrders = sumField(previousMetrics, "orders");
-  const refundRate = currentOrders > 0 ? refunds / currentOrders : 0;
-  const prevRefundRate = previousOrders > 0 ? prevRefunds / previousOrders : 0;
-
-  return [
+function buildSummaryCards({ current, previous, conversionRate }) {
+  const totals = summarizeMetrics(current, conversionRate);
+  const prevTotals = summarizeMetrics(previous, conversionRate);
+  const cards = [
     {
-      key: "netRevenue",
-      label: "Net revenue",
-      value: netRevenue,
-      deltaPercentage: percentChange(netRevenue, prevRevenue),
-      trend: trendDirection(netRevenue, prevRevenue),
+      key: "revenue",
+      label: "Revenue",
+      value: totals.revenue,
+      deltaPercentage: percentChange(totals.revenue, prevTotals.revenue),
+      trend: trendDirection(totals.revenue, prevTotals.revenue),
+    },
+    {
+      key: "orders",
+      label: "Orders",
+      value: totals.orders,
+      deltaPercentage: percentChange(totals.orders, prevTotals.orders),
+      trend: trendDirection(totals.orders, prevTotals.orders),
+      formatter: "count",
     },
     {
       key: "adSpend",
       label: "Ad spend",
-      value: adSpend,
-      deltaPercentage: percentChange(adSpend, prevAdSpend),
-      trend: trendDirection(adSpend, prevAdSpend, false),
+      value: totals.adSpend,
+      deltaPercentage: percentChange(totals.adSpend, prevTotals.adSpend),
+      trend: trendDirection(totals.adSpend, prevTotals.adSpend, false),
     },
     {
       key: "netProfit",
       label: "Net profit",
-      value: netProfit,
-      deltaPercentage: percentChange(netProfit, prevNetProfit),
-      trend: trendDirection(netProfit, prevNetProfit),
+      value: totals.netProfit,
+      deltaPercentage: percentChange(totals.netProfit, prevTotals.netProfit),
+      trend: trendDirection(totals.netProfit, prevTotals.netProfit),
     },
     {
-      key: "profitOnAdSpend",
-      label: "Net profit % of ad spend",
-      value: profitOnAdSpend,
+      key: "netMargin",
+      label: "Net margin",
+      value: totals.margin,
+      formatter: "percentage",
+      deltaPercentage: percentChange(totals.margin, prevTotals.margin, true),
+      trend: trendDirection(totals.margin, prevTotals.margin),
+    },
+    {
+      key: "roas",
+      label: "ROAS",
+      value: totals.adSpend > 0 ? totals.revenue / totals.adSpend : 0,
+      formatter: "multiple",
       deltaPercentage: percentChange(
-        profitOnAdSpend,
-        prevProfitOnAdSpend,
+        totals.adSpend > 0 ? totals.revenue / totals.adSpend : 0,
+        prevTotals.adSpend > 0 ? prevTotals.revenue / prevTotals.adSpend : 0,
         true,
       ),
-      trend: trendDirection(profitOnAdSpend, prevProfitOnAdSpend),
-      formatter: "percentage",
-    },
-    {
-      key: "fixedCosts",
-      label: "Fixed cost burn",
-      value: fixedCostTotal,
-      deltaPercentage: null,
-      trend: "flat",
-      deltaLabel: "Fixed costs this period",
-    },
-    {
-      key: "netProfitAfterFixed",
-      label: "Net profit after fixed",
-      value: netProfitAfterFixed,
-      deltaPercentage: percentChange(
-        netProfitAfterFixed,
-        prevNetProfitAfterFixed,
-      ),
       trend: trendDirection(
-        netProfitAfterFixed,
-        prevNetProfitAfterFixed,
+        totals.adSpend > 0 ? totals.revenue / totals.adSpend : 0,
+        prevTotals.adSpend > 0 ? prevTotals.revenue / prevTotals.adSpend : 0,
       ),
-    },
-    {
-      key: "refundRate",
-      label: "Refund rate",
-      value: refundRate,
-      formatter: "percentage",
-      deltaPercentage: percentChange(refundRate, prevRefundRate, true),
-      trend: trendDirection(refundRate, prevRefundRate, false),
-      deltaLabel: `${refunds} refunds`,
-    },
-    {
-      key: "refundImpact",
-      label: "Refund impact",
-      value: refundAmount,
-      deltaPercentage: percentChange(refundAmount, prevRefundAmount),
-      trend: trendDirection(refundAmount, prevRefundAmount, false),
-      deltaLabel: "Refunded revenue",
     },
   ];
+  return cards;
 }
 
-function buildTimeSeries(
+function summarizeMetrics(metrics, conversionRate) {
+  const summary = {
+    revenue: 0,
+    orders: 0,
+    adSpend: 0,
+    netProfit: 0,
+  };
+  for (const row of metrics) {
+    summary.revenue += Number(row.revenue || 0) * conversionRate;
+    summary.orders += Number(row.orders || 0);
+    summary.adSpend += Number(row.adSpend || 0) * conversionRate;
+    summary.netProfit += Number(row.netProfit || 0) * conversionRate;
+  }
+  summary.margin =
+    summary.revenue > 0 ? summary.netProfit / summary.revenue : 0;
+  return summary;
+}
+
+function buildTimeSeries({
+  metrics,
   rangeStart,
   rangeDays,
-  metrics,
-  conversionRate = 1,
-  timezone = "UTC",
-) {
+  conversionRate,
+  timezone,
+}) {
   const timeline = new Map();
   for (const metric of metrics) {
     const key = formatDateKey(metric.date, { timezone });
     timeline.set(key, metric);
   }
-
   const series = {
     revenue: [],
-    adSpend: [],
     netProfit: [],
+    adSpend: [],
   };
-
   for (let i = 0; i < rangeDays; i += 1) {
     const date = shiftDays(rangeStart, i, { timezone });
     const key = formatDateKey(date, { timezone });
@@ -348,167 +223,114 @@ function buildTimeSeries(
       date: key,
       value: metric ? Number(metric.revenue) * conversionRate : 0,
     });
-    series.adSpend.push({
-      date: key,
-      value: metric ? Number(metric.adSpend) * conversionRate : 0,
-    });
     series.netProfit.push({
       date: key,
       value: metric ? Number(metric.netProfit) * conversionRate : 0,
     });
+    series.adSpend.push({
+      date: key,
+      value: metric ? Number(metric.adSpend) * conversionRate : 0,
+    });
   }
-
   return series;
 }
 
-function buildCostBreakdown(
-  metrics,
-  fixedCostTotal = 0,
-  conversionRate = 1,
-) {
+function buildCostBreakdown({ metrics, conversionRate }) {
   const revenue = sumField(metrics, "revenue") * conversionRate || 1;
   const cogs = sumField(metrics, "cogs") * conversionRate;
   const adSpend = sumField(metrics, "adSpend") * conversionRate;
   const shipping = sumField(metrics, "shippingCost") * conversionRate;
   const paymentFees = sumField(metrics, "paymentFees") * conversionRate;
   const refunds = sumField(metrics, "refundAmount") * conversionRate;
-  const fixedCosts = fixedCostTotal;
+
   const slices = [
-    { label: "COGS", value: cogs / revenue },
-    { label: "Ad spend", value: adSpend / revenue },
-    { label: "Payment fees", value: paymentFees / revenue },
-    { label: "Shipping", value: shipping / revenue },
-    { label: "Fixed costs", value: fixedCosts / revenue },
-    { label: "Refunds", value: refunds / revenue },
+    { label: "COGS", value: cogs },
+    { label: "Ad spend", value: adSpend },
+    { label: "Payment fees", value: paymentFees },
+    { label: "Shipping", value: shipping },
+    { label: "Refunds", value: refunds },
   ];
+  const accounted = slices.reduce((sum, slice) => sum + slice.value, 0);
+  slices.push({ label: "Other", value: Math.max(0, revenue - accounted) });
 
-  const accounted = slices.reduce((acc, slice) => acc + slice.value, 0);
-  slices.push({ label: "Other", value: Math.max(0, 1 - accounted) });
-
-  return slices;
+  return slices.map((slice) => ({
+    ...slice,
+    percentage: revenue > 0 ? slice.value / revenue : 0,
+  }));
 }
 
-function buildPlanStatus(planUsageResult) {
-  if (!planUsageResult) {
-    return null;
-  }
-  const usage = planUsageResult.usage?.orders ?? null;
-  return {
-    planName: planUsageResult.planDefinition?.name ?? null,
-    planStatus: planUsageResult.subscription?.status ?? "INACTIVE",
-    orderStatus: usage?.status,
-    orderLimit: usage?.limit ?? 0,
-    orderCount: usage?.count ?? 0,
-  };
-}
-
-async function loadTopProducts(storeId, rangeStart, rangeEnd, conversionRate = 1) {
-  const productGroups = await prisma.dailyMetric.groupBy({
-    by: ["productSku"],
+async function loadTopProducts({
+  storeId,
+  range,
+  conversionRate,
+  currency,
+}) {
+  const lineItems = await prisma.orderLineItem.groupBy({
+    by: ["sku"],
     where: {
-      storeId,
-      productSku: { not: null },
-      date: { gte: rangeStart, lte: rangeEnd },
+      order: {
+        storeId,
+        processedAt: { gte: range.start, lte: range.end },
+      },
     },
     _sum: {
       revenue: true,
-      netProfit: true,
-      units: true,
-      refundAmount: true,
+      cogs: true,
+      quantity: true,
     },
-    orderBy: {
-      _sum: {
-        netProfit: "desc",
-      },
-    },
-    take: 5,
   });
 
-  return productGroups.map((group) => {
-    const revenue = Number(group._sum.revenue || 0) * conversionRate;
-    const netProfit = Number(group._sum.netProfit || 0) * conversionRate;
-    const refundAmount = Number(group._sum.refundAmount || 0) * conversionRate;
-    const margin = revenue > 0 ? netProfit / revenue : 0;
-    return {
-      title: group.productSku ?? "Unknown SKU",
-      sku: group.productSku ?? "N/A",
+  const enriched = [];
+  for (const row of lineItems) {
+    const revenue = Number(row._sum.revenue || 0) * conversionRate;
+    const cogs = Number(row._sum.cogs || 0) * conversionRate;
+    const netProfit = revenue - cogs;
+    enriched.push({
+      sku: row.sku ?? "Unknown SKU",
+      title: row.sku ?? "Unknown SKU",
       revenue,
       netProfit,
-      margin,
-      refunds: revenue > 0 ? refundAmount / revenue : 0,
-    };
-  });
-}
-
-function summarizeChannelStats(metrics = []) {
-  const stats = {};
-  metrics.forEach((metric) => {
-    if (!metric) return;
-    if (metric.productSku) return;
-    if (!metric.channel || metric.channel === "TOTAL" || metric.channel === "PRODUCT") {
-      return;
-    }
-    const channel = metric.channel;
-    const entry = stats[channel] || { revenue: 0, orders: 0 };
-    entry.revenue += Number(metric.revenue || 0);
-    entry.orders += Number(metric.orders || 0);
-    stats[channel] = entry;
-  });
-  return stats;
-}
-
-function issueToAlert(issue) {
-  let tone = "info";
-  if (issue.issueType === "SHOPIFY_VS_PAYMENT") {
-    tone = "warning";
-  } else if (issue.issueType === "SHOPIFY_VS_ADS") {
-    tone = "info";
+      margin: revenue > 0 ? netProfit / revenue : 0,
+      units: Number(row._sum.quantity || 0),
+      currency,
+    });
   }
+
+  return enriched
+    .sort((a, b) => b.netProfit - a.netProfit)
+    .slice(0, 5);
+}
+
+function buildPlanStatus(planUsageResult) {
+  if (!planUsageResult) return null;
+  const usage = planUsageResult.usage?.orders;
   return {
-    type: tone,
-    title: issue.issueType.replace(/_/g, " "),
-    message: issue.details?.message ?? issueDescription(issue),
+    planName: planUsageResult.planDefinition?.name ?? null,
+    planStatus: planUsageResult.subscription?.status ?? "INACTIVE",
+    orderUsage: usage?.count ?? 0,
+    orderLimit: usage?.limit ?? 0,
+    orderStatus: usage?.status ?? "ok",
   };
 }
 
-function issueDescription(issue) {
-  if (issue.orderId) {
-    return `Order ${issue.orderId} delta ${formatAmount(issue.amountDelta)}`;
+function sumField(rows, field) {
+  return rows.reduce((sum, row) => sum + Number(row[field] || 0), 0);
+}
+
+function percentChange(current, previous, allowNegativeZero = false) {
+  if (!Number.isFinite(previous) || previous === 0) {
+    return null;
   }
-  return `Detected ${formatAmount(issue.amountDelta)} variance`;
-}
-
-function formatAmount(value) {
-  return `$${Number(value).toFixed(2)}`;
-}
-
-function formatRangeLabel(range, fallbackDays, timezone = "UTC") {
-  if (!range?.start || !range?.end) {
-    return `Last ${fallbackDays} days`;
-  }
-  const start = formatDateKey(range.start, { timezone });
-  const end = formatDateKey(range.end, { timezone });
-  return `${start} – ${end}`;
-}
-
-function sumField(metrics, field) {
-  return metrics.reduce((acc, metric) => acc + Number(metric[field] || 0), 0);
-}
-
-function percentChange(current, previous, allowNaN = false) {
-  if (!previous && previous !== 0) {
+  const delta = ((current - previous) / Math.abs(previous)) * 100;
+  if (!allowNegativeZero && Math.abs(delta) < 0.01) {
     return 0;
   }
-  if (previous === 0) {
-    return allowNaN ? 0 : current > 0 ? 100 : 0;
-  }
-  return Number((((current - previous) / Math.abs(previous)) * 100).toFixed(1));
+  return Number(delta.toFixed(1));
 }
 
-function trendDirection(current, previous, positiveIsGood = true) {
-  if (current === previous) {
-    return "flat";
-  }
-  const isUp = current > previous;
-  return positiveIsGood ? (isUp ? "up" : "down") : isUp ? "down" : "up";
+function trendDirection(current, previous, positiveWhenLower = false) {
+  if (previous == null) return "flat";
+  if (current === previous) return "flat";
+  const improving = positiveWhenLower ? current < previous : current > previous;
+  return improving ? "up" : "down";
 }
