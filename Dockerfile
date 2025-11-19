@@ -4,7 +4,8 @@ RUN apk add --no-cache openssl
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci
+# Use npm install to allow dependency tree to be regenerated when lock file entries are missing
+RUN npm install
 
 FROM deps AS builder
 COPY . .
@@ -14,7 +15,7 @@ FROM base AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/public ./public
