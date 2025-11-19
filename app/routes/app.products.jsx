@@ -86,7 +86,7 @@ export default function ProductsPage() {
             <s-text variation="subdued">
               {missingCostCount > 0
                 ? `${missingCostCount} 个 SKU 未配置成本，利润统计可能不准确。`
-                : "部分 SKU 未配置成本，利润统计可能不准确。`}
+                : "部分 SKU 未配置成本，利润统计可能不准确。"}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
               去补成本
