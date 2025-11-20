@@ -95,11 +95,18 @@ export async function ensureOrderCapacity({
     return { overageRecord: null };
   }
 
-  await tx.$executeRaw`
-    INSERT INTO "monthly_order_usage"("merchantId", "year", "month", "orders")
-    VALUES (${merchantId}, ${year}, ${month}, 0)
-    ON CONFLICT ("merchantId", "year", "month") DO NOTHING
-  `;
+  await tx.monthlyOrderUsage.upsert({
+    where: {
+      merchantId_year_month: { merchantId, year, month },
+    },
+    create: {
+      merchantId,
+      year,
+      month,
+      orders: 0,
+    },
+    update: {},
+  });
   const [row] = await tx.$queryRaw`
     SELECT "orders"
     FROM "monthly_order_usage"
