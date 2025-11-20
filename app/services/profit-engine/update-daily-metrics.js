@@ -162,7 +162,10 @@ export function resolveOrderChannel(sourceName) {
 async function adjustMetricRow(tx, where, values, options = {}) {
   const direction = options.direction ?? 1;
   const allowCreate = options.allowCreate ?? direction > 0;
+
+  // ⚠️ 这里改掉：不能用 findUnique + 复合唯一键，因为 productSku 可能是 null（TOTAL 行）
   const existing = await tx.dailyMetric.findFirst({ where });
+
   if (!existing) {
     if (!allowCreate) return;
     await tx.dailyMetric.create({
@@ -189,9 +192,10 @@ async function adjustMetricRow(tx, where, values, options = {}) {
     "grossProfit",
     "netProfit",
   ];
+
   for (const field of numericFields) {
-    if (values[field] !== undefined) {
-      data[field] = { increment: applyValue(values[field]) };
+    if (values[field] != null) {
+      data[field] = (existing[field] ?? 0) + applyValue(values[field]);
     }
   }
 
