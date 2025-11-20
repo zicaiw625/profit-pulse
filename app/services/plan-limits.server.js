@@ -211,14 +211,14 @@ function assertSubscriptionActive(subscription) {
   const trialActive =
     subscription.trialEndsAt &&
     new Date(subscription.trialEndsAt).getTime() > now;
-  if (subscription.status !== "ACTIVE" && !trialActive) {
-    throw new PlanLimitError({
-      code: "SUBSCRIPTION_INACTIVE",
-      message:
-        "Subscription is inactive. Activate or upgrade your plan to continue syncing orders.",
-      detail: {
-        status: subscription.status ?? "INACTIVE",
-      },
-    });
+  //if (subscription.status !== "ACTIVE" && !trialActive) {
+  //  throw new PlanLimitError({
+  //    code: "SUBSCRIPTION_INACTIVE",
+  //    message:
+  //      "Subscription is inactive. Activate or upgrade your plan to continue syncing orders.",
+  //    detail: {
+  //      status: subscription.status ?? "INACTIVE",
+  //    },
+  //  });
   }
 }
