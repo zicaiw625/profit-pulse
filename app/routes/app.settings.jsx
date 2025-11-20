@@ -68,9 +68,27 @@ export const action = async ({ request }) => {
     }
   } catch (error) {
     if (error instanceof MissingShopifyScopeError) {
-      const reauthUrl = new URL("/auth", request.url);
-      reauthUrl.searchParams.set("shop", store.shopDomain ?? session.shop);
+      const currentUrl = new URL(request.url);
+
+      // 这里用 origin，确保是你的 app 根域名，不受 /app/settings 影响
+      const reauthUrl = new URL("/auth", currentUrl.origin);
+
+      const shop = store.shopDomain ?? session.shop;
+      if (shop) {
+        reauthUrl.searchParams.set("shop", shop);
+      }
       reauthUrl.searchParams.set("reauth", "1");
+
+      // 把 Shopify 自带的 host / embedded 也透传过去
+      const host = currentUrl.searchParams.get("host");
+      if (host) {
+        reauthUrl.searchParams.set("host", host);
+      }
+      const embedded = currentUrl.searchParams.get("embedded");
+      if (embedded) {
+        reauthUrl.searchParams.set("embedded", embedded);
+      }
+
       return redirect(reauthUrl.toString());
     }
     return json(
