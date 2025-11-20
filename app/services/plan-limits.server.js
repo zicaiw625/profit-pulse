@@ -94,18 +94,25 @@ export async function ensureOrderCapacity({
     }
     return { overageRecord: null };
   }
-
-  await tx.monthlyOrderUsage.upsert({
+  await db.monthlyOrderUsage.upsert({
     where: {
-      merchantId_year_month: { merchantId, year, month },
+      merchantId_year_month: {
+        merchantId,
+        year,
+        month,
+      },
     },
     create: {
       merchantId,
       year,
       month,
-      orders: 0,
+      orders: incomingOrders,      // 第一次规模记这里
     },
-    update: {},
+    update: {
+      orders: {
+        increment: incomingOrders, // 之后每次累加
+      },
+    },
   });
   const [row] = await tx.$queryRaw`
     SELECT "orders"
