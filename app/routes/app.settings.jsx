@@ -1,4 +1,4 @@
-import { Form, useActionData, useLoaderData, useRouteError } from "react-router";
+import { Form, redirect, useActionData, useLoaderData, useRouteError } from "react-router";
 import { json } from "@remix-run/node";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -39,8 +39,11 @@ export const action = async ({ request }) => {
         await seedDemoCostConfiguration({ storeId: store.id, currency: store.currency });
         return json({ success: true, message: "Demo cost templates imported." });
       case "sync-shopify-orders":
-        await syncShopifyOrders({ store, session, days: 30 });
-        return json({ success: true, message: "Shopify orders queued for sync." });
+        await syncShopifyOrders({ store, session, days: 30, useRequestedLookback: true });
+        return json({
+          success: true,
+          message: "Shopify orders sync started for the last 30 days. Refresh in a few minutes.",
+        });
       case "sync-shopify-payments":
         await syncShopifyPayments({ store, session });
         return json({ success: true, message: "Shopify Payments refreshed." });
@@ -52,13 +55,13 @@ export const action = async ({ request }) => {
         if (!planTier) {
           throw new Error("Select a plan to continue.");
         }
-        await requestPlanChange({
+        const confirmationUrl = await requestPlanChange({
           planTier,
           billing,
           session,
           returnUrl: new URL("/app/settings", request.url).toString(),
         });
-        return json({ success: true, message: "Redirecting to Shopify billing..." });
+        return redirect(confirmationUrl);
       }
       default:
         return json({ success: false, message: "Unsupported action." }, { status: 400 });

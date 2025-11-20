@@ -161,3 +161,42 @@ test("syncShopifyOrders defaults to extended lookback for new stores", async (t)
     "processedAtMin should reflect the extended lookback",
   );
 });
+
+test("syncShopifyOrders can force a requested lookback window even when orders exist", async (t) => {
+  const latestOrder = {
+    processedAt: new Date("2024-06-10T10:00:00.000Z"),
+  };
+  const responses = [
+    {
+      body: { orders: [] },
+      pageInfo: {},
+    },
+  ];
+
+  setShopifyOrderSyncDependenciesForTests({
+    prismaClient: createPrismaStub(latestOrder),
+    shopifyApi: createShopifyStub(responses),
+    processShopifyOrder: async () => {},
+  });
+
+  t.after(() => {
+    resetShopifyOrderSyncDependenciesForTests();
+    resetOrderSyncConcurrencyForTests();
+  });
+
+  const before = Date.now();
+  const result = await syncShopifyOrders({
+    store: { id: "store-2" },
+    session: { shop: "demo-shop.myshopify.com", accessToken: "token" },
+    days: 30,
+    useRequestedLookback: true,
+  });
+  const after = Date.now();
+
+  const dayMs = 1000 * 60 * 60 * 24;
+  const diffDays = (after - result.processedAtMin.getTime()) / dayMs;
+  assert.ok(
+    diffDays >= 29.9 && diffDays <= 30.1,
+    `expected lookback to honor the requested 30 days but was ${diffDays.toFixed(2)}`,
+  );
+});

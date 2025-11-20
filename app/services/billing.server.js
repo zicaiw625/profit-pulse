@@ -89,12 +89,22 @@ export async function requestPlanChange({
     throw new Error(`Unknown plan tier: ${planTier}`);
   }
 
-  await billing.request({
+  const response = await billing.request({
     session,
     plan: plan.billingKey,
     isTest: BILLING_TEST_MODE,
     returnUrl,
   });
+
+  const confirmationUrl =
+    typeof response === "string"
+      ? response
+      : response?.confirmationUrl ?? response?.url ?? null;
+  if (!confirmationUrl) {
+    throw new Error("Missing Shopify billing confirmation URL. Please try again.");
+  }
+
+  return confirmationUrl;
 }
 
 function computeTrialEnd(subscription) {

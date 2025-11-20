@@ -64,7 +64,7 @@ const ORDER_SYNC_CONCURRENCY = Number.parseInt(
   10,
 );
 
-export async function syncShopifyOrders({ store, session, days = 2 }) {
+export async function syncShopifyOrders({ store, session, days = 2, useRequestedLookback = false }) {
   if (!store?.id) {
     throw new Error("Store is required to sync Shopify orders");
   }
@@ -76,7 +76,7 @@ export async function syncShopifyOrders({ store, session, days = 2 }) {
   const shopifyApi = await loadShopifyApi();
 
   const restClient = new shopifyApi.api.clients.Rest({ session });
-  const processedAtMin = await determineStartDate(store.id, days);
+  const processedAtMin = await determineStartDate(store.id, days, { useRequestedLookback });
   let cursor = null;
   let processed = 0;
 
@@ -139,22 +139,32 @@ export async function syncOrderById({ store, session, orderId }) {
   return order;
 }
 
-async function determineStartDate(storeId, days) {
+async function determineStartDate(storeId, days, { useRequestedLookback = false } = {}) {
   const { prismaClient } = getOrderSyncDependencies();
   const latestOrder = await prismaClient.order.findFirst({
     where: { storeId },
     orderBy: { processedAt: "desc" },
   });
 
-  if (!latestOrder) {
+  const lookbackDays = resolveLookbackDays(days, {
+    minimum: useRequestedLookback ? 1 : 14,
+  });
+
+  if (!latestOrder || useRequestedLookback) {
     const start = new Date();
-    start.setUTCDate(start.getUTCDate() - Math.max(days, 14));
+    start.setUTCDate(start.getUTCDate() - lookbackDays);
     return start;
   }
 
   const start = new Date(latestOrder.processedAt);
   start.setUTCDate(start.getUTCDate() - 1);
   return start;
+}
+
+function resolveLookbackDays(value, { minimum = 14 } = {}) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  const normalized = Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
+  return Math.max(normalized, minimum);
 }
 
 const ORDER_FIELDS = [
