@@ -56,7 +56,7 @@ async function loadShopifyApi() {
     shopifyModulePromise = import("../../shopify.server.js");
   }
   const module = await shopifyModulePromise;
-  return module.default;
+  return module.default ?? module.shopify ?? module;
 }
 
 const ORDER_SYNC_CONCURRENCY = Number.parseInt(
@@ -75,7 +75,7 @@ export async function syncShopifyOrders({ store, session, days = 2, useRequested
   const { prismaClient, processShopifyOrder: processOrder } = getOrderSyncDependencies();
   const shopifyApi = await loadShopifyApi();
 
-  const restClient = new shopifyApi.api.clients.Rest({ session });
+  const restClient = createRestClient(shopifyApi, session);
   const processedAtMin = await determineStartDate(store.id, days, { useRequestedLookback });
   let cursor = null;
   let processed = 0;
@@ -122,7 +122,7 @@ export async function syncOrderById({ store, session, orderId }) {
   const { processShopifyOrder: processOrder } = getOrderSyncDependencies();
   const shopifyApi = await loadShopifyApi();
 
-  const restClient = new shopifyApi.api.clients.Rest({ session });
+  const restClient = createRestClient(shopifyApi, session);
   const response = await restClient.get({
     path: `orders/${orderId}.json`,
     query: {
@@ -165,6 +165,14 @@ function resolveLookbackDays(value, { minimum = 14 } = {}) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   const normalized = Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
   return Math.max(normalized, minimum);
+}
+
+function createRestClient(shopifyApi, session) {
+  const api = shopifyApi?.api ?? shopifyApi;
+  if (!api?.clients?.Rest) {
+    throw new Error("Shopify API REST client is not configured. Check shopify.server.js export.");
+  }
+  return new api.clients.Rest({ session });
 }
 
 const ORDER_FIELDS = [
