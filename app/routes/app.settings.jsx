@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getAccountSettings } from "../services/settings.server";
 import { importSkuCostsFromCsv, seedDemoCostConfiguration } from "../services/costs.server";
-import { syncShopifyOrders } from "../services/sync/shopify-orders.server";
+import { MissingShopifyScopeError, syncShopifyOrders } from "../services/sync/shopify-orders.server";
 import { syncShopifyPayments } from "../services/sync/payment-payouts.server";
 import { syncAdProvider } from "../services/sync/ad-spend.server";
 import { requestPlanChange } from "../services/billing.server";
@@ -67,6 +67,12 @@ export const action = async ({ request }) => {
         return json({ success: false, message: "Unsupported action." }, { status: 400 });
     }
   } catch (error) {
+    if (error instanceof MissingShopifyScopeError) {
+      const reauthUrl = new URL("/auth", request.url);
+      reauthUrl.searchParams.set("shop", store.shopDomain ?? session.shop);
+      reauthUrl.searchParams.set("reauth", "1");
+      return redirect(reauthUrl.toString());
+    }
     return json(
       {
         success: false,

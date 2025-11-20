@@ -7,6 +7,18 @@ const DEFAULT_CONCURRENCY = Number.parseInt(
   10,
 );
 
+const REQUIRED_ORDER_SCOPES = ["read_orders"];
+
+export class MissingShopifyScopeError extends Error {
+  constructor(requiredScopes, grantedScopes, shop) {
+    super(`Missing Shopify scopes: ${requiredScopes.join(", ")}`);
+    this.name = "MissingShopifyScopeError";
+    this.requiredScopes = requiredScopes;
+    this.grantedScopes = grantedScopes;
+    this.shop = shop;
+  }
+}
+
 const defaultDependencies = {
   prismaClient: defaultPrisma,
   shopifyApi: null,
@@ -73,6 +85,8 @@ export async function syncShopifyOrders({ store, session, days = 2, useRequested
     throw new Error("Shopify admin session is required for order sync");
   }
 
+  assertOrderScopes(session);
+
   const { prismaClient, processShopifyOrder: processOrder } = getOrderSyncDependencies();
   const shopifyApi = await loadShopifyApi();
 
@@ -120,6 +134,8 @@ export async function syncOrderById({ store, session, orderId }) {
     throw new Error("Shopify admin session is required");
   }
 
+  assertOrderScopes(session);
+
   const { processShopifyOrder: processOrder } = getOrderSyncDependencies();
   const shopifyApi = await loadShopifyApi();
 
@@ -166,6 +182,17 @@ function resolveLookbackDays(value, { minimum = 14 } = {}) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   const normalized = Number.isFinite(parsed) && parsed > 0 ? parsed : 2;
   return Math.max(normalized, minimum);
+}
+
+function assertOrderScopes(session) {
+  const granted = (session?.scope ?? "")
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+  const missing = REQUIRED_ORDER_SCOPES.filter((scope) => !granted.includes(scope));
+  if (missing.length > 0) {
+    throw new MissingShopifyScopeError(missing, granted, session?.shop);
+  }
 }
 
 function createRestClient(shopifyApi, session) {
