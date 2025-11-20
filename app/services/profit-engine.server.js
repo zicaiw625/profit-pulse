@@ -431,14 +431,12 @@ async function allocateAdSpendAttributions(
     return;
   }
   const metricDate = startOfDay(date);
-  const totalRow = await tx.dailyMetric.findUnique({
+  const totalRow = await tx.dailyMetric.findFirst({
     where: {
-      storeId_channel_productSku_date: {
-        storeId,
-        channel: "TOTAL",
-        productSku: null,
-        date: metricDate,
-      },
+      storeId,
+      channel: "TOTAL",
+      productSku: null,
+      date: metricDate,
     },
   });
   const totalAdSpend = Number(totalRow?.adSpend || 0);
