@@ -162,7 +162,7 @@ export function resolveOrderChannel(sourceName) {
 async function adjustMetricRow(tx, where, values, options = {}) {
   const direction = options.direction ?? 1;
   const allowCreate = options.allowCreate ?? direction > 0;
-  const existing = await tx.dailyMetric.findUnique({ where });
+  const existing = await tx.dailyMetric.findFirst({ where });
   if (!existing) {
     if (!allowCreate) return;
     await tx.dailyMetric.create({
