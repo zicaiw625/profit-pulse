@@ -5,7 +5,7 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getDashboardOverview } from "../services/dashboard.server";
 import { formatCurrency, formatPercent, formatDateShort } from "../utils/formatting";
-import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
+import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { useLocale } from "../hooks/useLocale";
 import { TRANSLATION_KEYS } from "../constants/translations";
 
@@ -43,8 +43,10 @@ export default function DashboardIndex() {
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
   const { t } = useLocale();
-  const hostParam = searchParams.get("host");
-  const shopParam = searchParams.get("shop");
+  const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
+    const value = searchParams.get(key);
+    return value ? { key, value } : null;
+  }).filter(Boolean);
   const planStatus = overview.planStatus ?? null;
   const missingCost = overview.missingCost ?? null;
   const pendingSync = (overview.syncState?.totalOrders ?? 0) === 0;
@@ -101,8 +103,9 @@ export default function DashboardIndex() {
       )}
       <s-section heading={t(TRANSLATION_KEYS.DASHBOARD_DATE_FILTERS)}>
         <Form method="get">
-          {hostParam && <input type="hidden" name="host" value={hostParam} />}
-          {shopParam && <input type="hidden" name="shop" value={shopParam} />}
+          {preservedFormParams.map(({ key, value }) => (
+            <input key={key} type="hidden" name={key} value={value} />
+          ))}
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               Start date

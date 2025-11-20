@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useLocation } from "react-router";
 
-const PRESERVED_PARAMS = ["host", "shop", "lang", "id_token", "session", "embedded"];
+export const APP_PRESERVED_PARAMS = ["host", "shop", "lang", "id_token", "session", "embedded"];
 
 export function useAppUrlBuilder() {
   const { search } = useLocation();
@@ -10,7 +10,7 @@ export function useAppUrlBuilder() {
     const urlSearch = new URLSearchParams(search);
     const entries = [];
 
-    PRESERVED_PARAMS.forEach((key) => {
+    APP_PRESERVED_PARAMS.forEach((key) => {
       const value = urlSearch.get(key);
       if (value) {
         entries.push([key, value]);

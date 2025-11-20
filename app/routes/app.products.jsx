@@ -3,7 +3,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getProductProfitTable } from "../services/reports.server";
-import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
+import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { formatCurrency, formatPercent } from "../utils/formatting";
 
 export const loader = async ({ request }) => {
@@ -43,16 +43,19 @@ export default function ProductsPage() {
   const { products, filters, currency, hasMissingCost } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
-  const hostParam = searchParams.get("host");
-  const shopParam = searchParams.get("shop");
+  const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
+    const value = searchParams.get(key);
+    return value ? { key, value } : null;
+  }).filter(Boolean);
   const missingCostCount = products.filter((product) => product.hasMissingCost).length;
 
   return (
     <s-page heading="Product profitability" subtitle="SKU level sales, COGS, and net profit">
       <s-section heading="Filters">
         <Form method="get">
-          {hostParam && <input type="hidden" name="host" value={hostParam} />}
-          {shopParam && <input type="hidden" name="shop" value={shopParam} />}
+          {preservedFormParams.map(({ key, value }) => (
+            <input key={key} type="hidden" name={key} value={value} />
+          ))}
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               Start date
