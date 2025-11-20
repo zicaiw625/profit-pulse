@@ -163,7 +163,7 @@ async function adjustMetricRow(tx, where, values, options = {}) {
   const direction = options.direction ?? 1;
   const allowCreate = options.allowCreate ?? direction > 0;
 
-  // ⚠️ 这里改掉：不能用 findUnique + 复合唯一键，因为 productSku 可能是 null（TOTAL 行）
+  // ✅ 用 findFirst，避免复合唯一键 + productSku null 的问题
   const existing = await tx.dailyMetric.findFirst({ where });
 
   if (!existing) {
@@ -195,7 +195,8 @@ async function adjustMetricRow(tx, where, values, options = {}) {
 
   for (const field of numericFields) {
     if (values[field] != null) {
-      data[field] = (existing[field] ?? 0) + applyValue(values[field]);
+      // ✅ 用 increment，让 Prisma 自己处理加减，避免字符串拼接
+      data[field] = { increment: applyValue(values[field]) };
     }
   }
 
