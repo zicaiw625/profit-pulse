@@ -9,11 +9,29 @@ import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prism
 import prisma from "./db.server.js";
 import { BILLING_CONFIG } from "./config/billing.js";
 
+const REQUIRED_SCOPES = [
+  "read_orders",
+  "read_refunds",
+  "read_customers",
+  "read_products",
+  "read_inventory",
+];
+
+function resolveScopes() {
+  const envScopes = (process.env.SCOPES ?? "")
+    .split(",")
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+
+  const merged = new Set([...envScopes, ...REQUIRED_SCOPES]);
+  return Array.from(merged);
+}
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   apiVersion: ApiVersion.October25,
-  scopes: process.env.SCOPES?.split(","),
+  scopes: resolveScopes(),
   appUrl: process.env.SHOPIFY_APP_URL || "",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
