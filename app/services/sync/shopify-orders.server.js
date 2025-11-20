@@ -1,5 +1,6 @@
 import defaultPrisma from "../../db.server.js";
 import { processShopifyOrder as defaultProcessShopifyOrder } from "../profit-engine.server.js";
+import { apiVersion as SHOPIFY_API_VERSION } from "../../shopify.server.js";
 
 const DEFAULT_CONCURRENCY = Number.parseInt(
   process.env.ORDER_SYNC_CONCURRENCY ?? "5",
@@ -169,10 +170,62 @@ function resolveLookbackDays(value, { minimum = 14 } = {}) {
 
 function createRestClient(shopifyApi, session) {
   const api = shopifyApi?.api ?? shopifyApi;
-  if (!api?.clients?.Rest) {
-    throw new Error("Shopify API REST client is not configured. Check shopify.server.js export.");
+  if (api?.clients?.Rest) {
+    return new api.clients.Rest({ session });
   }
-  return new api.clients.Rest({ session });
+  if (api?.clients?.rest) {
+    return new api.clients.rest({ session });
+  }
+  return createFetchRestClient(session);
+}
+
+function createFetchRestClient(session) {
+  const version = typeof SHOPIFY_API_VERSION === "string" ? SHOPIFY_API_VERSION : String(SHOPIFY_API_VERSION);
+  const baseUrl = `https://${session.shop}/admin/api/${version}`;
+
+  return {
+    async get({ path, query }) {
+      const search = new URLSearchParams();
+      Object.entries(query ?? {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          search.set(key, String(value));
+        }
+      });
+      const url = `${baseUrl}/${path}${search.toString() ? `?${search.toString()}` : ""}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": session.accessToken,
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Shopify REST request failed (${response.status}): ${text || response.statusText}`);
+      }
+
+      const body = await response.json();
+      const pageInfo = parseLinkHeaderForNextPage(response.headers.get("link"));
+      return { body, pageInfo };
+    },
+  };
+}
+
+function parseLinkHeaderForNextPage(linkHeader) {
+  if (!linkHeader) return undefined;
+
+  const parts = linkHeader.split(",").map((part) => part.trim());
+  for (const part of parts) {
+    const match = part.match(/<([^>]+)>; rel="next"/i);
+    if (!match) continue;
+    const url = new URL(match[1]);
+    const pageInfo = url.searchParams.get("page_info");
+    if (pageInfo) {
+      return { nextPage: { query: { page_info: pageInfo } } };
+    }
+  }
+  return undefined;
 }
 
 const ORDER_FIELDS = [
