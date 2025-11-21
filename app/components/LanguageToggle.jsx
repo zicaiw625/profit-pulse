@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "react-router";
 import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 import { useLocale } from "../hooks/useLocale";
+import { TRANSLATION_KEYS } from "../constants/translations";
 
 function buildLangHref({ pathname, search, hash, buildAppUrl, targetLang }) {
   const url = new URL(`${pathname}${search || ""}${hash || ""}`, "https://app.internal");
@@ -10,7 +11,7 @@ function buildLangHref({ pathname, search, hash, buildAppUrl, targetLang }) {
 }
 
 export function LanguageToggle() {
-  const { lang } = useLocale();
+  const { lang, t } = useLocale();
   const { pathname, search, hash } = useLocation();
   const navigate = useNavigate();
   const buildAppUrl = useAppUrlBuilder();
@@ -24,21 +25,24 @@ export function LanguageToggle() {
   const chineseHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "zh" });
 
   return (
-    <s-button-group>
-      <s-button
-        variant={lang === "en" ? "primary" : "secondary"}
-        href={englishHref}
-        onClick={handleClick("en")}
-      >
-        English
-      </s-button>
-      <s-button
-        variant={lang === "zh" ? "primary" : "secondary"}
-        href={chineseHref}
-        onClick={handleClick("zh")}
-      >
-        中文
-      </s-button>
-    </s-button-group>
+    <s-stack direction="inline" gap="tight" align="center">
+      <s-text variation="subdued">{t(TRANSLATION_KEYS.REPORTS_LANG_LABEL)}</s-text>
+      <s-button-group>
+        <s-button
+          variant={lang === "en" ? "primary" : "secondary"}
+          href={englishHref}
+          onClick={handleClick("en")}
+        >
+          English
+        </s-button>
+        <s-button
+          variant={lang === "zh" ? "primary" : "secondary"}
+          href={chineseHref}
+          onClick={handleClick("zh")}
+        >
+          中文
+        </s-button>
+      </s-button-group>
+    </s-stack>
   );
 }
