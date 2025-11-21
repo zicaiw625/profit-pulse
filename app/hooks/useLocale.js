@@ -8,7 +8,7 @@ import {
 } from "../utils/i18n";
 
 export function useLocale() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const hasLangParam = searchParams.has("lang");
   const langFromSearch = getLanguageFromSearchParams(searchParams);
   const documentLang =
@@ -19,10 +19,24 @@ export function useLocale() {
   const resolvedLang = lang || DEFAULT_LANG;
 
   useEffect(() => {
+    const currentLangNormalized = normalizeLanguage(searchParams.get("lang"));
+    if (currentLangNormalized !== resolvedLang) {
+      const next = new URLSearchParams(searchParams);
+      next.set("lang", resolvedLang);
+      setSearchParams(next, { replace: true });
+    }
+  }, [resolvedLang, searchParams, setSearchParams]);
+
+  useEffect(() => {
     if (typeof document !== "undefined" && document?.documentElement) {
       document.documentElement.lang = resolvedLang;
       const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
-      document.cookie = `lang=${resolvedLang}; path=/; SameSite=Lax; expires=${expires.toUTCString()}`;
+      const sameSite =
+        typeof window !== "undefined" && window?.location?.protocol === "https:"
+          ? "None"
+          : "Lax";
+      const secureFlag = sameSite === "None" ? "; Secure" : "";
+      document.cookie = `lang=${resolvedLang}; path=/; SameSite=${sameSite}${secureFlag}; expires=${expires.toUTCString()}`;
     }
   }, [resolvedLang]);
 
