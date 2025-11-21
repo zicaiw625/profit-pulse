@@ -24,26 +24,21 @@ export function LanguageToggle() {
   const chineseHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "zh" });
 
   return (
-    <s-stack direction="inline" gap="tight" align="center" wrap>
-      <s-text variation="subdued" style={{ whiteSpace: "nowrap" }}>
-        Language / 语言
-      </s-text>
-      <s-button-group>
-        <s-button
-          variant={lang === "en" ? "primary" : "secondary"}
-          href={englishHref}
-          onClick={handleClick("en")}
-        >
-          English
-        </s-button>
-        <s-button
-          variant={lang === "zh" ? "primary" : "secondary"}
-          href={chineseHref}
-          onClick={handleClick("zh")}
-        >
-          中文
-        </s-button>
-      </s-button-group>
-    </s-stack>
+    <s-button-group>
+      <s-button
+        variant={lang === "en" ? "primary" : "secondary"}
+        href={englishHref}
+        onClick={handleClick("en")}
+      >
+        English
+      </s-button>
+      <s-button
+        variant={lang === "zh" ? "primary" : "secondary"}
+        href={chineseHref}
+        onClick={handleClick("zh")}
+      >
+        中文
+      </s-button>
+    </s-button-group>
   );
 }
