@@ -24,25 +24,19 @@ export function LanguageToggle() {
   const englishHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "en" });
   const chineseHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "zh" });
 
+  const targetLang = lang === "zh" ? "en" : "zh";
+  const targetHref = targetLang === "zh" ? chineseHref : englishHref;
+  const targetLabel = targetLang === "zh" ? "中文" : "English";
+
   return (
-    <s-stack direction="inline" gap="tight" align="center">
-      <s-text variation="subdued">{t(TRANSLATION_KEYS.REPORTS_LANG_LABEL)}</s-text>
-      <s-button-group>
-        <s-button
-          variant={lang === "en" ? "primary" : "secondary"}
-          href={englishHref}
-          onClick={handleClick("en")}
-        >
-          English
-        </s-button>
-        <s-button
-          variant={lang === "zh" ? "primary" : "secondary"}
-          href={chineseHref}
-          onClick={handleClick("zh")}
-        >
-          中文
-        </s-button>
-      </s-button-group>
-    </s-stack>
+    <s-button
+      variant="secondary"
+      size="slim"
+      href={targetHref}
+      onClick={handleClick(targetLang)}
+      aria-label={`${t(TRANSLATION_KEYS.REPORTS_LANG_LABEL)}: ${targetLabel}`}
+    >
+      {targetLabel}
+    </s-button>
   );
 }

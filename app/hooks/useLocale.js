@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import {
   DEFAULT_LANG,
@@ -16,10 +16,17 @@ export function useLocale() {
       ? normalizeLanguage(document.documentElement.lang)
       : null;
   const lang = hasLangParam ? langFromSearch : documentLang || langFromSearch;
+  const resolvedLang = lang || DEFAULT_LANG;
+
+  useEffect(() => {
+    if (typeof document !== "undefined" && document?.documentElement) {
+      document.documentElement.lang = resolvedLang;
+    }
+  }, [resolvedLang]);
 
   const t = useMemo(() => {
-    return (key) => translate(key, lang);
-  }, [lang]);
+    return (key) => translate(key, resolvedLang);
+  }, [resolvedLang]);
 
-  return { lang: lang || DEFAULT_LANG, t };
+  return { lang: resolvedLang, t };
 }
