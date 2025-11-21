@@ -2,7 +2,6 @@ import { TRANSLATIONS } from "../constants/translations";
 
 export const SUPPORTED_LANGS = ["en", "zh"];
 export const DEFAULT_LANG = "en";
-export const LANG_COOKIE_NAME = "pp_lang";
 
 export function normalizeLanguage(lang) {
   const normalized = (lang || "").toString().toLowerCase();
@@ -30,10 +29,6 @@ export function getLanguageFromRequest(request) {
     if (langParam) {
       return normalizeLanguage(langParam);
     }
-    const cookieLang = getLanguageFromCookies(request.headers.get("cookie"));
-    if (cookieLang) {
-      return cookieLang;
-    }
     const acceptLanguage = request.headers.get("accept-language") || "";
     const [first] = acceptLanguage.split(",").map((item) => item.split(";")[0]);
     if (first) {
@@ -43,20 +38,6 @@ export function getLanguageFromRequest(request) {
     // Non-blocking: fall back to default language when parsing fails.
   }
   return DEFAULT_LANG;
-}
-
-export function getLanguageFromCookies(cookieHeader) {
-  if (!cookieHeader) return null;
-  const parts = cookieHeader.split(";").map((item) => item.trim());
-  for (const part of parts) {
-    if (!part) continue;
-    const [key, ...rest] = part.split("=");
-    if (key !== LANG_COOKIE_NAME) continue;
-    const value = rest.join("=");
-    if (!value) continue;
-    return normalizeLanguage(decodeURIComponent(value));
-  }
-  return null;
 }
 
 export function translate(key, lang = DEFAULT_LANG) {
