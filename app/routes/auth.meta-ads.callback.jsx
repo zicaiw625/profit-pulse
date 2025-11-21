@@ -10,12 +10,15 @@ import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const oauthLogger = createScopedLogger({ route: "auth.meta-ads.callback" });
 
-function buildSettingsRedirect({ provider, status, message }) {
+function buildSettingsRedirect({ provider, status, message, lang }) {
   const url = new URL("/app/settings", "http://localhost");
   url.searchParams.set("oauth", provider);
   url.searchParams.set("status", status);
   if (message) {
     url.searchParams.set("message", message);
+  }
+  if (lang) {
+    url.searchParams.set("lang", lang);
   }
   const location = `${url.pathname}?${url.searchParams.toString()}`;
   return new Response(null, {
@@ -34,6 +37,8 @@ function resolveAbsoluteUrl(pathname) {
 
 export const loader = async ({ request }) => {
   const url = new URL(request.url);
+  let lang = resolveLangFromRequest({ request });
+  let copy = OAUTH_COPY[lang] ?? OAUTH_COPY.en;
   const error = url.searchParams.get("error");
   if (error) {
     const message = url.searchParams.get("error_description") || error;
@@ -41,6 +46,7 @@ export const loader = async ({ request }) => {
       provider: "meta-ads",
       status: "error",
       message,
+      lang,
     });
   }
 
@@ -58,15 +64,20 @@ export const loader = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "授权回调校验失败，请重试。",
+      message: copy.stateInvalid,
+      lang,
     });
   }
+
+  lang = resolveLangFromRequest({ request, state });
+  copy = OAUTH_COPY[lang] ?? OAUTH_COPY.en;
 
   if (!code) {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "缺少 Meta 授权码，请重试。",
+      message: copy.missingCode,
+      lang,
     });
   }
 
@@ -74,7 +85,8 @@ export const loader = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "授权目标不匹配，请重新发起。",
+      message: copy.providerMismatch,
+      lang,
     });
   }
 
@@ -83,7 +95,8 @@ export const loader = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "无法匹配店铺，请重新发起授权。",
+      message: copy.storeMismatch,
+      lang,
     });
   }
 
@@ -127,7 +140,8 @@ export const loader = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "success",
-      message: "Meta Ads 已成功授权。",
+      message: copy.success,
+      lang,
     });
   } catch (error) {
     oauthLogger.error("meta_ads_oauth_callback_failed", {
@@ -139,7 +153,33 @@ export const loader = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: error.message ?? "Meta Ads 授权失败，请重试。",
+      message: error.message ?? copy.genericError,
+      lang,
     });
   }
+};
+
+function resolveLangFromRequest({ request, state }) {
+  if (state?.lang === "zh") return "zh";
+  const langParam = new URL(request.url).searchParams.get("lang");
+  return langParam && langParam.toLowerCase() === "zh" ? "zh" : "en";
+}
+
+const OAUTH_COPY = {
+  en: {
+    stateInvalid: "Authorization validation failed. Please try again.",
+    missingCode: "Missing Meta authorization code. Please try again.",
+    providerMismatch: "Authorization target mismatch. Please restart the flow.",
+    storeMismatch: "Could not match the store. Please restart authorization.",
+    success: "Meta Ads connected successfully.",
+    genericError: "Meta Ads authorization failed. Please try again.",
+  },
+  zh: {
+    stateInvalid: "授权回调校验失败，请重试。",
+    missingCode: "缺少 Meta 授权码，请重试。",
+    providerMismatch: "授权目标不匹配，请重新发起。",
+    storeMismatch: "无法匹配店铺，请重新发起授权。",
+    success: "Meta Ads 已成功授权。",
+    genericError: "Meta Ads 授权失败，请重试。",
+  },
 };

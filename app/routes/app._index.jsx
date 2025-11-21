@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getDashboardOverview } from "../services/dashboard.server";
-import { formatCurrency, formatPercent, formatDateShort } from "../utils/formatting";
+import { formatCurrency, formatPercent } from "../utils/formatting";
 import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { useLocale } from "../hooks/useLocale";
 import { TRANSLATION_KEYS } from "../constants/translations";
@@ -42,7 +42,7 @@ export default function DashboardIndex() {
   const { overview, filters } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
-  const { t } = useLocale();
+  const { lang, t } = useLocale();
   const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
     const value = searchParams.get(key);
     return value ? { key, value } : null;
@@ -60,6 +60,10 @@ export default function DashboardIndex() {
     (card) => card.key === "netRevenue",
   );
   const revenueBasis = Number(netRevenueCard?.value ?? 0);
+  const copy = DASHBOARD_COPY[lang] ?? DASHBOARD_COPY.en;
+  const missingCostPercent = missingCost
+    ? (missingCost.percent * 100).toFixed(1)
+    : null;
 
   return (
     <s-page
@@ -68,22 +72,22 @@ export default function DashboardIndex() {
     >
       {pendingSync && (
         <s-section>
-          <s-banner tone="info" title="数据同步中">
+          <s-banner tone="info" title={copy.syncingTitle}>
             <s-text variation="subdued">
-              Shopify 订单与 Meta Ads 花费正在同步，通常需要几分钟。当前展示示意数据，完成后会自动刷新。
+              {copy.syncingDescription}
             </s-text>
           </s-banner>
           <s-card padding="base">
-            <s-heading>下一步操作</s-heading>
+            <s-heading>{copy.nextStepsHeading}</s-heading>
             <s-text variation="subdued">
-              导入 COGS、连接 Meta Ads，并等待 Shopify Webhook 生效即可看到真实利润。
+              {copy.nextStepsDescription}
             </s-text>
             <s-stack direction="inline" gap="base" wrap style={{ marginTop: "0.75rem" }}>
               <s-button variant="primary" href={buildAppUrl("/app/onboarding")}>
-                查看 Onboarding
+                {copy.viewOnboarding}
               </s-button>
               <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
-                上传 SKU 成本
+                {copy.uploadCosts}
               </s-button>
             </s-stack>
           </s-card>
@@ -91,12 +95,12 @@ export default function DashboardIndex() {
       )}
       {!pendingSync && missingCost?.orders > 0 && (
         <s-section>
-          <s-banner tone="warning" title="部分订单缺少成本">
+          <s-banner tone="warning" title={copy.missingCostTitle}>
             <s-text variation="subdued">
-              {`约 ${(missingCost.percent * 100).toFixed(1)}% 的订单缺少 SKU 成本，净利润可能被高估。`}
+              {copy.missingCostDescription(missingCostPercent)}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
-              去补成本
+              {copy.missingCostCta}
             </s-button>
           </s-banner>
         </s-section>
@@ -138,7 +142,7 @@ export default function DashboardIndex() {
         </Form>
       </s-section>
       {pendingSync ? (
-        <DashboardPlaceholder />
+        <DashboardPlaceholder copy={copy} />
       ) : (
         <>
           <s-section heading={`${t(TRANSLATION_KEYS.DASHBOARD_PERFORMANCE)} (${overview.rangeLabel})`}>
@@ -364,6 +368,43 @@ function CostCompositionChart({ slices, revenue, currency }) {
   );
 }
 
+const DASHBOARD_COPY = {
+  en: {
+    syncingTitle: "Sync in progress",
+    syncingDescription:
+      "Shopify orders and Meta Ads spend are still syncing. Demo data is shown until everything finishes.",
+    nextStepsHeading: "Next actions",
+    nextStepsDescription:
+      "Import SKU costs, connect Meta Ads, and wait for Shopify webhooks to finish to see live profit.",
+    viewOnboarding: "Open onboarding",
+    uploadCosts: "Upload SKU costs",
+    missingCostTitle: "Some orders are missing costs",
+    missingCostDescription: (percent) =>
+      percent != null
+        ? `About ${percent}% of orders are missing SKU costs; net profit may be overstated.`
+        : "Some orders are missing SKU costs; net profit may be overstated.",
+    missingCostCta: "Fill in costs",
+    placeholderDescription:
+      "Data is syncing. A sample chart is shown so you can explore the layout; real metrics will replace it automatically.",
+  },
+  zh: {
+    syncingTitle: "数据同步中",
+    syncingDescription:
+      "Shopify 订单与 Meta Ads 花费正在同步，通常需要几分钟。当前展示示意数据，完成后会自动刷新。",
+    nextStepsHeading: "下一步操作",
+    nextStepsDescription:
+      "导入 COGS、连接 Meta Ads，并等待 Shopify Webhook 生效即可看到真实利润。",
+    viewOnboarding: "查看 Onboarding",
+    uploadCosts: "上传 SKU 成本",
+    missingCostTitle: "部分订单缺少成本",
+    missingCostDescription: (percent) =>
+      `约 ${percent ?? "0"}% 的订单缺少 SKU 成本，净利润可能被高估。`,
+    missingCostCta: "去补成本",
+    placeholderDescription:
+      "数据正在同步，我们先展示一份示意图以便熟悉界面。完成同步后，所有指标会自动替换成真实数据。",
+  },
+};
+
 const CARD_LABEL_MAP = {
   revenue: TRANSLATION_KEYS.DASHBOARD_CARD_NET_REVENUE,
   orders: TRANSLATION_KEYS.DASHBOARD_CARD_ORDERS,
@@ -450,12 +491,12 @@ function formatOrderCount(value) {
   return Number(value ?? 0).toLocaleString();
 }
 
-function DashboardPlaceholder() {
+function DashboardPlaceholder({ copy }) {
   return (
     <s-section heading="Demo preview">
       <s-card padding="base">
         <s-text variation="subdued">
-          数据正在同步，我们先展示一份示意图以便熟悉界面。完成同步后，所有指标会自动替换成真实数据。
+          {copy.placeholderDescription}
         </s-text>
         <s-stack direction="inline" gap="base" wrap style={{ marginTop: "1rem" }}>
           <s-card padding="base">

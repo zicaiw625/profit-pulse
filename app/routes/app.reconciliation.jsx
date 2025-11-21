@@ -7,6 +7,7 @@ import {
 } from "../services/reconciliation.server";
 import { formatCurrency } from "../utils/formatting";
 import { RECONCILIATION_RULE_DEFAULTS } from "../config/reconciliation.js";
+import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -22,8 +23,23 @@ export const loader = async ({ request }) => {
   };
 };
 
+const RECONCILIATION_COPY = {
+  en: {
+    ruleOfThumb: (paymentPercent, paymentAmount, adsMultiple, spendThreshold) =>
+      `If Shopify vs. payment revenue differs by more than ${paymentPercent}% or ${paymentAmount} on a given day, we flag a payment anomaly. ` +
+      `If Meta conversions exceed Shopify orders by ${adsMultiple}x, or spend is above ${spendThreshold} with zero conversions, we flag an ads anomaly.`,
+  },
+  zh: {
+    ruleOfThumb: (paymentPercent, paymentAmount, adsMultiple, spendThreshold) =>
+      `当某天 Shopify 与支付渠道营收差异超过 ${paymentPercent}% 或 ${paymentAmount} 时，我们会标记为「支付异常」；` +
+      `当 Meta 转化数高于 Shopify 订单 ${adsMultiple} 倍，或花费超过 ${spendThreshold} 但 0 转化时，会标记为「广告异常」。`,
+  },
+};
+
 export default function ReconciliationPage() {
   const { snapshot, rules, currency } = useLoaderData();
+  const { lang } = useLocale();
+  const copy = RECONCILIATION_COPY[lang] ?? RECONCILIATION_COPY.en;
   const paymentPercent = (rules.payment.percentDelta * 100).toFixed(1);
   const paymentAmount = formatCurrency(rules.payment.amountDelta, currency);
   const adsMultiple = rules.ads.conversionMultiple.toFixed(1);
@@ -50,8 +66,7 @@ export default function ReconciliationPage() {
       <s-section heading="Rule of thumb">
         <s-card padding="base">
           <s-text variation="subdued">
-            当某天 Shopify 与支付渠道营收差异超过 {paymentPercent}% 或 {paymentAmount} 时，我们会标记为「支付异常」；
-            当 Meta 转化数高于 Shopify 订单 {adsMultiple} 倍，或花费超过 {spendThreshold} 但 0 转化时，会标记为「广告异常」。
+            {copy.ruleOfThumb(paymentPercent, paymentAmount, adsMultiple, spendThreshold)}
           </s-text>
         </s-card>
       </s-section>

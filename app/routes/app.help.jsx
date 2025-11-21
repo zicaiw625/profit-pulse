@@ -1,12 +1,8 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
-import {
-  HELP_LINKS,
-  HELP_METRIC_DEFINITIONS,
-  HELP_ONBOARDING_ITEMS,
-  HELP_SYNC_ITEMS,
-} from "../constants/helpContent";
+import { getHelpContent } from "../constants/helpContent";
 import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
+import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -15,31 +11,34 @@ export const loader = async ({ request }) => {
 
 export default function HelpPage() {
   const buildAppUrl = useAppUrlBuilder();
+  const { lang } = useLocale();
+  const content = getHelpContent(lang);
+  const copy = HELP_PAGE_COPY[lang] ?? HELP_PAGE_COPY.en;
 
   return (
     <s-page
-      heading="Help center"
-      subtitle="Best practices, workflows, and definitions for Profit Pulse"
+      heading={copy.heading}
+      subtitle={copy.subtitle}
     >
-      <s-section heading="Onboarding checklist">
+      <s-section heading={copy.onboardingHeading}>
         <s-unordered-list>
-          {HELP_ONBOARDING_ITEMS.map((item) => (
+          {content.onboardingItems.map((item) => (
             <s-list-item key={item}>{item}</s-list-item>
           ))}
         </s-unordered-list>
       </s-section>
-      <s-section heading="Start onboarding">
+      <s-section heading={copy.startHeading}>
         <s-text variation="subdued">
-          Use the guided walkthrough to finish connecting stores, ads, costs, and alerts.
+          {copy.startDescription}
         </s-text>
         <s-button variant="primary" href={buildAppUrl("/app/onboarding")}>
-          Open onboarding guide
+          {copy.startButton}
         </s-button>
       </s-section>
 
-      <s-section heading="Key metrics explained">
+      <s-section heading={copy.metricsHeading}>
         <s-stack direction="block" gap="base">
-          {HELP_METRIC_DEFINITIONS.map((entry) => (
+          {content.metricDefinitions.map((entry) => (
             <s-card key={entry.title}>
               <s-heading level="4">{entry.title}</s-heading>
               <s-text variation="subdued">{entry.description}</s-text>
@@ -48,32 +47,32 @@ export default function HelpPage() {
         </s-stack>
       </s-section>
 
-      <s-section heading="Data sources & sync cadence">
+      <s-section heading={copy.syncHeading}>
         <s-unordered-list>
-          {HELP_SYNC_ITEMS.map((item) => (
+          {content.syncItems.map((item) => (
             <s-list-item key={item}>{item}</s-list-item>
           ))}
         </s-unordered-list>
       </s-section>
 
-      <s-section heading="法律与合规">
+      <s-section heading={copy.legalHeading}>
         <s-unordered-list>
           <s-list-item>
             <s-link href={buildAppUrl("/app/privacy")} target="_self">
-              隐私政策
+              {copy.privacyLabel}
             </s-link>
           </s-list-item>
           <s-list-item>
             <s-link href={buildAppUrl("/app/terms")} target="_self">
-              使用条款
+              {copy.termsLabel}
             </s-link>
           </s-list-item>
         </s-unordered-list>
       </s-section>
 
-      <s-section heading="Quick links & resources">
+      <s-section heading={copy.quickLinksHeading}>
         <s-stack direction="block" gap="base">
-          {HELP_LINKS.map((entry) => (
+          {content.links.map((entry) => (
             <s-card key={entry.title}>
               <s-heading level="4">{entry.title}</s-heading>
               <s-text variation="subdued">
@@ -81,7 +80,7 @@ export default function HelpPage() {
                 {entry.link && (
                   <>
                     {" "}
-                    <s-link href={entry.link.href} tone="primary">
+                    <s-link href={buildAppUrl(entry.link.href)} tone="primary">
                       {entry.link.label}
                     </s-link>
                   </>
@@ -94,5 +93,36 @@ export default function HelpPage() {
     </s-page>
   );
 }
+
+const HELP_PAGE_COPY = {
+  en: {
+    heading: "Help center",
+    subtitle: "Best practices, workflows, and definitions for Profit Pulse",
+    onboardingHeading: "Onboarding checklist",
+    startHeading: "Start onboarding",
+    startDescription: "Use the guided walkthrough to finish connecting stores, ads, costs, and alerts.",
+    startButton: "Open onboarding guide",
+    metricsHeading: "Key metrics explained",
+    syncHeading: "Data sources & sync cadence",
+    legalHeading: "Legal & compliance",
+    privacyLabel: "Privacy policy",
+    termsLabel: "Terms of use",
+    quickLinksHeading: "Quick links & resources",
+  },
+  zh: {
+    heading: "帮助中心",
+    subtitle: "Profit Pulse 的最佳实践、流程与定义",
+    onboardingHeading: "Onboarding 清单",
+    startHeading: "开始 Onboarding",
+    startDescription: "通过向导完成店铺、广告、成本与提醒配置。",
+    startButton: "打开 Onboarding 指南",
+    metricsHeading: "关键指标释义",
+    syncHeading: "数据来源与同步频率",
+    legalHeading: "法律与合规",
+    privacyLabel: "隐私政策",
+    termsLabel: "使用条款",
+    quickLinksHeading: "快速链接与资源",
+  },
+};
 
 export const headers = (headersArgs) => boundary.headers(headersArgs);

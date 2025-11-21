@@ -6,12 +6,15 @@ import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const oauthLogger = createScopedLogger({ route: "auth.meta-ads.start" });
 
-function buildSettingsRedirect({ provider, status, message }) {
+function buildSettingsRedirect({ provider, status, message, lang }) {
   const url = new URL("/app/settings", "http://localhost");
   url.searchParams.set("oauth", provider);
   url.searchParams.set("status", status);
   if (message) {
     url.searchParams.set("message", message);
+  }
+  if (lang) {
+    url.searchParams.set("lang", lang);
   }
   const location = `${url.pathname}?${url.searchParams.toString()}`;
   return new Response(null, {
@@ -42,6 +45,8 @@ function resolveAbsoluteUrl(pathname) {
 export const action = async ({ request }) => {
   const { session } = await authenticate.admin(request);
   const store = await ensureMerchantAndStore(session.shop, session.email);
+  const lang = resolveLangFromRequest(request);
+  const copy = OAUTH_COPY[lang] ?? OAUTH_COPY.en;
   const formData = await request.formData();
   const accountId = normalizeAccountId(formData.get("accountId"));
   const accountName = formData.get("accountName")?.toString().trim() || undefined;
@@ -50,7 +55,8 @@ export const action = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "请提供 Meta 广告账号 ID (act_123456789)。",
+      message: copy.accountIdRequired,
+      lang,
     });
   }
 
@@ -63,6 +69,7 @@ export const action = async ({ request }) => {
       accountName: accountName ?? null,
       userEmail: session.email ?? null,
       redirectPath: "/app/settings",
+      lang,
     });
 
     const redirectUri = resolveAbsoluteUrl("/auth/meta-ads/callback");
@@ -79,7 +86,24 @@ export const action = async ({ request }) => {
     return buildSettingsRedirect({
       provider: "meta-ads",
       status: "error",
-      message: "无法启动 Meta 授权，请检查应用配置。",
+      message: copy.startFailed,
+      lang,
     });
   }
+};
+
+function resolveLangFromRequest(request) {
+  const langParam = new URL(request.url).searchParams.get("lang");
+  return langParam && langParam.toLowerCase() === "zh" ? "zh" : "en";
+}
+
+const OAUTH_COPY = {
+  en: {
+    accountIdRequired: "Please provide a Meta Ads account ID (act_123456789).",
+    startFailed: "Could not start Meta authorization. Please check the app configuration.",
+  },
+  zh: {
+    accountIdRequired: "请提供 Meta 广告账号 ID (act_123456789)。",
+    startFailed: "无法启动 Meta 授权，请检查应用配置。",
+  },
 };

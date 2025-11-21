@@ -10,6 +10,7 @@ import { syncShopifyPayments } from "../services/sync/payment-payouts.server";
 import { syncAdProvider } from "../services/sync/ad-spend.server";
 import { requestPlanChange } from "../services/billing.server";
 import { CredentialProvider } from "@prisma/client";
+import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -93,6 +94,8 @@ export default function SettingsPage() {
   const { settings } = useLoaderData();
   const actionData = useActionData();
   const missingCostSkuCount = settings.missingCostSkuCount ?? 0;
+  const { lang } = useLocale();
+  const copy = SETTINGS_COPY[lang] ?? SETTINGS_COPY.en;
 
   return (
     <s-page heading="Workspace settings" subtitle="Plans, stores, integrations, and costs">
@@ -140,10 +143,8 @@ export default function SettingsPage() {
       <div id="costs">
         {missingCostSkuCount > 0 && (
           <s-section>
-            <s-banner tone="warning" title="部分 SKU 未配置成本">
-              <s-text variation="subdued">
-                {`已检测到 ${missingCostSkuCount} 个 SKU 没有成本配置，利润统计可能不准确。`}
-              </s-text>
+            <s-banner tone="warning" title={copy.missingCostTitle}>
+              <s-text variation="subdued">{copy.missingCostDescription(missingCostSkuCount)}</s-text>
             </s-banner>
           </s-section>
         )}
@@ -158,6 +159,19 @@ export default function SettingsPage() {
     </s-page>
   );
 }
+
+const SETTINGS_COPY = {
+  en: {
+    missingCostTitle: "Some SKUs are missing costs",
+    missingCostDescription: (count) =>
+      `Detected ${count} SKUs without costs configured; profit calculations may be inaccurate.`,
+  },
+  zh: {
+    missingCostTitle: "部分 SKU 未配置成本",
+    missingCostDescription: (count) =>
+      `已检测到 ${count} 个 SKU 没有成本配置，利润统计可能不准确。`,
+  },
+};
 
 function PlanOverview({ plan, planOptions }) {
   return (

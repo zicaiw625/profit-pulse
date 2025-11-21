@@ -5,6 +5,7 @@ import { ensureMerchantAndStore } from "../models/store.server";
 import { getOrderProfitTable } from "../services/reports.server";
 import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { formatCurrency, formatDateShort, formatPercent } from "../utils/formatting";
+import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -42,6 +43,8 @@ export default function OrdersPage() {
   const { orders, filters, currency } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
+  const { lang } = useLocale();
+  const copy = ORDERS_COPY[lang] ?? ORDERS_COPY.en;
   const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
     const value = searchParams.get(key);
     return value ? { key, value } : null;
@@ -116,10 +119,10 @@ export default function OrdersPage() {
         {!orders.length && (
           <s-card padding="base" tone="info">
             <s-text variation="subdued">
-              尚无订单数据，完成 Onboarding 或稍等同步即可看到结果。
+              {copy.emptyState}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/onboarding")}>
-              查看 Onboarding 清单
+              {copy.emptyStateCta}
             </s-button>
           </s-card>
         )}
@@ -127,6 +130,17 @@ export default function OrdersPage() {
     </s-page>
   );
 }
+
+const ORDERS_COPY = {
+  en: {
+    emptyState: "No orders yet. Finish onboarding or wait for sync to complete to see results.",
+    emptyStateCta: "View onboarding checklist",
+  },
+  zh: {
+    emptyState: "尚无订单数据，完成 Onboarding 或稍等同步即可看到结果。",
+    emptyStateCta: "查看 Onboarding 清单",
+  },
+};
 
 export function ErrorBoundary() {
   return boundary.error(useRouteError());

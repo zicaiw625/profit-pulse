@@ -8,6 +8,7 @@ import { ShopifyFetchProvider } from "../components/ShopifyFetchProvider";
 import { useLocale } from "../hooks/useLocale";
 import { TRANSLATION_KEYS } from "../constants/translations";
 import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+import { LanguageToggle } from "../components/LanguageToggle";
 
 const appLogger = createScopedLogger({ route: "app.loader" });
 
@@ -70,6 +71,9 @@ export default function App() {
           <LinkWithQuery to="/app/help">
             {t(TRANSLATION_KEYS.NAV_HELP)}
           </LinkWithQuery>
+          <div style={{ marginLeft: "auto" }}>
+            <LanguageToggle />
+          </div>
         </s-app-nav>
         <Outlet />
       </ShopifyFetchProvider>

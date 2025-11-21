@@ -5,6 +5,7 @@ import { ensureMerchantAndStore } from "../models/store.server";
 import { getProductProfitTable } from "../services/reports.server";
 import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { formatCurrency, formatPercent } from "../utils/formatting";
+import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -43,6 +44,8 @@ export default function ProductsPage() {
   const { products, filters, currency, hasMissingCost } = useLoaderData();
   const [searchParams] = useSearchParams();
   const buildAppUrl = useAppUrlBuilder();
+  const { lang } = useLocale();
+  const copy = PRODUCTS_COPY[lang] ?? PRODUCTS_COPY.en;
   const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
     const value = searchParams.get(key);
     return value ? { key, value } : null;
@@ -85,14 +88,12 @@ export default function ProductsPage() {
 
       {hasMissingCost && (
         <s-section>
-          <s-banner tone="warning" title="部分 SKU 未配置成本">
+          <s-banner tone="warning" title={copy.missingCostTitle}>
             <s-text variation="subdued">
-              {missingCostCount > 0
-                ? `${missingCostCount} 个 SKU 未配置成本，利润统计可能不准确。`
-                : "部分 SKU 未配置成本，利润统计可能不准确。"}
+              {copy.missingCostDescription(missingCostCount)}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/settings#costs")}>
-              去补成本
+              {copy.missingCostCta}
             </s-button>
           </s-banner>
         </s-section>
@@ -121,7 +122,9 @@ export default function ProductsPage() {
                     {product.hasMissingCost && (
                       <>
                         <br />
-                        <s-badge tone="critical">未配置成本，利润可能不准确</s-badge>
+                        <s-badge tone="critical">
+                          {copy.missingCostBadge}
+                        </s-badge>
                       </>
                     )}
                   </td>
@@ -138,10 +141,10 @@ export default function ProductsPage() {
         {!products.length && (
           <s-card padding="base" tone="info">
             <s-text variation="subdued">
-              尚无商品利润数据，完成 Onboarding 或上传成本后即可看到排名。
+              {copy.emptyState}
             </s-text>
             <s-button variant="secondary" href={buildAppUrl("/app/onboarding")}>
-              查看 Onboarding 清单
+              {copy.emptyStateCta}
             </s-button>
           </s-card>
         )}
@@ -149,6 +152,31 @@ export default function ProductsPage() {
     </s-page>
   );
 }
+
+const PRODUCTS_COPY = {
+  en: {
+    missingCostTitle: "Some SKUs are missing costs",
+    missingCostDescription: (count) =>
+      count > 0
+        ? `${count} SKUs are missing costs; profit may be inaccurate.`
+        : "Some SKUs are missing costs; profit may be inaccurate.",
+    missingCostCta: "Update costs",
+    missingCostBadge: "Missing cost, profit may be inaccurate",
+    emptyState: "No product profitability data yet. Finish onboarding or upload costs to see rankings.",
+    emptyStateCta: "View onboarding checklist",
+  },
+  zh: {
+    missingCostTitle: "部分 SKU 未配置成本",
+    missingCostDescription: (count) =>
+      count > 0
+        ? `${count} 个 SKU 未配置成本，利润统计可能不准确。`
+        : "部分 SKU 未配置成本，利润统计可能不准确。",
+    missingCostCta: "去补成本",
+    missingCostBadge: "未配置成本，利润可能不准确",
+    emptyState: "尚无商品利润数据，完成 Onboarding 或上传成本后即可看到排名。",
+    emptyStateCta: "查看 Onboarding 清单",
+  },
+};
 
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
