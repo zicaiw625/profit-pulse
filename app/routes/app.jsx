@@ -48,27 +48,43 @@ export const loader = async ({ request }) => {
 export default function App() {
   const { apiKey } = useLoaderData();
   const { t } = useLocale();
+  const navStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "12px 16px",
+    background: "var(--p-surface, #ffffff)",
+    borderBottom: "1px solid #e3e8ee",
+    position: "sticky",
+    top: 0,
+    zIndex: 20,
+  };
+  const linkStyle = {
+    textDecoration: "none",
+    color: "inherit",
+    fontWeight: 600,
+  };
 
   return (
     <AppProvider embedded apiKey={apiKey}>
       <ShopifyFetchProvider>
-        <s-app-nav>
-          <LinkWithQuery to="/app">
+        <s-app-nav style={navStyle}>
+          <LinkWithQuery to="/app" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/orders">
+          <LinkWithQuery to="/app/orders" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_ORDERS)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/products">
+          <LinkWithQuery to="/app/products" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_PRODUCTS)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/reconciliation">
+          <LinkWithQuery to="/app/reconciliation" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_RECONCILIATION)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/settings">
+          <LinkWithQuery to="/app/settings" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_SETTINGS)}
           </LinkWithQuery>
-          <LinkWithQuery to="/app/help">
+          <LinkWithQuery to="/app/help" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_HELP)}
           </LinkWithQuery>
           <div style={{ marginLeft: "auto" }}>
