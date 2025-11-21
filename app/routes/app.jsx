@@ -68,7 +68,7 @@ export default function App() {
   return (
     <AppProvider embedded apiKey={apiKey}>
       <ShopifyFetchProvider>
-        <s-app-nav style={navStyle}>
+        <div role="navigation" style={navStyle}>
           <LinkWithQuery to="/app" style={linkStyle}>
             {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
           </LinkWithQuery>
@@ -90,7 +90,7 @@ export default function App() {
           <div style={{ marginLeft: "auto" }}>
             <LanguageToggle />
           </div>
-        </s-app-nav>
+        </div>
         <Outlet />
       </ShopifyFetchProvider>
     </AppProvider>
