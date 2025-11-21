@@ -53,34 +53,34 @@ export default function ProductsPage() {
   const missingCostCount = products.filter((product) => product.hasMissingCost).length;
 
   return (
-    <s-page heading="Product profitability" subtitle="SKU level sales, COGS, and net profit">
-      <s-section heading="Filters">
+    <s-page heading={copy.heading} subtitle={copy.subtitle}>
+      <s-section heading={copy.filtersHeading}>
         <Form method="get">
           {preservedFormParams.map(({ key, value }) => (
             <input key={key} type="hidden" name={key} value={value} />
           ))}
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
-              Start date
+              {copy.startDate}
               <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
-              End date
+              {copy.endDate}
               <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
-              Sort by
+              {copy.sortBy}
               <select name="sort" defaultValue={filters.sort}>
-                <option value="netProfit">Net profit</option>
-                <option value="revenue">Revenue</option>
-                <option value="margin">Net margin</option>
+                <option value="netProfit">{copy.sortOptions.netProfit}</option>
+                <option value="revenue">{copy.sortOptions.revenue}</option>
+                <option value="margin">{copy.sortOptions.margin}</option>
               </select>
             </label>
             <s-button type="submit" variant="primary">
-              Apply
+              {copy.apply}
             </s-button>
             <s-button type="button" variant="tertiary" href={buildAppUrl("/app/products")}>
-              Reset
+              {copy.reset}
             </s-button>
           </s-stack>
         </Form>
@@ -99,17 +99,17 @@ export default function ProductsPage() {
         </s-section>
       )}
 
-      <s-section heading="Products">
+      <s-section heading={copy.tableHeading}>
         <s-data-table>
           <table>
             <thead>
               <tr>
-                <th align="left">Product</th>
-                <th align="right">Units</th>
-                <th align="right">Revenue</th>
-                <th align="right">COGS</th>
-                <th align="right">Net profit</th>
-                <th align="right">Net margin</th>
+                <th align="left">{copy.columns.product}</th>
+                <th align="right">{copy.columns.units}</th>
+                <th align="right">{copy.columns.revenue}</th>
+                <th align="right">{copy.columns.cogs}</th>
+                <th align="right">{copy.columns.netProfit}</th>
+                <th align="right">{copy.columns.margin}</th>
               </tr>
             </thead>
             <tbody>
@@ -155,6 +155,28 @@ export default function ProductsPage() {
 
 const PRODUCTS_COPY = {
   en: {
+    heading: "Product profitability",
+    subtitle: "SKU level sales, COGS, and net profit",
+    filtersHeading: "Filters",
+    startDate: "Start date",
+    endDate: "End date",
+    sortBy: "Sort by",
+    sortOptions: {
+      netProfit: "Net profit",
+      revenue: "Revenue",
+      margin: "Net margin",
+    },
+    apply: "Apply",
+    reset: "Reset",
+    tableHeading: "Products",
+    columns: {
+      product: "Product",
+      units: "Units",
+      revenue: "Revenue",
+      cogs: "COGS",
+      netProfit: "Net profit",
+      margin: "Net margin",
+    },
     missingCostTitle: "Some SKUs are missing costs",
     missingCostDescription: (count) =>
       count > 0
@@ -166,6 +188,28 @@ const PRODUCTS_COPY = {
     emptyStateCta: "View onboarding checklist",
   },
   zh: {
+    heading: "商品利润",
+    subtitle: "SKU 销售、成本与净利润",
+    filtersHeading: "筛选条件",
+    startDate: "起始日期",
+    endDate: "结束日期",
+    sortBy: "排序",
+    sortOptions: {
+      netProfit: "净利润",
+      revenue: "营收",
+      margin: "净利率",
+    },
+    apply: "应用",
+    reset: "重置",
+    tableHeading: "商品",
+    columns: {
+      product: "商品",
+      units: "件数",
+      revenue: "营收",
+      cogs: "成本",
+      netProfit: "净利润",
+      margin: "净利率",
+    },
     missingCostTitle: "部分 SKU 未配置成本",
     missingCostDescription: (count) =>
       count > 0

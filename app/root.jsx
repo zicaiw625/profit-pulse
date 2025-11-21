@@ -7,16 +7,18 @@ import {
   useLoaderData,
 } from "react-router";
 import { generateCspNonce } from "./utils/csp-nonce.server";
+import { getLanguageFromRequest } from "./utils/i18n";
 
-export const loader = () => {
-  return { cspNonce: generateCspNonce() };
+export const loader = ({ request }) => {
+  const lang = getLanguageFromRequest(request);
+  return { cspNonce: generateCspNonce(), lang };
 };
 
 export default function App() {
-  const { cspNonce } = useLoaderData();
+  const { cspNonce, lang } = useLoaderData();
 
   return (
-    <html lang="en">
+    <html lang={lang || "en"}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -46,4 +48,3 @@ export default function App() {
     </html>
   );
 }
-

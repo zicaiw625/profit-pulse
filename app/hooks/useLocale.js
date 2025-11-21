@@ -1,18 +1,25 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router";
-import { translate } from "../utils/i18n";
-
-const SUPPORTED_LANGS = ["en", "zh"];
-const DEFAULT_LANG = "en";
+import {
+  DEFAULT_LANG,
+  getLanguageFromSearchParams,
+  normalizeLanguage,
+  translate,
+} from "../utils/i18n";
 
 export function useLocale() {
   const [searchParams] = useSearchParams();
-  const langParam = (searchParams.get("lang") || "").toLowerCase();
-  const lang = SUPPORTED_LANGS.includes(langParam) ? langParam : DEFAULT_LANG;
+  const hasLangParam = searchParams.has("lang");
+  const langFromSearch = getLanguageFromSearchParams(searchParams);
+  const documentLang =
+    typeof document !== "undefined" && document?.documentElement?.lang
+      ? normalizeLanguage(document.documentElement.lang)
+      : null;
+  const lang = hasLangParam ? langFromSearch : documentLang || langFromSearch;
 
   const t = useMemo(() => {
     return (key) => translate(key, lang);
   }, [lang]);
 
-  return { lang, t };
+  return { lang: lang || DEFAULT_LANG, t };
 }

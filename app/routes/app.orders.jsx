@@ -51,52 +51,52 @@ export default function OrdersPage() {
   }).filter(Boolean);
 
   return (
-    <s-page heading="Order profitability" subtitle="Per-order revenue, cost, and net margin">
-      <s-section heading="Filters">
+    <s-page heading={copy.heading} subtitle={copy.subtitle}>
+      <s-section heading={copy.filtersHeading}>
         <Form method="get">
           {preservedFormParams.map(({ key, value }) => (
             <input key={key} type="hidden" name={key} value={value} />
           ))}
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
-              Start date
+              {copy.startDate}
               <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
-              End date
+              {copy.endDate}
               <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
-              Refund handling
+              {copy.refundHandling}
               <select name="refunds" defaultValue={filters.includeRefunds ? "included" : "excluded"}>
-                <option value="included">Include refunds</option>
-                <option value="excluded">Exclude refunded orders</option>
+                <option value="included">{copy.includeRefunds}</option>
+                <option value="excluded">{copy.excludeRefunds}</option>
               </select>
             </label>
             <s-button type="submit" variant="primary">
-              Apply
+              {copy.apply}
             </s-button>
             <s-button type="button" variant="tertiary" href={buildAppUrl("/app/orders")}>
-              Reset
+              {copy.reset}
             </s-button>
           </s-stack>
         </Form>
       </s-section>
 
-      <s-section heading="Orders">
+      <s-section heading={copy.tableHeading}>
         <s-data-table>
           <table>
             <thead>
               <tr>
-                <th align="left">Order</th>
-                <th align="left">Date</th>
-                <th align="right">Revenue</th>
-                <th align="right">COGS</th>
-                <th align="right">Shipping</th>
-                <th align="right">Fees</th>
-                <th align="right">Advertising</th>
-                <th align="right">Net profit</th>
-                <th align="right">Margin</th>
+                <th align="left">{copy.columns.order}</th>
+                <th align="left">{copy.columns.date}</th>
+                <th align="right">{copy.columns.revenue}</th>
+                <th align="right">{copy.columns.cogs}</th>
+                <th align="right">{copy.columns.shipping}</th>
+                <th align="right">{copy.columns.fees}</th>
+                <th align="right">{copy.columns.advertising}</th>
+                <th align="right">{copy.columns.netProfit}</th>
+                <th align="right">{copy.columns.margin}</th>
               </tr>
             </thead>
             <tbody>
@@ -133,10 +133,54 @@ export default function OrdersPage() {
 
 const ORDERS_COPY = {
   en: {
+    heading: "Order profitability",
+    subtitle: "Per-order revenue, cost, and net margin",
+    filtersHeading: "Filters",
+    startDate: "Start date",
+    endDate: "End date",
+    refundHandling: "Refund handling",
+    includeRefunds: "Include refunds",
+    excludeRefunds: "Exclude refunded orders",
+    apply: "Apply",
+    reset: "Reset",
+    tableHeading: "Orders",
+    columns: {
+      order: "Order",
+      date: "Date",
+      revenue: "Revenue",
+      cogs: "COGS",
+      shipping: "Shipping",
+      fees: "Fees",
+      advertising: "Advertising",
+      netProfit: "Net profit",
+      margin: "Margin",
+    },
     emptyState: "No orders yet. Finish onboarding or wait for sync to complete to see results.",
     emptyStateCta: "View onboarding checklist",
   },
   zh: {
+    heading: "订单利润",
+    subtitle: "逐单营收、成本与净利率",
+    filtersHeading: "筛选条件",
+    startDate: "起始日期",
+    endDate: "结束日期",
+    refundHandling: "退款处理",
+    includeRefunds: "包含退款订单",
+    excludeRefunds: "排除退款订单",
+    apply: "应用",
+    reset: "重置",
+    tableHeading: "订单列表",
+    columns: {
+      order: "订单",
+      date: "日期",
+      revenue: "营收",
+      cogs: "成本",
+      shipping: "运费",
+      fees: "手续费",
+      advertising: "广告",
+      netProfit: "净利润",
+      margin: "净利率",
+    },
     emptyState: "尚无订单数据，完成 Onboarding 或稍等同步即可看到结果。",
     emptyStateCta: "查看 Onboarding 清单",
   },

@@ -11,6 +11,7 @@ import { syncAdProvider } from "../services/sync/ad-spend.server";
 import { requestPlanChange } from "../services/billing.server";
 import { CredentialProvider } from "@prisma/client";
 import { useLocale } from "../hooks/useLocale";
+import { getLanguageFromRequest } from "../utils/i18n";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -24,37 +25,39 @@ export const action = async ({ request }) => {
   const store = await ensureMerchantAndStore(session.shop, session.email);
   const formData = await request.formData();
   const intent = formData.get("intent");
+  const lang = getLanguageFromRequest(request);
+  const actionsCopy = (SETTINGS_COPY[lang] ?? SETTINGS_COPY.en).actions;
 
   try {
     switch (intent) {
       case "import-costs": {
         const file = formData.get("file");
         if (!(file instanceof File)) {
-          throw new Error("CSV file is required");
+          throw new Error(actionsCopy.csvRequired);
         }
         const csv = await file.text();
         await importSkuCostsFromCsv({ storeId: store.id, csv, defaultCurrency: store.currency });
-        return json({ success: true, message: "SKU costs updated." });
+        return json({ success: true, message: actionsCopy.importSuccess });
       }
       case "seed-demo-costs":
         await seedDemoCostConfiguration({ storeId: store.id, currency: store.currency });
-        return json({ success: true, message: "Demo cost templates imported." });
+        return json({ success: true, message: actionsCopy.seedSuccess });
       case "sync-shopify-orders":
         await syncShopifyOrders({ store, session, days: 30, useRequestedLookback: true });
         return json({
           success: true,
-          message: "Shopify orders sync started for the last 30 days. Refresh in a few minutes.",
+          message: actionsCopy.syncOrders,
         });
       case "sync-shopify-payments":
         await syncShopifyPayments({ store, session });
-        return json({ success: true, message: "Shopify Payments refreshed." });
+        return json({ success: true, message: actionsCopy.syncPayments });
       case "sync-meta-ads":
         await syncAdProvider({ store, provider: CredentialProvider.META_ADS, days: 30 });
-        return json({ success: true, message: "Meta Ads sync started." });
+        return json({ success: true, message: actionsCopy.syncMetaAds });
       case "change-plan": {
         const planTier = formData.get("planTier");
         if (!planTier) {
-          throw new Error("Select a plan to continue.");
+          throw new Error(actionsCopy.selectPlan);
         }
         const confirmationUrl = await requestPlanChange({
           planTier,
@@ -65,17 +68,14 @@ export const action = async ({ request }) => {
         return redirect(confirmationUrl);
       }
       default:
-        return json({ success: false, message: "Unsupported action." }, { status: 400 });
+        return json({ success: false, message: actionsCopy.unsupported }, { status: 400 });
     }
   } catch (error) {
     if (error instanceof MissingShopifyScopeError) {
       return json(
         {
           success: false,
-          message:
-            "This shop hasn't granted order permissions yet. " +
-            "Please uninstall the app from your store and install it again " +
-            "so it can request the \"read_orders\" scope.",
+          message: actionsCopy.missingScope,
         },
         { status: 400 },
       );
@@ -83,7 +83,7 @@ export const action = async ({ request }) => {
     return json(
       {
         success: false,
-        message: error.message || "Something went wrong.",
+        message: error.message || actionsCopy.genericError,
       },
       { status: 400 },
     );
@@ -98,27 +98,27 @@ export default function SettingsPage() {
   const copy = SETTINGS_COPY[lang] ?? SETTINGS_COPY.en;
 
   return (
-    <s-page heading="Workspace settings" subtitle="Plans, stores, integrations, and costs">
+    <s-page heading={copy.pageTitle} subtitle={copy.pageSubtitle}>
       {actionData?.message && (
         <s-section>
           <s-banner tone={actionData.success ? "success" : "critical"} title={actionData.message} />
         </s-section>
       )}
 
-      <s-section heading="Plan & billing">
-        <PlanOverview plan={settings.plan} planOptions={settings.planOptions} />
+      <s-section heading={copy.sections.plan}>
+        <PlanOverview plan={settings.plan} planOptions={settings.planOptions} copy={copy.plan} />
       </s-section>
 
-      <s-section heading="Connected stores">
+      <s-section heading={copy.sections.stores}>
         <s-data-table>
           <table>
             <thead>
               <tr>
-                <th align="left">Shop domain</th>
-                <th align="left">Status</th>
-                <th align="left">Currency</th>
-                <th align="left">Timezone</th>
-                <th align="left">Installed</th>
+                <th align="left">{copy.storesTable.shopDomain}</th>
+                <th align="left">{copy.storesTable.status}</th>
+                <th align="left">{copy.storesTable.currency}</th>
+                <th align="left">{copy.storesTable.timezone}</th>
+                <th align="left">{copy.storesTable.installed}</th>
               </tr>
             </thead>
             <tbody>
@@ -136,25 +136,29 @@ export default function SettingsPage() {
         </s-data-table>
       </s-section>
 
-      <s-section heading="Integrations">
-        <IntegrationList integrations={settings.integrations} />
+      <s-section heading={copy.sections.integrations}>
+        <IntegrationList integrations={settings.integrations} copy={copy.integrations} />
       </s-section>
 
       <div id="costs">
         {missingCostSkuCount > 0 && (
           <s-section>
-            <s-banner tone="warning" title={copy.missingCostTitle}>
-              <s-text variation="subdued">{copy.missingCostDescription(missingCostSkuCount)}</s-text>
+            <s-banner tone="warning" title={copy.missingCost.title}>
+              <s-text variation="subdued">{copy.missingCost.description(missingCostSkuCount)}</s-text>
             </s-banner>
           </s-section>
         )}
-        <s-section heading="Cost configuration">
-          <CostConfiguration costConfig={settings.costConfig} primaryCurrency={settings.primaryCurrency} />
+        <s-section heading={copy.sections.costs}>
+          <CostConfiguration
+            costConfig={settings.costConfig}
+            primaryCurrency={settings.primaryCurrency}
+            copy={copy.costs}
+          />
         </s-section>
       </div>
 
-      <s-section heading="Manual sync tools">
-        <SyncTools />
+      <s-section heading={copy.sections.manualSync}>
+        <SyncTools copy={copy.syncTools} />
       </s-section>
     </s-page>
   );
@@ -162,18 +166,148 @@ export default function SettingsPage() {
 
 const SETTINGS_COPY = {
   en: {
-    missingCostTitle: "Some SKUs are missing costs",
-    missingCostDescription: (count) =>
-      `Detected ${count} SKUs without costs configured; profit calculations may be inaccurate.`,
+    pageTitle: "Workspace settings",
+    pageSubtitle: "Plans, stores, integrations, and costs",
+    sections: {
+      plan: "Plan & billing",
+      stores: "Connected stores",
+      integrations: "Integrations",
+      costs: "Cost configuration",
+      manualSync: "Manual sync tools",
+    },
+    missingCost: {
+      title: "Some SKUs are missing costs",
+      description: (count) =>
+        `Detected ${count} SKUs without costs configured; profit calculations may be inaccurate.`,
+    },
+    plan: {
+      trialEnds: "Trial ends",
+      orderAllowance: "Order allowance",
+      storeAllowance: "Store allowance",
+      switchPlan: "Switch plan",
+      updatePlan: "Update plan",
+      notAvailable: "N/A",
+    },
+    storesTable: {
+      shopDomain: "Shop domain",
+      status: "Status",
+      currency: "Currency",
+      timezone: "Timezone",
+      installed: "Installed",
+    },
+    integrations: {
+      notConnected: "Not connected.",
+      statusLabel: "Status",
+      lastSyncLabel: "Last sync",
+      never: "Never",
+      cards: {
+        shopify: "Shopify",
+        metaAds: "Meta Ads",
+        shopifyPayments: "Shopify Payments",
+        paypal: "PayPal",
+      },
+    },
+    costs: {
+      uploadLabel: "Upload SKU cost CSV",
+      import: "Import",
+      seedDemo: "Seed demo costs",
+      tableHeaders: {
+        sku: "SKU",
+        cost: (currency) => `Cost (${currency})`,
+      },
+    },
+    syncTools: {
+      syncOrders: "Sync Shopify orders",
+      syncPayments: "Sync Shopify Payments",
+      syncMetaAds: "Sync Meta Ads",
+    },
+    actions: {
+      csvRequired: "CSV file is required",
+      importSuccess: "SKU costs updated.",
+      seedSuccess: "Demo cost templates imported.",
+      syncOrders: "Shopify orders sync started for the last 30 days. Refresh in a few minutes.",
+      syncPayments: "Shopify Payments refreshed.",
+      syncMetaAds: "Meta Ads sync started.",
+      selectPlan: "Select a plan to continue.",
+      unsupported: "Unsupported action.",
+      missingScope:
+        "This shop hasn't granted order permissions yet. Please uninstall the app from your store and install it again so it can request the \"read_orders\" scope.",
+      genericError: "Something went wrong.",
+    },
   },
   zh: {
-    missingCostTitle: "部分 SKU 未配置成本",
-    missingCostDescription: (count) =>
-      `已检测到 ${count} 个 SKU 没有成本配置，利润统计可能不准确。`,
+    pageTitle: "工作区设置",
+    pageSubtitle: "套餐、店铺、集成与成本",
+    sections: {
+      plan: "套餐与计费",
+      stores: "已连接店铺",
+      integrations: "集成",
+      costs: "成本配置",
+      manualSync: "手动同步工具",
+    },
+    missingCost: {
+      title: "部分 SKU 未配置成本",
+      description: (count) =>
+        `已检测到 ${count} 个 SKU 没有成本配置，利润统计可能不准确。`,
+    },
+    plan: {
+      trialEnds: "试用结束时间",
+      orderAllowance: "订单额度",
+      storeAllowance: "店铺额度",
+      switchPlan: "切换套餐",
+      updatePlan: "更新套餐",
+      notAvailable: "暂无",
+    },
+    storesTable: {
+      shopDomain: "店铺域名",
+      status: "状态",
+      currency: "货币",
+      timezone: "时区",
+      installed: "安装时间",
+    },
+    integrations: {
+      notConnected: "未连接。",
+      statusLabel: "状态",
+      lastSyncLabel: "最近同步",
+      never: "从未同步",
+      cards: {
+        shopify: "Shopify",
+        metaAds: "Meta Ads",
+        shopifyPayments: "Shopify Payments",
+        paypal: "PayPal",
+      },
+    },
+    costs: {
+      uploadLabel: "上传 SKU 成本 CSV",
+      import: "导入",
+      seedDemo: "导入演示成本",
+      tableHeaders: {
+        sku: "SKU",
+        cost: (currency) => `成本（${currency}）`,
+      },
+    },
+    syncTools: {
+      syncOrders: "同步 Shopify 订单",
+      syncPayments: "同步 Shopify Payments",
+      syncMetaAds: "同步 Meta Ads",
+    },
+    actions: {
+      csvRequired: "需要上传 CSV 文件",
+      importSuccess: "SKU 成本已更新。",
+      seedSuccess: "演示成本模板已导入。",
+      syncOrders: "已开始同步最近 30 天的 Shopify 订单，几分钟后刷新查看。",
+      syncPayments: "Shopify Payments 已刷新。",
+      syncMetaAds: "Meta Ads 同步已启动。",
+      selectPlan: "请选择套餐后再继续。",
+      unsupported: "不支持的操作。",
+      missingScope:
+        "店铺尚未授予订单权限。请先在商店卸载应用并重新安装，以便重新请求 \"read_orders\" 权限。",
+      genericError: "发生错误，请稍后再试。",
+    },
   },
 };
 
-function PlanOverview({ plan, planOptions }) {
+function PlanOverview({ plan, planOptions, copy }) {
   return (
     <s-stack direction="block" gap="base">
       <s-card padding="base">
@@ -182,17 +316,17 @@ function PlanOverview({ plan, planOptions }) {
           {plan.currency} {plan.price} / {plan.intervalLabel}
         </s-display-text>
         <s-text variation="subdued">
-          Trial ends: {plan.trialEndsAt ? new Date(plan.trialEndsAt).toLocaleDateString() : "N/A"}
+          {copy.trialEnds}: {plan.trialEndsAt ? new Date(plan.trialEndsAt).toLocaleDateString() : copy.notAvailable}
         </s-text>
         <s-text variation="subdued">
-          Order allowance: {plan.orderLimit.toLocaleString()} · Store allowance:{" "}
+          {copy.orderAllowance}: {plan.orderLimit.toLocaleString()} · {copy.storeAllowance}:{" "}
           {plan.storeLimit.toLocaleString()}
         </s-text>
       </s-card>
       <Form method="post">
         <input type="hidden" name="intent" value="change-plan" />
         <label>
-          Switch plan
+          {copy.switchPlan}
           <select name="planTier" defaultValue={plan.tier}>
             {planOptions.map((option) => (
               <option key={option.tier} value={option.tier}>
@@ -202,36 +336,42 @@ function PlanOverview({ plan, planOptions }) {
           </select>
         </label>
         <s-button type="submit" variant="primary">
-          Update plan
+          {copy.updatePlan}
         </s-button>
       </Form>
     </s-stack>
   );
 }
 
-function IntegrationList({ integrations }) {
+function IntegrationList({ integrations, copy }) {
   return (
     <s-stack direction="block" gap="base">
-      <IntegrationCard title="Shopify" integration={integrations.shopify} />
-      <IntegrationCard title="Meta Ads" integration={integrations.ads.find((item) => item.id === "META_ADS")} />
+      <IntegrationCard title={copy.cards.shopify} integration={integrations.shopify} copy={copy} />
       <IntegrationCard
-        title="Shopify Payments"
-        integration={integrations.payments.find((item) => item.id === "SHOPIFY_PAYMENTS")}
+        title={copy.cards.metaAds}
+        integration={integrations.ads.find((item) => item.id === "META_ADS")}
+        copy={copy}
       />
       <IntegrationCard
-        title="PayPal"
+        title={copy.cards.shopifyPayments}
+        integration={integrations.payments.find((item) => item.id === "SHOPIFY_PAYMENTS")}
+        copy={copy}
+      />
+      <IntegrationCard
+        title={copy.cards.paypal}
         integration={integrations.payments.find((item) => item.id === "PAYPAL")}
+        copy={copy}
       />
     </s-stack>
   );
 }
 
-function IntegrationCard({ title, integration }) {
+function IntegrationCard({ title, integration, copy }) {
   if (!integration) {
     return (
       <s-card padding="base">
         <s-heading>{title}</s-heading>
-        <s-text variation="subdued">Not connected.</s-text>
+        <s-text variation="subdued">{copy.notConnected}</s-text>
       </s-card>
     );
   }
@@ -239,41 +379,44 @@ function IntegrationCard({ title, integration }) {
   return (
     <s-card padding="base">
       <s-heading>{title}</s-heading>
-      <s-text variation="subdued">Status: {integration.status}</s-text>
       <s-text variation="subdued">
-        Last sync: {integration.lastSyncedAt ? new Date(integration.lastSyncedAt).toLocaleString() : "Never"}
+        {copy.statusLabel}: {integration.status}
+      </s-text>
+      <s-text variation="subdued">
+        {copy.lastSyncLabel}:{" "}
+        {integration.lastSyncedAt ? new Date(integration.lastSyncedAt).toLocaleString() : copy.never}
       </s-text>
     </s-card>
   );
 }
 
-function CostConfiguration({ costConfig, primaryCurrency }) {
+function CostConfiguration({ costConfig, primaryCurrency, copy }) {
   return (
     <s-stack direction="block" gap="base">
       <Form method="post" encType="multipart/form-data">
         <input type="hidden" name="intent" value="import-costs" />
         <s-stack direction="inline" gap="base" wrap align="end">
           <label>
-            Upload SKU cost CSV
+            {copy.uploadLabel}
             <input type="file" name="file" accept=".csv,text/csv" />
           </label>
           <s-button type="submit" variant="primary">
-            Import
+            {copy.import}
           </s-button>
         </s-stack>
       </Form>
       <Form method="post">
         <input type="hidden" name="intent" value="seed-demo-costs" />
         <s-button type="submit" variant="secondary">
-          Seed demo costs
+          {copy.seedDemo}
         </s-button>
       </Form>
       <s-data-table>
         <table>
           <thead>
             <tr>
-              <th align="left">SKU</th>
-              <th align="right">Cost ({primaryCurrency})</th>
+              <th align="left">{copy.tableHeaders.sku}</th>
+              <th align="right">{copy.tableHeaders.cost(primaryCurrency)}</th>
             </tr>
           </thead>
           <tbody>
@@ -290,25 +433,25 @@ function CostConfiguration({ costConfig, primaryCurrency }) {
   );
 }
 
-function SyncTools() {
+function SyncTools({ copy }) {
   return (
     <s-stack direction="inline" gap="base" wrap>
       <Form method="post">
         <input type="hidden" name="intent" value="sync-shopify-orders" />
         <s-button type="submit" variant="secondary">
-          Sync Shopify orders
+          {copy.syncOrders}
         </s-button>
       </Form>
       <Form method="post">
         <input type="hidden" name="intent" value="sync-shopify-payments" />
         <s-button type="submit" variant="secondary">
-          Sync Shopify Payments
+          {copy.syncPayments}
         </s-button>
       </Form>
       <Form method="post">
         <input type="hidden" name="intent" value="sync-meta-ads" />
         <s-button type="submit" variant="secondary">
-          Sync Meta Ads
+          {copy.syncMetaAds}
         </s-button>
       </Form>
     </s-stack>

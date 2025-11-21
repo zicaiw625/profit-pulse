@@ -60,6 +60,7 @@ export default function DashboardIndex() {
     (card) => card.key === "netRevenue",
   );
   const revenueBasis = Number(netRevenueCard?.value ?? 0);
+  const ui = DASHBOARD_UI[lang] ?? DASHBOARD_UI.en;
   const copy = DASHBOARD_COPY[lang] ?? DASHBOARD_COPY.en;
   const missingCostPercent = missingCost
     ? (missingCost.percent * 100).toFixed(1)
@@ -112,43 +113,48 @@ export default function DashboardIndex() {
           ))}
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
-              Start date
+              {ui.filters.startDate}
               <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
-              End date
+              {ui.filters.endDate}
               <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
-              Quick range
+              {ui.filters.quickRange}
               <select name="days" defaultValue={filters.days || "14"}>
-                <option value="7">Last 7 days</option>
-                <option value="14">Last 14 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="60">Last 60 days</option>
+                <option value="7">{ui.filters.quickRanges.last7}</option>
+                <option value="14">{ui.filters.quickRanges.last14}</option>
+                <option value="30">{ui.filters.quickRanges.last30}</option>
+                <option value="60">{ui.filters.quickRanges.last60}</option>
               </select>
             </label>
             <s-button type="submit" variant="primary">
-              Apply
+              {ui.filters.apply}
             </s-button>
             <s-button
               type="button"
               variant="tertiary"
               href={buildAppUrl("/app")}
             >
-              Reset
+              {ui.filters.reset}
             </s-button>
           </s-stack>
         </Form>
       </s-section>
       {pendingSync ? (
-        <DashboardPlaceholder copy={copy} />
+        <DashboardPlaceholder copy={copy} placeholder={ui.placeholder} />
       ) : (
         <>
           <s-section heading={`${t(TRANSLATION_KEYS.DASHBOARD_PERFORMANCE)} (${overview.rangeLabel})`}>
             <s-stack direction="inline" gap="base" wrap>
               {localizedCards.map((card) => (
-                <MetricCard key={card.label} card={card} currency={overview.currency} />
+                <MetricCard
+                  key={card.label}
+                  card={card}
+                  currency={overview.currency}
+                  deltaSuffix={ui.metricDeltaSuffix}
+                />
               ))}
             </s-stack>
           </s-section>
@@ -175,6 +181,7 @@ export default function DashboardIndex() {
               slices={overview.costBreakdown}
               revenue={revenueBasis}
               currency={overview.currency}
+              copy={ui.costChart}
             />
           </s-section>
 
@@ -183,12 +190,12 @@ export default function DashboardIndex() {
               <table>
                 <thead>
                   <tr>
-                    <th align="left">Product</th>
-                    <th align="right">Units</th>
-                    <th align="right">Revenue</th>
-                    <th align="right">COGS</th>
-                    <th align="right">Net profit</th>
-                    <th align="right">Margin</th>
+                    <th align="left">{ui.productsTable.product}</th>
+                    <th align="right">{ui.productsTable.units}</th>
+                    <th align="right">{ui.productsTable.revenue}</th>
+                    <th align="right">{ui.productsTable.cogs}</th>
+                    <th align="right">{ui.productsTable.netProfit}</th>
+                    <th align="right">{ui.productsTable.margin}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -213,16 +220,20 @@ export default function DashboardIndex() {
         </>
       )}
 
-      <s-section slot="aside" heading="Plan usage">
-        <PlanUsageCard planStatus={planStatus} currency={overview.currency} buildAppUrl={buildAppUrl} />
+      <s-section slot="aside" heading={ui.planUsageHeading}>
+        <PlanUsageCard
+          planStatus={planStatus}
+          buildAppUrl={buildAppUrl}
+          copy={ui.planCard}
+        />
       </s-section>
 
-      <s-section slot="aside" heading="Data coverage">
+      <s-section slot="aside" heading={ui.dataCoverageHeading}>
         <s-card padding="base">
-          <s-text variation="subdued">Reporting window</s-text>
+          <s-text variation="subdued">{ui.reportingWindow}</s-text>
           <s-display-text size="small">{overview.rangeLabel}</s-display-text>
           <s-text variation="subdued">
-            Updated in {overview.timezone ?? "UTC"}
+            {ui.updatedIn} {overview.timezone ?? "UTC"}
           </s-text>
         </s-card>
       </s-section>
@@ -231,7 +242,7 @@ export default function DashboardIndex() {
 }
 
 
-function CostCompositionChart({ slices, revenue, currency }) {
+function CostCompositionChart({ slices, revenue, currency, copy }) {
   const sanitized = (slices ?? []).map((slice) => ({
     label: slice.label,
     amount: Math.max(0, Number(slice.amount ?? 0)),
@@ -242,7 +253,7 @@ function CostCompositionChart({ slices, revenue, currency }) {
   if (!sanitized.length || totalAmount <= 0) {
     return (
       <s-card padding="base">
-        <s-text variation="subdued">No cost data available for this range.</s-text>
+        <s-text variation="subdued">{copy.empty}</s-text>
       </s-card>
     );
   }
@@ -330,7 +341,7 @@ function CostCompositionChart({ slices, revenue, currency }) {
               padding: "0.75rem",
             }}
           >
-            <s-text variation="subdued">Revenue basis</s-text>
+            <s-text variation="subdued">{copy.revenueBasis}</s-text>
             <s-heading>{formatCurrency(revenue, currency)}</s-heading>
           </div>
         </div>
@@ -355,7 +366,7 @@ function CostCompositionChart({ slices, revenue, currency }) {
               />
               <s-text strong>{slice.label}</s-text>
               <s-text variation="subdued">
-                {formatPercent(slice.share)} of revenue
+                {formatPercent(slice.share)} {copy.shareOfRevenue}
               </s-text>
               <s-text variation="subdued">
                 {formatCurrency(slice.amount, currency)}
@@ -367,6 +378,101 @@ function CostCompositionChart({ slices, revenue, currency }) {
     </s-card>
   );
 }
+
+const DASHBOARD_UI = {
+  en: {
+    filters: {
+      startDate: "Start date",
+      endDate: "End date",
+      quickRange: "Quick range",
+      quickRanges: {
+        last7: "Last 7 days",
+        last14: "Last 14 days",
+        last30: "Last 30 days",
+        last60: "Last 60 days",
+      },
+      apply: "Apply",
+      reset: "Reset",
+    },
+    productsTable: {
+      product: "Product",
+      units: "Units",
+      revenue: "Revenue",
+      cogs: "COGS",
+      netProfit: "Net profit",
+      margin: "Margin",
+    },
+    planUsageHeading: "Plan usage",
+    dataCoverageHeading: "Data coverage",
+    reportingWindow: "Reporting window",
+    updatedIn: "Updated in",
+    metricDeltaSuffix: "vs. prior period",
+    costChart: {
+      empty: "No cost data available for this range.",
+      revenueBasis: "Revenue basis",
+      shareOfRevenue: "of revenue",
+    },
+    planCard: {
+      emptyPlan: "No subscription detected for this store.",
+      statusLabel: "Status",
+      managePlan: "Manage plan",
+      ordersLabel: "orders",
+      unknownStatus: "UNKNOWN",
+    },
+    placeholder: {
+      heading: "Demo preview",
+      revenue: "Revenue",
+      netProfit: "Net profit",
+      roas: "ROAS",
+    },
+  },
+  zh: {
+    filters: {
+      startDate: "起始日期",
+      endDate: "结束日期",
+      quickRange: "快捷区间",
+      quickRanges: {
+        last7: "近 7 天",
+        last14: "近 14 天",
+        last30: "近 30 天",
+        last60: "近 60 天",
+      },
+      apply: "应用",
+      reset: "重置",
+    },
+    productsTable: {
+      product: "商品",
+      units: "件数",
+      revenue: "营收",
+      cogs: "成本",
+      netProfit: "净利润",
+      margin: "净利率",
+    },
+    planUsageHeading: "套餐用量",
+    dataCoverageHeading: "数据覆盖",
+    reportingWindow: "统计区间",
+    updatedIn: "时区",
+    metricDeltaSuffix: "较上一周期",
+    costChart: {
+      empty: "该时间段暂无成本数据。",
+      revenueBasis: "营收基数",
+      shareOfRevenue: "占营收",
+    },
+    planCard: {
+      emptyPlan: "未检测到订阅。",
+      statusLabel: "状态",
+      managePlan: "管理套餐",
+      ordersLabel: "订单",
+      unknownStatus: "未知",
+    },
+    placeholder: {
+      heading: "示例预览",
+      revenue: "营收",
+      netProfit: "净利润",
+      roas: "ROAS",
+    },
+  },
+};
 
 const DASHBOARD_COPY = {
   en: {
@@ -414,7 +520,7 @@ const CARD_LABEL_MAP = {
   roas: TRANSLATION_KEYS.DASHBOARD_CARD_ROAS,
 };
 
-function MetricCard({ card, currency }) {
+function MetricCard({ card, currency, deltaSuffix = "vs. prior period" }) {
   const trendEmoji = card.trend === "up" ? "↗︎" : "↘︎";
   let value;
   if (card.formatter === "percentage") {
@@ -428,7 +534,7 @@ function MetricCard({ card, currency }) {
   }
   const deltaText =
     typeof card.deltaPercentage === "number"
-      ? `${card.deltaPercentage}% vs. prior period`
+      ? `${card.deltaPercentage}% ${deltaSuffix}`
       : card.deltaLabel ?? "—";
   const hasTrendArrow = card.trend === "up" || card.trend === "down";
   const tone =
@@ -464,24 +570,24 @@ function TrendPreview({ label, data }) {
   );
 }
 
-function PlanUsageCard({ planStatus, buildAppUrl }) {
+function PlanUsageCard({ planStatus, buildAppUrl, copy }) {
   if (!planStatus) {
     return (
       <s-card padding="base">
-        <s-text variation="subdued">No subscription detected for this store.</s-text>
+        <s-text variation="subdued">{copy.emptyPlan}</s-text>
       </s-card>
     );
   }
-  const usage = `${formatOrderCount(planStatus.orderUsage)} / ${formatOrderCount(planStatus.orderLimit)} orders`;
+  const usage = `${formatOrderCount(planStatus.orderUsage)} / ${formatOrderCount(planStatus.orderLimit)} ${copy.ordersLabel}`;
   return (
     <s-card padding="base">
       <s-text variation="subdued">{planStatus.planName}</s-text>
       <s-display-text size="small">{usage}</s-display-text>
       <s-text variation="subdued">
-        Status: {planStatus.planStatus ?? "UNKNOWN"}
+        {copy.statusLabel}: {planStatus.planStatus ?? copy.unknownStatus}
       </s-text>
       <s-button variant="secondary" href={buildAppUrl("/app/settings")}>
-        Manage plan
+        {copy.managePlan}
       </s-button>
     </s-card>
   );
@@ -491,24 +597,24 @@ function formatOrderCount(value) {
   return Number(value ?? 0).toLocaleString();
 }
 
-function DashboardPlaceholder({ copy }) {
+function DashboardPlaceholder({ copy, placeholder }) {
   return (
-    <s-section heading="Demo preview">
+    <s-section heading={placeholder.heading}>
       <s-card padding="base">
         <s-text variation="subdued">
           {copy.placeholderDescription}
         </s-text>
         <s-stack direction="inline" gap="base" wrap style={{ marginTop: "1rem" }}>
           <s-card padding="base">
-            <s-text variation="subdued">Revenue</s-text>
+            <s-text variation="subdued">{placeholder.revenue}</s-text>
             <s-display-text size="small">—</s-display-text>
           </s-card>
           <s-card padding="base">
-            <s-text variation="subdued">Net profit</s-text>
+            <s-text variation="subdued">{placeholder.netProfit}</s-text>
             <s-display-text size="small">—</s-display-text>
           </s-card>
           <s-card padding="base">
-            <s-text variation="subdued">ROAS</s-text>
+            <s-text variation="subdued">{placeholder.roas}</s-text>
             <s-display-text size="small">—</s-display-text>
           </s-card>
         </s-stack>
