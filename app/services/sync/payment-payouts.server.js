@@ -4,6 +4,7 @@ import { startSyncJob, finishSyncJob, failSyncJob } from "./jobs.server.js";
 import { mapWithConcurrency } from "../../utils/concurrency.server.js";
 import { fetchPaypalPayouts } from "../payments/paypal.server.js";
 import { createScopedLogger, serializeError } from "../../utils/logger.server.js";
+import { apiVersion as SHOPIFY_API_VERSION } from "../../shopify.server.js";
 
 const { CredentialProvider, SyncJobType } = pkg;
 
@@ -70,8 +71,67 @@ async function loadShopifyApi() {
   return module.default ?? module.shopify ?? module;
 }
 
+function createFetchRestClient(session) {
+  const version =
+    typeof SHOPIFY_API_VERSION === "string"
+      ? SHOPIFY_API_VERSION
+      : String(SHOPIFY_API_VERSION);
+  const baseUrl = `https://${session.shop}/admin/api/${version}`;
+
+  return {
+    async get({ path, query }) {
+      const search = new URLSearchParams();
+      Object.entries(query ?? {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          search.set(key, String(value));
+        }
+      });
+
+      const url = `${baseUrl}/${path}${
+        search.toString() ? `?${search.toString()}` : ""
+      }`;
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": session.accessToken,
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(
+          `Shopify REST request failed (${response.status}): ${
+            text || response.statusText
+          }`,
+        );
+      }
+
+      const body = await response.json();
+      const pageInfo = parseLinkHeaderForNextPage(response.headers.get("link"));
+      return { body, pageInfo };
+    },
+  };
+}
+
+function parseLinkHeaderForNextPage(linkHeader) {
+  if (!linkHeader) return undefined;
+
+  const parts = linkHeader.split(",").map((part) => part.trim());
+  for (const part of parts) {
+    const match = part.match(/<([^>]+)>; rel="next"/i);
+    if (!match) continue;
+    const url = new URL(match[1]);
+    const pageInfo = url.searchParams.get("page_info");
+    if (pageInfo) {
+      return { nextPage: { query: { page_info: pageInfo } } };
+    }
+  }
+  return undefined;
+}
+
 function createRestClient(shopifyApi, session) {
-  // 有些版本是 shopifyApi.api.clients，有些是 shopifyApi.clients
   const api = shopifyApi?.api ?? shopifyApi;
 
   if (api?.clients?.Rest) {
@@ -81,8 +141,8 @@ function createRestClient(shopifyApi, session) {
     return new api.clients.rest({ session });
   }
 
-  // 理论上不会走到这里，如果走到说明 SDK 形态完全不一样了
-  throw new Error("Shopify REST client not available on shopifyApi");
+  // 2. 如果 SDK 上根本没有 REST client，就退回到我们手写的 fetch 版本
+  return createFetchRestClient(session);
 }
 
 export async function syncShopifyPayments({ store, session, days = 7 }) {
