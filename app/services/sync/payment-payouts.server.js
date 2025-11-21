@@ -66,7 +66,23 @@ async function loadShopifyApi() {
     shopifyModulePromise = import("../../shopify.server.js");
   }
   const module = await shopifyModulePromise;
-  return module.default;
+  // 兼容不同打包形态：default / shopify / 整个 module
+  return module.default ?? module.shopify ?? module;
+}
+
+function createRestClient(shopifyApi, session) {
+  // 有些版本是 shopifyApi.api.clients，有些是 shopifyApi.clients
+  const api = shopifyApi?.api ?? shopifyApi;
+
+  if (api?.clients?.Rest) {
+    return new api.clients.Rest({ session });
+  }
+  if (api?.clients?.rest) {
+    return new api.clients.rest({ session });
+  }
+
+  // 理论上不会走到这里，如果走到说明 SDK 形态完全不一样了
+  throw new Error("Shopify REST client not available on shopifyApi");
 }
 
 export async function syncShopifyPayments({ store, session, days = 7 }) {
@@ -94,7 +110,7 @@ export async function syncShopifyPayments({ store, session, days = 7 }) {
       context: { provider, storeId: store.id },
       days,
     });
-    const restClient = new shopifyApi.api.clients.Rest({ session });
+    const restClient = createRestClient(shopifyApi, session);
     const payouts = await collectPayouts({ restClient, days });
 
     for (const payout of payouts) {
