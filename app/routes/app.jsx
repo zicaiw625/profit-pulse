@@ -53,26 +53,38 @@ export default function App() {
     <AppProvider embedded apiKey={apiKey}>
       <ShopifyFetchProvider>
         <s-app-nav>
-          <LinkWithQuery to="/app">
-            {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
-          </LinkWithQuery>
-          <LinkWithQuery to="/app/orders">
-            {t(TRANSLATION_KEYS.NAV_ORDERS)}
-          </LinkWithQuery>
-          <LinkWithQuery to="/app/products">
-            {t(TRANSLATION_KEYS.NAV_PRODUCTS)}
-          </LinkWithQuery>
-          <LinkWithQuery to="/app/reconciliation">
-            {t(TRANSLATION_KEYS.NAV_RECONCILIATION)}
-          </LinkWithQuery>
-          <LinkWithQuery to="/app/settings">
-            {t(TRANSLATION_KEYS.NAV_SETTINGS)}
-          </LinkWithQuery>
-          <LinkWithQuery to="/app/help">
-            {t(TRANSLATION_KEYS.NAV_HELP)}
-          </LinkWithQuery>
-          <div style={{ marginLeft: "auto" }}>
-            <LanguageToggle />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+              width: "100%",
+            }}
+          >
+            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+              <LinkWithQuery to="/app">
+                {t(TRANSLATION_KEYS.NAV_OVERVIEW)}
+              </LinkWithQuery>
+              <LinkWithQuery to="/app/orders">
+                {t(TRANSLATION_KEYS.NAV_ORDERS)}
+              </LinkWithQuery>
+              <LinkWithQuery to="/app/products">
+                {t(TRANSLATION_KEYS.NAV_PRODUCTS)}
+              </LinkWithQuery>
+              <LinkWithQuery to="/app/reconciliation">
+                {t(TRANSLATION_KEYS.NAV_RECONCILIATION)}
+              </LinkWithQuery>
+              <LinkWithQuery to="/app/settings">
+                {t(TRANSLATION_KEYS.NAV_SETTINGS)}
+              </LinkWithQuery>
+              <LinkWithQuery to="/app/help">
+                {t(TRANSLATION_KEYS.NAV_HELP)}
+              </LinkWithQuery>
+            </div>
+            <div style={{ marginLeft: "auto" }}>
+              <LanguageToggle />
+            </div>
           </div>
         </s-app-nav>
         <Outlet />
