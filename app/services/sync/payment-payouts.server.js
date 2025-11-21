@@ -76,6 +76,7 @@ function createFetchRestClient(session) {
     typeof SHOPIFY_API_VERSION === "string"
       ? SHOPIFY_API_VERSION
       : String(SHOPIFY_API_VERSION);
+
   const baseUrl = `https://${session.shop}/admin/api/${version}`;
 
   return {
@@ -99,8 +100,18 @@ function createFetchRestClient(session) {
         },
       });
 
+      // 🔴 这里是关键：特殊处理 payouts 的 404
       if (!response.ok) {
         const text = await response.text();
+
+        // 如果店没有开 Shopify Payments 或没有 payout 权限，
+        // Shopify 会对 /shopify_payments/... 返回 404。
+        // 在这种情况下我们就当「没有 payout 数据」，返回空结果。
+        if (response.status === 404 && path.startsWith("shopify_payments/")) {
+          return { body: {}, pageInfo: undefined };
+        }
+
+        // 其他情况仍然按错误处理
         throw new Error(
           `Shopify REST request failed (${response.status}): ${
             text || response.statusText
