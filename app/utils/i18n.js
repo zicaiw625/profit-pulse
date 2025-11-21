@@ -3,6 +3,21 @@ import { TRANSLATIONS } from "../constants/translations";
 export const SUPPORTED_LANGS = ["en", "zh"];
 export const DEFAULT_LANG = "en";
 
+function getLanguageFromCookieHeader(cookieHeader) {
+  if (!cookieHeader) return null;
+  try {
+    for (const part of cookieHeader.split(";")) {
+      const [name, value] = part.trim().split("=");
+      if (name === "lang" && value) {
+        return normalizeLanguage(value);
+      }
+    }
+  } catch (error) {
+    // Non-blocking: ignore malformed cookies.
+  }
+  return null;
+}
+
 export function normalizeLanguage(lang) {
   const normalized = (lang || "").toString().toLowerCase();
   if (SUPPORTED_LANGS.includes(normalized)) {
@@ -28,6 +43,12 @@ export function getLanguageFromRequest(request) {
     const langParam = url.searchParams.get("lang");
     if (langParam) {
       return normalizeLanguage(langParam);
+    }
+    const langFromCookie = getLanguageFromCookieHeader(
+      request.headers.get("cookie"),
+    );
+    if (langFromCookie) {
+      return langFromCookie;
     }
     const acceptLanguage = request.headers.get("accept-language") || "";
     const [first] = acceptLanguage.split(",").map((item) => item.split(";")[0]);

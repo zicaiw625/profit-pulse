@@ -21,6 +21,8 @@ export function useLocale() {
   useEffect(() => {
     if (typeof document !== "undefined" && document?.documentElement) {
       document.documentElement.lang = resolvedLang;
+      const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      document.cookie = `lang=${resolvedLang}; path=/; SameSite=Lax; expires=${expires.toUTCString()}`;
     }
   }, [resolvedLang]);
 
