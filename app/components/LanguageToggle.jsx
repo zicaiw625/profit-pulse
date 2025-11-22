@@ -21,22 +21,28 @@ export function LanguageToggle() {
     navigate(buildLangHref({ pathname, search, hash, buildAppUrl, targetLang }));
   };
 
-  const englishHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "en" });
-  const chineseHref = buildLangHref({ pathname, search, hash, buildAppUrl, targetLang: "zh" });
-
   const targetLang = lang === "zh" ? "en" : "zh";
-  const targetHref = targetLang === "zh" ? chineseHref : englishHref;
   const targetLabel = targetLang === "zh" ? "中文" : "English";
+  const buttonStyle = {
+    border: "1px solid var(--p-border, #c9ccd1)",
+    background: "var(--p-surface, #fff)",
+    color: "inherit",
+    borderRadius: 6,
+    padding: "4px 10px",
+    fontSize: 14,
+    cursor: "pointer",
+    height: 28,
+    lineHeight: "20px",
+  };
 
   return (
-    <s-button
-      variant="secondary"
-      size="slim"
-      href={targetHref}
+    <button
+      type="button"
+      style={buttonStyle}
       onClick={handleClick(targetLang)}
       aria-label={`${t(TRANSLATION_KEYS.REPORTS_LANG_LABEL)}: ${targetLabel}`}
     >
       {targetLabel}
-    </s-button>
+    </button>
   );
 }

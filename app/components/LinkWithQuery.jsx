@@ -16,8 +16,8 @@ export function LinkWithQuery({ to, onClick, children, ...props }) {
   };
 
   return (
-    <s-link {...props} href={destination} onClick={handleClick}>
+    <a {...props} href={destination} onClick={handleClick}>
       {children}
-    </s-link>
+    </a>
   );
 }
