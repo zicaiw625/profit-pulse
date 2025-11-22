@@ -212,8 +212,15 @@ async function adjustMetricRow(tx, where, values, options = {}) {
     return;
   }
 
+  const normalizedWhere = {
+    ...where,
+    productSku: where.productSku ?? null,
+  };
+
   await updateMetric({
-    where: { storeId_channel_productSku_date: { ...where } },
+    where: existing.id
+      ? { id: existing.id }
+      : { storeId_channel_productSku_date: normalizedWhere },
     data,
   });
 }
