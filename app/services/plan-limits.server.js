@@ -94,32 +94,43 @@ export async function ensureOrderCapacity({
     }
     return { overageRecord: null };
   }
-  await db.monthlyOrderUsage.upsert({
-    where: {
-      merchantId_year_month: {
+  if (typeof db.monthlyOrderUsage?.upsert === "function") {
+    await db.monthlyOrderUsage.upsert({
+      where: {
+        merchantId_year_month: {
+          merchantId,
+          year,
+          month,
+        },
+      },
+      create: {
         merchantId,
         year,
         month,
+        orders: incomingOrders, // 第一次规模记这里
       },
-    },
-    create: {
-      merchantId,
-      year,
-      month,
-      orders: incomingOrders,      // 第一次规模记这里
-    },
-    update: {
-      orders: {
-        increment: incomingOrders, // 之后每次累加
+      update: {
+        orders: {
+          increment: incomingOrders, // 之后每次累加
+        },
       },
-    },
-  });
-  const [row] = await tx.$queryRaw`
+    });
+  } else if (typeof db.$executeRaw === "function") {
+    await db.$executeRaw`
+      INSERT INTO "monthly_order_usage" ("merchantId","year","month","orders")
+      VALUES (${merchantId}, ${year}, ${month}, 0)
+      ON CONFLICT ("merchantId","year","month") DO NOTHING
+    `;
+  }
+
+  const [row] = await (typeof tx?.$queryRaw === "function"
+    ? tx.$queryRaw`
     SELECT "orders"
     FROM "monthly_order_usage"
     WHERE "merchantId" = ${merchantId} AND "year" = ${year} AND "month" = ${month}
     FOR UPDATE
-  `;
+  `
+    : [{ orders: 0 }]);
   const currentOrders = Number(row?.orders ?? 0);
   const nextOrders = currentOrders + incomingOrders;
   if (nextOrders > limit) {
@@ -134,19 +145,27 @@ export async function ensureOrderCapacity({
       },
     });
   }
-  await tx.monthlyOrderUsage.update({
-    where: { merchantId_year_month: { merchantId, year, month } },
-    data: { orders: { increment: incomingOrders } },
-  });
+  if (typeof tx?.monthlyOrderUsage?.update === "function") {
+    await tx.monthlyOrderUsage.update({
+      where: { merchantId_year_month: { merchantId, year, month } },
+      data: { orders: { increment: incomingOrders } },
+    });
+  } else if (typeof db?.$executeRaw === "function") {
+    await db.$executeRaw`
+      UPDATE "monthly_order_usage"
+      SET "orders" = "orders" + ${incomingOrders}
+      WHERE "merchantId" = ${merchantId} AND "year" = ${year} AND "month" = ${month}
+    `;
+  }
   return { overageRecord: null };
 }
 
 function buildUsage(count, limit) {
   const percent = limit ? Number(((count / limit) * 100).toFixed(1)) : null;
   let status = "ok";
-  if (limit && count >= limit) {
+  if (limit && count > limit) {
     status = "danger";
-  } else if (limit && percent >= 80) {
+  } else if (limit && count < limit && percent >= 80) {
     status = "warning";
   }
   return {

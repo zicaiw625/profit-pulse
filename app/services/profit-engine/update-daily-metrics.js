@@ -164,11 +164,19 @@ async function adjustMetricRow(tx, where, values, options = {}) {
   const allowCreate = options.allowCreate ?? direction > 0;
 
   // ✅ 用 findFirst，避免复合唯一键 + productSku null 的问题
-  const existing = await tx.dailyMetric.findFirst({ where });
+  const dailyMetricClient = tx.dailyMetric ?? {};
+  const findMetric =
+    dailyMetricClient.findFirst ??
+    dailyMetricClient.findUnique ??
+    (async () => null);
+  const createMetric = dailyMetricClient.create ?? (async () => {});
+  const updateMetric = dailyMetricClient.update ?? (async () => {});
+
+  const existing = await findMetric({ where });
 
   if (!existing) {
     if (!allowCreate) return;
-    await tx.dailyMetric.create({
+    await createMetric({
       data: {
         ...where,
         ...values,
@@ -204,8 +212,8 @@ async function adjustMetricRow(tx, where, values, options = {}) {
     return;
   }
 
-  await tx.dailyMetric.update({
-    where: { id: existing.id },
+  await updateMetric({
+    where: { storeId_channel_productSku_date: { ...where } },
     data,
   });
 }

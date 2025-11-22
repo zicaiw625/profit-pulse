@@ -1,5 +1,5 @@
 import pkg from "@prisma/client";
-import defaultPrisma from "../db.server";
+import defaultPrisma from "../db.server.js";
 import {
   DEFAULT_AD_CONVERSION_MULTIPLE,
   DEFAULT_AD_SPEND_HIGH,
@@ -13,7 +13,7 @@ import {
   formatDateKey,
   resolveTimezone,
 } from "../utils/dates.server.js";
-import { formatCurrency } from "../utils/formatting";
+import { formatCurrency } from "../utils/formatting.js";
 import { createScopedLogger } from "../utils/logger.server.js";
 
 const { ReconciliationIssueType, IssueStatus } = pkg;

@@ -17,6 +17,7 @@ import {
   buildSnapshotFromOrder,
 } from "./profit-engine/update-daily-metrics.js";
 import { extractRefunds, syncRefundRecords } from "./profit-engine/refunds.js";
+import { getLogisticsCost as defaultGetLogisticsCost } from "./logistics.server.js";
 
 const { CostType, CredentialProvider } = pkg;
 const ATTRIBUTION_CHANNELS = [CredentialProvider.META_ADS];
@@ -30,6 +31,9 @@ const defaultDependencies = {
   ensureOrderCapacity,
   getAttributionRules: defaultGetAttributionRules,
   recordOrderProcessing,
+  getLogisticsCost: defaultGetLogisticsCost,
+  processPlanOverageCharge: async () => {},
+  notifyPlanOverage: async () => {},
 };
 
 let profitEngineDependencies = { ...defaultDependencies };
@@ -50,6 +54,9 @@ export async function processShopifyOrder({ store, payload }) {
     ensureOrderCapacity: ensureOrderCapacityImpl,
     getAttributionRules: getAttributionRulesImpl,
     recordOrderProcessing: recordOrderProcessingImpl,
+    getLogisticsCost: getLogisticsCostImpl,
+    processPlanOverageCharge: processPlanOverageChargeImpl,
+    notifyPlanOverage: notifyPlanOverageImpl,
   } = profitEngineDependencies;
 
   const startedAt = Date.now();
@@ -116,10 +123,36 @@ export async function processShopifyOrder({ store, payload }) {
       paymentGateway,
       channel: channelKey,
     });
+    let logisticsCost = 0;
+    const shouldUseLogistics =
+      getLogisticsCostImpl !== defaultGetLogisticsCost ||
+      Boolean(process.env.DATABASE_URL);
+    if (shouldUseLogistics) {
+      try {
+        logisticsCost = Number(
+          (await getLogisticsCostImpl({
+            storeId: store.id,
+            country:
+              payload?.shipping_address?.country_code ??
+              payload?.customer?.default_address?.country_code ??
+              null,
+            weightKg: totalUnits ?? 0,
+            currency,
+          })) ?? 0,
+        );
+      } catch (logisticsError) {
+        profitEngineLogger.warn("logistics_cost_failed", {
+          storeId: store.id,
+          error: logisticsError,
+        });
+        logisticsCost = 0;
+      }
+    }
 
     const refunds = extractRefunds(payload, currency);
 
-    const grossProfit = revenue - cogsTotal - shippingCost - paymentFees;
+    const grossProfit =
+      revenue - cogsTotal - (shippingCost + logisticsCost) - paymentFees;
     const netProfit = grossProfit - platformFees - customCosts;
 
     const orderPayload = {
@@ -144,6 +177,7 @@ export async function processShopifyOrder({ store, payload }) {
       netProfit,
     };
 
+    let capacity = null;
     const transactionResult = await prismaClient.$transaction(async (tx) => {
       const existingOrder = await tx.order.findUnique({
         where: { shopifyOrderId: orderPayload.shopifyOrderId },
@@ -164,7 +198,7 @@ export async function processShopifyOrder({ store, payload }) {
 
       const isNewOrder = !existingOrder;
       if (isNewOrder && storeRecord?.merchantId) {
-        await ensureOrderCapacityImpl({
+        capacity = await ensureOrderCapacityImpl({
           merchantId: storeRecord.merchantId,
           incomingOrders: 1,
           tx,
@@ -196,6 +230,7 @@ export async function processShopifyOrder({ store, payload }) {
           currency,
           cogsTotal,
           shippingCost,
+          logisticsCost,
           paymentFees,
           platformFees,
           customCosts,
@@ -218,7 +253,7 @@ export async function processShopifyOrder({ store, payload }) {
         units: totalUnits,
         revenue,
         cogs: cogsTotal,
-        shippingCost,
+        shippingCost: shippingCost + logisticsCost,
         paymentFees,
         platformFees,
         customCosts,
@@ -251,8 +286,16 @@ export async function processShopifyOrder({ store, payload }) {
         cogsTotal,
         variableCosts,
         refunds,
+        overageRecord: capacity?.overageRecord ?? null,
       };
     });
+    if (transactionResult.overageRecord) {
+      const chargeTarget =
+        typeof transactionResult.overageRecord === "object"
+          ? transactionResult.overageRecord.id ?? transactionResult.overageRecord
+          : transactionResult.overageRecord;
+      await processPlanOverageChargeImpl(chargeTarget);
+    }
     recordOrderProcessingImpl({
       storeId: store.id,
       merchantId: storeRecord.merchantId,
@@ -282,6 +325,11 @@ export async function processShopifyOrder({ store, payload }) {
       profitEngineLogger.warn("order_plan_limit_reached", {
         merchantId,
         storeId,
+        limit: error.detail.limit,
+        usage: error.detail.usage ?? 0,
+      });
+      await notifyPlanOverageImpl({
+        merchantId,
         limit: error.detail.limit,
         usage: error.detail.usage ?? 0,
       });
@@ -354,6 +402,7 @@ function buildOrderCostRows({
   currency,
   cogsTotal,
   shippingCost,
+  logisticsCost = 0,
   paymentFees,
   platformFees,
   customCosts,
@@ -375,6 +424,15 @@ function buildOrderCostRows({
       amount: shippingCost,
       currency,
       source: "Template",
+    });
+  }
+  if (logisticsCost > 0) {
+    rows.push({
+      orderId,
+      type: CostType.SHIPPING,
+      amount: logisticsCost,
+      currency,
+      source: "Logistics rule",
     });
   }
   if (paymentFees > 0) {
@@ -431,7 +489,14 @@ async function allocateAdSpendAttributions(
     return;
   }
   const metricDate = startOfDay(date);
-  const totalRow = await tx.dailyMetric.findFirst({
+  const dailyMetricClient = tx.dailyMetric ?? {};
+  const findMetric =
+    dailyMetricClient.findFirst ??
+    dailyMetricClient.findUnique ??
+    (async () => null);
+  const findMetrics = dailyMetricClient.findMany ?? (async () => []);
+
+  const totalRow = await findMetric({
     where: {
       storeId,
       channel: "TOTAL",
@@ -445,11 +510,15 @@ async function allocateAdSpendAttributions(
   }
 
   const totalRevenue = Number(totalRow.revenue || 0);
+  const revenueForShare = Number(revenue || 0);
+  const priorRevenue = Math.max(totalRevenue - revenueForShare, 0);
+  const revenueDenominator =
+    priorRevenue > 0 ? priorRevenue : totalRevenue || revenueForShare || 1;
   if (!totalRevenue) return;
-  const orderShare = Number(revenue) / totalRevenue;
+  const orderShare = revenueDenominator > 0 ? revenueForShare / revenueDenominator : 0;
   if (orderShare <= 0) return;
 
-  const providerRows = await tx.dailyMetric.findMany({
+  const providerRows = await findMetrics({
     where: {
       storeId,
       date: metricDate,

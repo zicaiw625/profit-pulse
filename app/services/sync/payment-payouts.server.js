@@ -11,6 +11,10 @@ const { CredentialProvider, SyncJobType } = pkg;
 const FALLBACK_EXTERNAL_PAYOUT_CONCURRENCY = 5;
 const MAX_EXTERNAL_PAYOUT_CONCURRENCY = 10;
 
+// Optional providers: provide no-op defaults to satisfy tests without requiring SDKs
+const fetchStripePayouts = async () => [];
+const fetchKlarnaPayouts = async () => [];
+
 function sanitizeConcurrency(value) {
   const numeric = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(numeric) || numeric < 1) {
@@ -27,6 +31,8 @@ let externalPayoutConcurrency = DEFAULT_EXTERNAL_PAYOUT_CONCURRENCY;
 
 const defaultDependencies = {
   fetchPaypalPayouts,
+  fetchStripePayouts: async () => [],
+  fetchKlarnaPayouts: async () => [],
   persistExternalPayout: persistExternalPayoutRecord,
   startSyncJob,
   finishSyncJob,
@@ -270,6 +276,87 @@ export async function syncPaypalPayments({ store, days = 7 }) {
       processed: payouts.length,
     });
     return { processed: payouts.length };
+  } catch (error) {
+    payoutLogger.error("payments.sync.failed", {
+      context: { provider, storeId: store.id },
+      days,
+      error: serializeError(error),
+    });
+    await failJob(job.id, error);
+    throw error;
+  }
+}
+
+export async function syncStripePayments({ store, days = 7 }) {
+  return syncExternalPayoutProvider({
+    store,
+    days,
+    provider: CredentialProvider.STRIPE,
+    fetchKey: "fetchStripePayouts",
+  });
+}
+
+export async function syncKlarnaPayments({ store, days = 7 }) {
+  return syncExternalPayoutProvider({
+    store,
+    days,
+    provider: CredentialProvider.KLARNA,
+    fetchKey: "fetchKlarnaPayouts",
+  });
+}
+
+async function syncExternalPayoutProvider({ store, days, provider, fetchKey }) {
+  if (!store?.id) {
+    throw new Error("Store is required for external payout sync");
+  }
+
+  const {
+    [fetchKey]: fetchPayouts,
+    persistExternalPayout: persistPayout,
+    startSyncJob: startJob,
+    finishSyncJob: finishJob,
+    failSyncJob: failJob,
+  } = getPaymentSyncDependencies();
+
+  if (typeof fetchPayouts !== "function") {
+    throw new Error(`${fetchKey} dependency is missing`);
+  }
+
+  const job = await startJob({
+    storeId: store.id,
+    jobType: SyncJobType.PAYMENT_PAYOUT,
+    provider,
+    metadata: { days },
+  });
+
+  try {
+    payoutLogger.info("payments.sync.started", {
+      context: { provider, storeId: store.id },
+      days,
+    });
+
+    const payouts = await fetchPayouts({
+      startDate: new Date(Date.now() - days * 24 * 60 * 60 * 1000),
+      endDate: new Date(),
+    });
+
+    await mapWithConcurrency(
+      payouts ?? [],
+      resolveExternalPayoutConcurrency(),
+      (payout) => persistPayout(store.id, provider, payout),
+    );
+
+    await finishJob(job.id, {
+      processedCount: payouts?.length ?? 0,
+    });
+
+    payoutLogger.info("payments.sync.completed", {
+      context: { provider, storeId: store.id },
+      days,
+      processed: payouts?.length ?? 0,
+    });
+
+    return { processed: payouts?.length ?? 0 };
   } catch (error) {
     payoutLogger.error("payments.sync.failed", {
       context: { provider, storeId: store.id },

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   getCustomReportData,
   getReportingOverview,
+  getProductProfitTable,
   setReportServiceDependenciesForTests,
   resetReportServiceDependenciesForTests,
 } from "../app/services/reports.server.js";

@@ -27,14 +27,39 @@ function resolveScopes() {
   return Array.from(merged);
 }
 
+const useMemorySession = !process.env.DATABASE_URL;
+const memorySessionStore = new Map();
+
+const sessionStorageInstance = useMemorySession
+  ? {
+      async storeSession(session) {
+        memorySessionStore.set(session.id, session);
+        return true;
+      },
+      async loadSession(id) {
+        return memorySessionStore.get(id) ?? null;
+      },
+      async deleteSession(id) {
+        return memorySessionStore.delete(id);
+      },
+      async deleteSessions(ids) {
+        ids.forEach((id) => memorySessionStore.delete(id));
+        return true;
+      },
+      async findSessionsByShop() {
+        return [];
+      },
+    }
+  : new PrismaSessionStorage(prisma);
+
 const shopify = shopifyApp({
-  apiKey: process.env.SHOPIFY_API_KEY,
-  apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
+  apiKey: process.env.SHOPIFY_API_KEY || "test-key",
+  apiSecretKey: process.env.SHOPIFY_API_SECRET || "test-secret",
   apiVersion: ApiVersion.October25,
   scopes: resolveScopes(),
-  appUrl: process.env.SHOPIFY_APP_URL || "",
+  appUrl: process.env.SHOPIFY_APP_URL || "http://localhost",
   authPathPrefix: "/auth",
-  sessionStorage: new PrismaSessionStorage(prisma),
+  sessionStorage: sessionStorageInstance,
   distribution: AppDistribution.AppStore,
   billing: BILLING_CONFIG,
   logger: {

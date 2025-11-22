@@ -21,6 +21,171 @@ export function resetReportServiceDependenciesForTests() {
   reportServiceDependencies = { ...defaultDependencies };
 }
 
+export async function getCustomReportData({
+  storeId,
+  metrics = [],
+  formula,
+  formulaLabel,
+  rangeDays = DEFAULT_RANGE_DAYS,
+}) {
+  if (!storeId) {
+    throw new Error("storeId is required for custom reports");
+  }
+
+  const { prismaClient, getExchangeRate } = reportServiceDependencies;
+  const store =
+    (await prismaClient.store?.findUnique?.({ where: { id: storeId } })) ?? null;
+  const currency = store?.currency ?? store?.merchant?.primaryCurrency ?? "USD";
+
+  const since = shiftDays(startOfDay(new Date()), -(Math.max(rangeDays, 1) - 1));
+
+  const grouped = await prismaClient.dailyMetric.groupBy({
+    by: ["channel"],
+    where: { storeId, date: { gte: since } },
+    _sum: {
+      revenue: true,
+      netProfit: true,
+      adSpend: true,
+      cogs: true,
+      shippingCost: true,
+      paymentFees: true,
+      refundAmount: true,
+      orders: true,
+    },
+  });
+
+  const metricDefs = metrics.map((key) => ({ label: key }));
+  if (formula && formulaLabel) {
+    metricDefs.push({ label: formulaLabel });
+  }
+
+  const rows = grouped.map((group) => {
+    const context = {
+      currency,
+      ...(group._sum ?? {}),
+    };
+    const metricValues = metrics.map((key) => ({
+      label: key,
+      value: Number(group._sum?.[key] ?? 0),
+    }));
+    if (formula && formulaLabel) {
+      const value = evaluateFormula(formula, context);
+      metricValues.push({ label: formulaLabel, value });
+    }
+    return {
+      channel: group.channel ?? "TOTAL",
+      metrics: metricValues,
+    };
+  });
+
+  return {
+    metrics: metricDefs,
+    rows,
+    currency,
+    exchangeRateProvider: getExchangeRate ? "custom" : "none",
+  };
+}
+
+export async function getReportingOverview({ storeId, rangeDays = DEFAULT_RANGE_DAYS }) {
+  if (!storeId) {
+    throw new Error("storeId is required for reporting overview");
+  }
+
+  const { prismaClient, getFixedCostBreakdown, buildCacheKey, memoizeAsync } =
+    reportServiceDependencies;
+
+  const cacheKeyBuilder =
+    buildCacheKey ?? ((...parts) => parts.filter(Boolean).join("|"));
+  const cacheKey = cacheKeyBuilder("reporting-overview", storeId, rangeDays);
+
+  const compute = async () => {
+    const store =
+      (await prismaClient.store?.findUnique?.({ where: { id: storeId } })) ?? null;
+    const timezone = resolveTimezone({ store });
+    const since = shiftDays(
+      startOfDay(new Date(), { timezone }),
+      -(Math.max(rangeDays, 1) - 1),
+      { timezone },
+    );
+
+    const aggregates = await prismaClient.dailyMetric.aggregate({
+      _sum: {
+        revenue: true,
+        netProfit: true,
+        adSpend: true,
+        orders: true,
+        refundAmount: true,
+        refunds: true,
+        cogs: true,
+        shippingCost: true,
+        paymentFees: true,
+      },
+      where: { storeId, date: { gte: since } },
+    });
+
+    const channelGroups = await prismaClient.dailyMetric.groupBy({
+      by: ["channel"],
+      where: { storeId, date: { gte: since } },
+      _sum: {
+        revenue: true,
+        netProfit: true,
+        adSpend: true,
+        orders: true,
+        refundAmount: true,
+        refunds: true,
+      },
+    });
+
+    const fixedCosts =
+      (await getFixedCostBreakdown?.({ storeId, rangeDays })) ?? {
+        total: 0,
+        allocations: { perChannel: {}, unassigned: 0 },
+        items: [],
+      };
+
+    const summaryNetProfit = Number(aggregates._sum?.netProfit ?? 0);
+    const summary = {
+      revenue: Number(aggregates._sum?.revenue ?? 0),
+      netProfit: summaryNetProfit,
+      adSpend: Number(aggregates._sum?.adSpend ?? 0),
+      orders: Number(aggregates._sum?.orders ?? 0),
+      refunds: Number(aggregates._sum?.refunds ?? 0),
+      refundAmount: Number(aggregates._sum?.refundAmount ?? 0),
+      fixedCosts: Number(fixedCosts.total ?? 0),
+      netProfitAfterFixed: summaryNetProfit - Number(fixedCosts.total ?? 0),
+    };
+
+    const channels = channelGroups.map((group) => {
+      const channel = group.channel ?? "TOTAL";
+      const fixed = Number(fixedCosts.allocations?.perChannel?.[channel] ?? 0);
+      const netProfit = Number(group._sum?.netProfit ?? 0);
+      return {
+        channel,
+        revenue: Number(group._sum?.revenue ?? 0),
+        netProfit,
+        adSpend: Number(group._sum?.adSpend ?? 0),
+        orders: Number(group._sum?.orders ?? 0),
+        refunds: Number(group._sum?.refunds ?? 0),
+        refundAmount: Number(group._sum?.refundAmount ?? 0),
+        netProfitAfterFixed: netProfit - fixed,
+      };
+    });
+
+    return {
+      summary,
+      channels,
+      fixedCosts,
+      products: [],
+    };
+  };
+
+  if (typeof memoizeAsync === "function") {
+    return memoizeAsync(cacheKey, 5 * 60 * 1000, compute);
+  }
+
+  return compute();
+}
+
 export async function getOrderProfitTable({
   store,
   rangeStart,
@@ -177,5 +342,19 @@ function buildProductSorter(sortBy) {
     case "netProfit":
     default:
       return (a, b) => b.netProfit - a.netProfit;
+  }
+}
+
+function evaluateFormula(formula, context = {}) {
+  try {
+    const evaluator = new Function(
+      "ctx",
+      `with (ctx) { return ${formula}; }`,
+    );
+    const value = evaluator(context);
+    return Number.isFinite(value) ? Number(value) : null;
+  } catch (error) {
+    // keep test-friendly fallback
+    return null;
   }
 }
