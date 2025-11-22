@@ -9,6 +9,10 @@ import {
   syncShopifyOrders,
 } from "../app/services/sync/shopify-orders.server.js";
 
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "test";
+}
+
 function createShopifyStub(responses) {
   class RestClientStub {
     constructor() {
