@@ -4,7 +4,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getDashboardOverview } from "../services/dashboard.server";
-import { formatCurrency, formatPercent } from "../utils/formatting";
+import { formatCurrency, formatPercent, formatNumber } from "../utils/formatting";
 import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
 import { useLocale } from "../hooks/useLocale";
 import { TRANSLATION_KEYS } from "../constants/translations";
@@ -154,6 +154,7 @@ export default function DashboardIndex() {
                   card={card}
                   currency={overview.currency}
                   deltaSuffix={ui.metricDeltaSuffix}
+                  lang={lang}
                 />
               ))}
             </s-stack>
@@ -206,7 +207,7 @@ export default function DashboardIndex() {
                         <br />
                         <s-text variation="subdued">{product.sku}</s-text>
                       </td>
-                      <td align="right">{product.units.toLocaleString()}</td>
+                      <td align="right">{formatNumber(product.units, lang)}</td>
                       <td align="right">{formatCurrency(product.revenue, overview.currency)}</td>
                       <td align="right">{formatCurrency(product.cogs ?? 0, overview.currency)}</td>
                       <td align="right">{formatCurrency(product.netProfit, overview.currency)}</td>
@@ -225,6 +226,7 @@ export default function DashboardIndex() {
           planStatus={planStatus}
           buildAppUrl={buildAppUrl}
           copy={ui.planCard}
+          lang={lang}
         />
       </s-section>
 
@@ -520,13 +522,13 @@ const CARD_LABEL_MAP = {
   roas: TRANSLATION_KEYS.DASHBOARD_CARD_ROAS,
 };
 
-function MetricCard({ card, currency, deltaSuffix = "vs. prior period" }) {
+function MetricCard({ card, currency, deltaSuffix = "vs. prior period", lang }) {
   const trendEmoji = card.trend === "up" ? "↗︎" : "↘︎";
   let value;
   if (card.formatter === "percentage") {
     value = formatPercent(card.value);
   } else if (card.formatter === "count") {
-    value = Number(card.value ?? 0).toLocaleString();
+    value = formatNumber(card.value, lang);
   } else if (card.formatter === "multiple") {
     value = `${(Number(card.value ?? 0)).toFixed(2)}×`;
   } else {
@@ -570,7 +572,7 @@ function TrendPreview({ label, data }) {
   );
 }
 
-function PlanUsageCard({ planStatus, buildAppUrl, copy }) {
+function PlanUsageCard({ planStatus, buildAppUrl, copy, lang }) {
   if (!planStatus) {
     return (
       <s-card padding="base">
@@ -578,7 +580,7 @@ function PlanUsageCard({ planStatus, buildAppUrl, copy }) {
       </s-card>
     );
   }
-  const usage = `${formatOrderCount(planStatus.orderUsage)} / ${formatOrderCount(planStatus.orderLimit)} ${copy.ordersLabel}`;
+  const usage = `${formatOrderCount(planStatus.orderUsage, lang)} / ${formatOrderCount(planStatus.orderLimit, lang)} ${copy.ordersLabel}`;
   return (
     <s-card padding="base">
       <s-text variation="subdued">{planStatus.planName}</s-text>
@@ -593,8 +595,8 @@ function PlanUsageCard({ planStatus, buildAppUrl, copy }) {
   );
 }
 
-function formatOrderCount(value) {
-  return Number(value ?? 0).toLocaleString();
+function formatOrderCount(value, lang) {
+  return formatNumber(value, lang);
 }
 
 function DashboardPlaceholder({ copy, placeholder }) {

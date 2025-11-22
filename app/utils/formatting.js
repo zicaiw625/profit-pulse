@@ -1,5 +1,8 @@
+import { normalizeLanguage } from "./i18n";
+
 const DEFAULT_CURRENCY = "USD";
 const CURRENCY_FORMATTER_CACHE = new Map();
+const NUMBER_FORMATTER_CACHE = new Map();
 
 export function formatCurrency(
   value,
@@ -85,10 +88,69 @@ export function formatDateShort(value, timezone) {
   return new Intl.DateTimeFormat("en-US", options).format(date);
 }
 
+export function formatDate(value, { lang, timeZone, options = {} } = {}) {
+  return formatDateTime(value, {
+    lang,
+    timeZone,
+    options: {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: undefined,
+      minute: undefined,
+      ...options,
+    },
+  });
+}
+
 export function formatDecimal(value, digits = 2) {
   return Number(value ?? 0).toFixed(digits);
 }
 
-export function formatNumber(value) {
-  return Number(value ?? 0).toLocaleString();
+export function formatNumber(value, lang) {
+  const formatter = getNumberFormatter(lang);
+  return formatter.format(Number(value ?? 0));
+}
+
+export function formatDateTime(
+  value,
+  { lang, timeZone, options = {} } = {},
+) {
+  if (!value) return "";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const locale = resolveLocale(lang);
+  const fmtOptions = {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+    ...options,
+  };
+  Object.keys(fmtOptions).forEach((key) => {
+    if (fmtOptions[key] === undefined) {
+      delete fmtOptions[key];
+    }
+  });
+  return new Intl.DateTimeFormat(locale, fmtOptions).format(date);
+}
+
+function resolveLocale(lang) {
+  const normalized = normalizeLanguage(lang);
+  if (normalized === "zh") return "zh-CN";
+  return "en-US";
+}
+
+function getNumberFormatter(lang) {
+  const locale = resolveLocale(lang);
+  const cached = NUMBER_FORMATTER_CACHE.get(locale);
+  if (cached) return cached;
+  const formatter = new Intl.NumberFormat(locale);
+  NUMBER_FORMATTER_CACHE.set(locale, formatter);
+  return formatter;
 }

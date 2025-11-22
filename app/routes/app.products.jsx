@@ -4,7 +4,7 @@ import { authenticate } from "../shopify.server";
 import { ensureMerchantAndStore } from "../models/store.server";
 import { getProductProfitTable } from "../services/reports.server";
 import { useAppUrlBuilder, APP_PRESERVED_PARAMS } from "../hooks/useAppUrlBuilder";
-import { formatCurrency, formatPercent } from "../utils/formatting";
+import { formatCurrency, formatNumber, formatPercent } from "../utils/formatting";
 import { useLocale } from "../hooks/useLocale";
 
 export const loader = async ({ request }) => {
@@ -128,7 +128,7 @@ export default function ProductsPage() {
                       </>
                     )}
                   </td>
-                  <td align="right">{product.units.toLocaleString()}</td>
+                  <td align="right">{formatNumber(product.units, lang)}</td>
                   <td align="right">{formatCurrency(product.revenue, currency)}</td>
                   <td align="right">{formatCurrency(product.cogs, currency)}</td>
                   <td align="right">{formatCurrency(product.netProfit, currency)}</td>

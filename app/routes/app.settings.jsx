@@ -13,6 +13,7 @@ import { CredentialProvider } from "@prisma/client";
 import { useLocale } from "../hooks/useLocale";
 import { getLanguageFromRequest } from "../utils/i18n";
 import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
+import { formatDate, formatDateTime, formatNumber } from "../utils/formatting";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -98,6 +99,10 @@ export default function SettingsPage() {
   const buildAppUrl = useAppUrlBuilder();
   const missingCostSkuCount = settings.missingCostSkuCount ?? 0;
   const { lang } = useLocale();
+  const defaultTimeZone = settings.primaryTimezone || settings.stores[0]?.timezone || "UTC";
+  const formatCount = (value) => formatNumber(value, lang);
+  const formatDateOnly = (value, timeZone) =>
+    formatDate(value, { lang, timeZone: timeZone || defaultTimeZone });
   const copy = SETTINGS_COPY[lang] ?? SETTINGS_COPY.en;
   const oauthProvider = searchParams.get("oauth");
   const oauthStatus = searchParams.get("status");
@@ -150,7 +155,7 @@ export default function SettingsPage() {
                   <td>{store.status}</td>
                   <td>{store.currency}</td>
                   <td>{store.timezone}</td>
-                  <td>{new Date(store.installedAt).toLocaleDateString()}</td>
+                  <td>{formatDateOnly(store.installedAt, store.timezone)}</td>
                 </tr>
               ))}
             </tbody>
@@ -164,6 +169,7 @@ export default function SettingsPage() {
           copy={copy.integrations}
           buildAppUrl={buildAppUrl}
           lang={lang}
+          timeZone={defaultTimeZone}
         />
       </s-section>
 
@@ -367,11 +373,11 @@ function PlanOverview({ plan, planOptions, copy }) {
           {plan.currency} {plan.price} / {plan.intervalLabel}
         </s-display-text>
         <s-text variation="subdued">
-          {copy.trialEnds}: {plan.trialEndsAt ? new Date(plan.trialEndsAt).toLocaleDateString() : copy.notAvailable}
+          {copy.trialEnds}: {plan.trialEndsAt ? formatDateOnly(plan.trialEndsAt, defaultTimeZone) : copy.notAvailable}
         </s-text>
         <s-text variation="subdued">
-          {copy.orderAllowance}: {plan.orderLimit.toLocaleString()} · {copy.storeAllowance}:{" "}
-          {plan.storeLimit.toLocaleString()}
+          {copy.orderAllowance}: {formatCount(plan.orderLimit)} · {copy.storeAllowance}:{" "}
+          {formatCount(plan.storeLimit)}
         </s-text>
       </s-card>
       <Form method="post">
@@ -394,35 +400,55 @@ function PlanOverview({ plan, planOptions, copy }) {
   );
 }
 
-function IntegrationList({ integrations, copy, buildAppUrl, lang }) {
+function IntegrationList({ integrations, copy, buildAppUrl, lang, timeZone }) {
   const metaIntegration = integrations.ads.find((item) => item.id === "META_ADS");
   const metaAuthPath = lang ? `/auth/meta-ads/start?lang=${lang}` : "/auth/meta-ads/start";
 
   return (
     <s-stack direction="block" gap="base">
-      <IntegrationCard title={copy.cards.shopify} integration={integrations.shopify} copy={copy} />
+      <IntegrationCard
+        title={copy.cards.shopify}
+        integration={integrations.shopify}
+        copy={copy}
+        lang={lang}
+        timeZone={timeZone}
+      />
       <MetaAdsIntegrationCard
         integration={metaIntegration}
         copy={copy}
         actionUrl={buildAppUrl(metaAuthPath)}
+        lang={lang}
+        timeZone={timeZone}
       />
       <IntegrationCard
         title={copy.cards.shopifyPayments}
         integration={integrations.payments.find((item) => item.id === "SHOPIFY_PAYMENTS")}
         copy={copy}
+        lang={lang}
+        timeZone={timeZone}
       />
       <IntegrationCard
         title={copy.cards.paypal}
         integration={integrations.payments.find((item) => item.id === "PAYPAL")}
         copy={copy}
+        lang={lang}
+        timeZone={timeZone}
       />
     </s-stack>
   );
 }
 
-function IntegrationCard({ title, integration, copy, extraContent = null, children = null }) {
+function IntegrationCard({
+  title,
+  integration,
+  copy,
+  extraContent = null,
+  children = null,
+  lang,
+  timeZone,
+}) {
   const lastSync = integration?.lastSyncedAt
-    ? new Date(integration.lastSyncedAt).toLocaleString()
+    ? formatDateTime(integration.lastSyncedAt, { lang, timeZone })
     : copy.never;
 
   return (
@@ -446,7 +472,7 @@ function IntegrationCard({ title, integration, copy, extraContent = null, childr
   );
 }
 
-function MetaAdsIntegrationCard({ integration, copy, actionUrl }) {
+function MetaAdsIntegrationCard({ integration, copy, actionUrl, lang, timeZone }) {
   const accountSummary =
     integration && (integration.accountName || integration.accountId)
       ? copy.metaAds.accountSummary(integration.accountName, integration.accountId)
@@ -457,6 +483,8 @@ function MetaAdsIntegrationCard({ integration, copy, actionUrl }) {
       title={copy.cards.metaAds}
       integration={integration}
       copy={copy}
+      lang={lang}
+      timeZone={timeZone}
       extraContent={
         accountSummary ? (
           <s-text variation="subdued">

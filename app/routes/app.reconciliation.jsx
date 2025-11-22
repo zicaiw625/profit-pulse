@@ -5,7 +5,7 @@ import {
   getReconciliationSnapshot,
   runReconciliationChecks,
 } from "../services/reconciliation.server";
-import { formatCurrency } from "../utils/formatting";
+import { formatCurrency, formatDateTime } from "../utils/formatting";
 import { RECONCILIATION_RULE_DEFAULTS } from "../config/reconciliation.js";
 import { useLocale } from "../hooks/useLocale";
 
@@ -138,7 +138,7 @@ export default function ReconciliationPage() {
                   <td>{issue.channel}</td>
                   <td>{issue.orderNumber || "—"}</td>
                   <td>{issue.description}</td>
-                  <td>{new Date(issue.detectedAt).toLocaleString()}</td>
+                  <td>{formatDateTime(issue.detectedAt, { lang, timeZone: snapshot.timezone || "UTC" })}</td>
                 </tr>
               ))}
             </tbody>

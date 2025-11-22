@@ -74,6 +74,7 @@ export async function getAccountSettings({ store }) {
     costConfig,
     integrations,
     primaryCurrency,
+    primaryTimezone: merchant?.primaryTimezone ?? store.timezone ?? "UTC",
     planUsage: planUsage.usage,
     shopifyData,
     missingCostSkuCount,
