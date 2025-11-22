@@ -1,4 +1,4 @@
-import { Form, redirect, useActionData, useLoaderData, useRouteError } from "react-router";
+import { Form, redirect, useActionData, useLoaderData, useRouteError, useSearchParams } from "react-router";
 import { json } from "@remix-run/node";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -12,6 +12,7 @@ import { requestPlanChange } from "../services/billing.server";
 import { CredentialProvider } from "@prisma/client";
 import { useLocale } from "../hooks/useLocale";
 import { getLanguageFromRequest } from "../utils/i18n";
+import { useAppUrlBuilder } from "../hooks/useAppUrlBuilder";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -93,15 +94,36 @@ export const action = async ({ request }) => {
 export default function SettingsPage() {
   const { settings } = useLoaderData();
   const actionData = useActionData();
+  const [searchParams] = useSearchParams();
+  const buildAppUrl = useAppUrlBuilder();
   const missingCostSkuCount = settings.missingCostSkuCount ?? 0;
   const { lang } = useLocale();
   const copy = SETTINGS_COPY[lang] ?? SETTINGS_COPY.en;
+  const oauthProvider = searchParams.get("oauth");
+  const oauthStatus = searchParams.get("status");
+  const oauthMessage = searchParams.get("message");
+  const oauthNotice =
+    oauthProvider === "meta-ads" && oauthStatus
+      ? {
+          tone: oauthStatus === "success" ? "success" : "critical",
+          message:
+            oauthMessage ||
+            (oauthStatus === "success"
+              ? copy.integrations.metaAds.oauthSuccess
+              : copy.integrations.metaAds.oauthError),
+        }
+      : null;
 
   return (
     <s-page heading={copy.pageTitle} subtitle={copy.pageSubtitle}>
       {actionData?.message && (
         <s-section>
           <s-banner tone={actionData.success ? "success" : "critical"} title={actionData.message} />
+        </s-section>
+      )}
+      {oauthNotice && (
+        <s-section>
+          <s-banner tone={oauthNotice.tone} title={oauthNotice.message} />
         </s-section>
       )}
 
@@ -137,7 +159,12 @@ export default function SettingsPage() {
       </s-section>
 
       <s-section heading={copy.sections.integrations}>
-        <IntegrationList integrations={settings.integrations} copy={copy.integrations} />
+        <IntegrationList
+          integrations={settings.integrations}
+          copy={copy.integrations}
+          buildAppUrl={buildAppUrl}
+          lang={lang}
+        />
       </s-section>
 
       <div id="costs">
@@ -205,6 +232,18 @@ const SETTINGS_COPY = {
         metaAds: "Meta Ads",
         shopifyPayments: "Shopify Payments",
         paypal: "PayPal",
+      },
+      metaAds: {
+        connectCta: "Connect Meta Ads",
+        reconnectCta: "Reconnect Meta Ads",
+        accountIdLabel: "Meta Ads account ID",
+        accountIdPlaceholder: "act_123456789",
+        accountNameLabel: "Account name (optional)",
+        accountNamePlaceholder: "e.g. Main account",
+        helperText: "Use your Meta ad account ID to authorize spend syncing.",
+        accountSummary: (name, id) => (name ? `${name} (${id})` : id),
+        oauthSuccess: "Meta Ads connected successfully.",
+        oauthError: "Meta Ads connection failed. Please try again.",
       },
     },
     costs: {
@@ -276,6 +315,18 @@ const SETTINGS_COPY = {
         shopifyPayments: "Shopify Payments",
         paypal: "PayPal",
       },
+      metaAds: {
+        connectCta: "连接 Meta Ads",
+        reconnectCta: "重新连接 Meta Ads",
+        accountIdLabel: "Meta 广告账号 ID",
+        accountIdPlaceholder: "act_123456789",
+        accountNameLabel: "账号名称（可选）",
+        accountNamePlaceholder: "例如 主账号",
+        helperText: "填写广告账号 ID 后跳转 Meta 完成授权以同步花费。",
+        accountSummary: (name, id) => (name ? `${name} (${id})` : id),
+        oauthSuccess: "Meta Ads 已成功连接。",
+        oauthError: "Meta Ads 连接失败，请重试。",
+      },
     },
     costs: {
       uploadLabel: "上传 SKU 成本 CSV",
@@ -343,14 +394,17 @@ function PlanOverview({ plan, planOptions, copy }) {
   );
 }
 
-function IntegrationList({ integrations, copy }) {
+function IntegrationList({ integrations, copy, buildAppUrl, lang }) {
+  const metaIntegration = integrations.ads.find((item) => item.id === "META_ADS");
+  const metaAuthPath = lang ? `/auth/meta-ads/start?lang=${lang}` : "/auth/meta-ads/start";
+
   return (
     <s-stack direction="block" gap="base">
       <IntegrationCard title={copy.cards.shopify} integration={integrations.shopify} copy={copy} />
-      <IntegrationCard
-        title={copy.cards.metaAds}
-        integration={integrations.ads.find((item) => item.id === "META_ADS")}
+      <MetaAdsIntegrationCard
+        integration={metaIntegration}
         copy={copy}
+        actionUrl={buildAppUrl(metaAuthPath)}
       />
       <IntegrationCard
         title={copy.cards.shopifyPayments}
@@ -366,27 +420,93 @@ function IntegrationList({ integrations, copy }) {
   );
 }
 
-function IntegrationCard({ title, integration, copy }) {
-  if (!integration) {
-    return (
-      <s-card padding="base">
-        <s-heading>{title}</s-heading>
-        <s-text variation="subdued">{copy.notConnected}</s-text>
-      </s-card>
-    );
-  }
+function IntegrationCard({ title, integration, copy, extraContent = null, children = null }) {
+  const lastSync = integration?.lastSyncedAt
+    ? new Date(integration.lastSyncedAt).toLocaleString()
+    : copy.never;
 
   return (
     <s-card padding="base">
       <s-heading>{title}</s-heading>
-      <s-text variation="subdued">
-        {copy.statusLabel}: {integration.status}
-      </s-text>
-      <s-text variation="subdued">
-        {copy.lastSyncLabel}:{" "}
-        {integration.lastSyncedAt ? new Date(integration.lastSyncedAt).toLocaleString() : copy.never}
-      </s-text>
+      {integration ? (
+        <>
+          <s-text variation="subdued">
+            {copy.statusLabel}: {integration.status}
+          </s-text>
+          {extraContent}
+          <s-text variation="subdued">
+            {copy.lastSyncLabel}: {lastSync}
+          </s-text>
+        </>
+      ) : (
+        <s-text variation="subdued">{copy.notConnected}</s-text>
+      )}
+      {children}
     </s-card>
+  );
+}
+
+function MetaAdsIntegrationCard({ integration, copy, actionUrl }) {
+  const accountSummary =
+    integration && (integration.accountName || integration.accountId)
+      ? copy.metaAds.accountSummary(integration.accountName, integration.accountId)
+      : null;
+
+  return (
+    <IntegrationCard
+      title={copy.cards.metaAds}
+      integration={integration}
+      copy={copy}
+      extraContent={
+        accountSummary ? (
+          <s-text variation="subdued">
+            {accountSummary}
+          </s-text>
+        ) : null
+      }
+    >
+      <MetaAdsConnectForm
+        actionUrl={actionUrl}
+        copy={copy.metaAds}
+        defaults={{
+          accountId: integration?.accountId ?? "",
+          accountName: integration?.accountName ?? "",
+        }}
+        hasConnection={Boolean(integration)}
+      />
+    </IntegrationCard>
+  );
+}
+
+function MetaAdsConnectForm({ actionUrl, copy, defaults, hasConnection }) {
+  return (
+    <Form method="post" action={actionUrl} style={{ marginTop: "0.75rem" }}>
+      <s-stack direction="block" gap="base">
+        <label>
+          {copy.accountIdLabel}
+          <input
+            type="text"
+            name="accountId"
+            required
+            defaultValue={defaults.accountId}
+            placeholder={copy.accountIdPlaceholder}
+          />
+        </label>
+        <label>
+          {copy.accountNameLabel}
+          <input
+            type="text"
+            name="accountName"
+            defaultValue={defaults.accountName}
+            placeholder={copy.accountNamePlaceholder}
+          />
+        </label>
+        <s-text variation="subdued">{copy.helperText}</s-text>
+        <s-button type="submit" variant="secondary">
+          {hasConnection ? copy.reconnectCta : copy.connectCta}
+        </s-button>
+      </s-stack>
+    </Form>
   );
 }
 
