@@ -67,15 +67,16 @@ export default function DashboardIndex() {
     : null;
 
   return (
-    <s-page
-      heading={t(TRANSLATION_KEYS.DASHBOARD_HEADING)}
-      subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)} · ${overview.shopDomain}`}
-    >
-      {pendingSync && (
-        <s-section>
-          <s-banner tone="info" title={copy.syncingTitle}>
-            <s-text variation="subdued">
-              {copy.syncingDescription}
+    <div suppressHydrationWarning>
+      <s-page
+        heading={t(TRANSLATION_KEYS.DASHBOARD_HEADING)}
+        subtitle={`${t(TRANSLATION_KEYS.DASHBOARD_SUBTITLE)} · ${overview.shopDomain}`}
+      >
+        {pendingSync && (
+          <s-section>
+            <s-banner tone="info" title={copy.syncingTitle}>
+              <s-text variation="subdued">
+                {copy.syncingDescription}
             </s-text>
           </s-banner>
           <s-card padding="base">
@@ -239,7 +240,8 @@ export default function DashboardIndex() {
           </s-text>
         </s-card>
       </s-section>
-    </s-page>
+      </s-page>
+    </div>
   );
 }
 
