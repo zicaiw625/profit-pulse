@@ -29,6 +29,14 @@ function createRecorder() {
     if (where.storeId_channel_productSku_date) {
       return keyFromParts(where.storeId_channel_productSku_date);
     }
+    if (where.id) {
+      for (const [key, record] of metricMap.entries()) {
+        if (record.id === where.id) {
+          return key;
+        }
+      }
+      return null;
+    }
     return keyFromParts(where);
   }
 

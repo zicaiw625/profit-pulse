@@ -27,7 +27,9 @@ function createTransactionStub() {
     },
     dailyMetric: {
       findUnique: async (args) => {
-        const channel = args?.where?.storeId_channel_productSku_date?.channel;
+        const channel =
+          args?.where?.storeId_channel_productSku_date?.channel ??
+          args?.where?.channel;
         if (channel === "TOTAL") {
           return { adSpend: 0, revenue: 0 };
         }

@@ -163,7 +163,7 @@ async function adjustMetricRow(tx, where, values, options = {}) {
   const direction = options.direction ?? 1;
   const allowCreate = options.allowCreate ?? direction > 0;
 
-  // ✅ 用 findFirst，避免复合唯一键 + productSku null 的问题
+  // ✅ 用 findFirst，避免复合唯一键 + productSku null 的问题，再用 id 更新以规避 null 限制
   const dailyMetricClient = tx.dailyMetric ?? {};
   const findMetric =
     dailyMetricClient.findFirst ??
@@ -172,13 +172,18 @@ async function adjustMetricRow(tx, where, values, options = {}) {
   const createMetric = dailyMetricClient.create ?? (async () => {});
   const updateMetric = dailyMetricClient.update ?? (async () => {});
 
-  const existing = await findMetric({ where });
+  const normalizedWhere = {
+    ...where,
+    productSku: where.productSku ?? null,
+  };
+
+  const existing = await findMetric({ where: normalizedWhere });
 
   if (!existing) {
     if (!allowCreate) return;
     await createMetric({
       data: {
-        ...where,
+        ...normalizedWhere,
         ...values,
       },
     });
@@ -212,13 +217,12 @@ async function adjustMetricRow(tx, where, values, options = {}) {
     return;
   }
 
-  const normalizedWhere = {
-    ...where,
-    productSku: where.productSku ?? null,
-  };
+  const updateWhere = existing.id
+    ? { id: existing.id }
+    : { storeId_channel_productSku_date: normalizedWhere };
 
   await updateMetric({
-    where: { storeId_channel_productSku_date: normalizedWhere },
+    where: updateWhere,
     data,
   });
 }
