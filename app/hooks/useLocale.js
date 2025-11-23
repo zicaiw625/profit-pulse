@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router";
+import { useSearchParams, useRouteLoaderData } from "react-router";
 import {
   DEFAULT_LANG,
   getLanguageFromSearchParams,
@@ -9,13 +9,20 @@ import {
 
 export function useLocale() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const rootData = useRouteLoaderData("root");
+  const rootLang =
+    rootData?.lang ? normalizeLanguage(rootData.lang) : null;
+
   const hasLangParam = searchParams.has("lang");
   const langFromSearch = getLanguageFromSearchParams(searchParams);
   const documentLang =
     typeof document !== "undefined" && document?.documentElement?.lang
       ? normalizeLanguage(document.documentElement.lang)
       : null;
-  const lang = hasLangParam ? langFromSearch : documentLang || langFromSearch;
+  const lang =
+    hasLangParam
+      ? langFromSearch
+      : documentLang || rootLang || langFromSearch;
   const resolvedLang = lang || DEFAULT_LANG;
 
   useEffect(() => {
