@@ -133,7 +133,14 @@ export default function SettingsPage() {
       )}
 
       <s-section heading={copy.sections.plan}>
-        <PlanOverview plan={settings.plan} planOptions={settings.planOptions} copy={copy.plan} />
+        <PlanOverview
+          plan={settings.plan}
+          planOptions={settings.planOptions}
+          copy={copy.plan}
+          defaultTimeZone={defaultTimeZone}
+          formatCount={formatCount}
+          formatDateOnly={formatDateOnly}
+        />
       </s-section>
 
       <s-section heading={copy.sections.stores}>
@@ -364,7 +371,7 @@ const SETTINGS_COPY = {
   },
 };
 
-function PlanOverview({ plan, planOptions, copy }) {
+function PlanOverview({ plan, planOptions, copy, defaultTimeZone, formatCount, formatDateOnly }) {
   return (
     <s-stack direction="block" gap="base">
       <s-card padding="base">
@@ -373,7 +380,8 @@ function PlanOverview({ plan, planOptions, copy }) {
           {plan.currency} {plan.price} / {plan.intervalLabel}
         </s-display-text>
         <s-text variation="subdued">
-          {copy.trialEnds}: {plan.trialEndsAt ? formatDateOnly(plan.trialEndsAt, defaultTimeZone) : copy.notAvailable}
+          {copy.trialEnds}:{" "}
+          {plan.trialEndsAt ? formatDateOnly(plan.trialEndsAt, defaultTimeZone) : copy.notAvailable}
         </s-text>
         <s-text variation="subdued">
           {copy.orderAllowance}: {formatCount(plan.orderLimit)} · {copy.storeAllowance}:{" "}
@@ -393,7 +401,7 @@ function PlanOverview({ plan, planOptions, copy }) {
           </select>
         </label>
         <s-button type="submit" variant="primary">
-          {copy.updatePlan}
+          {copy.switchPlan}
         </s-button>
       </Form>
     </s-stack>
