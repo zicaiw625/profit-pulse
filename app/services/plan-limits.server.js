@@ -58,6 +58,7 @@ export async function ensureOrderCapacity({
   merchantId,
   incomingOrders = 1,
   tx,
+  shopDomain,
 } = {}) {
   if (!merchantId) {
     throw new Error("merchantId is required to ensure order capacity");
@@ -81,6 +82,14 @@ export async function ensureOrderCapacity({
       ));
     const nextOrders = currentOrders + incomingOrders;
     if (nextOrders > limit) {
+      const overageRecord = await recordPlanOverage({
+        merchantId,
+        usage: currentOrders,
+        limit,
+        incomingOrders,
+        shopDomain,
+        monthContext,
+      });
       throw new PlanLimitError({
         code: "ORDER_LIMIT_REACHED",
         message:
@@ -89,6 +98,7 @@ export async function ensureOrderCapacity({
           limit,
           usage: currentOrders,
           incomingOrders,
+          overageRecordId: overageRecord?.id ?? null,
         },
       });
     }
@@ -134,6 +144,14 @@ export async function ensureOrderCapacity({
   const currentOrders = Number(row?.orders ?? 0);
   const nextOrders = currentOrders + incomingOrders;
   if (nextOrders > limit) {
+    const overageRecord = await recordPlanOverage({
+      merchantId,
+      usage: currentOrders,
+      limit,
+      incomingOrders,
+      shopDomain,
+      monthContext,
+    });
     throw new PlanLimitError({
       code: "ORDER_LIMIT_REACHED",
       message:
@@ -142,6 +160,7 @@ export async function ensureOrderCapacity({
         limit,
         usage: currentOrders,
         incomingOrders,
+        overageRecordId: overageRecord?.id ?? null,
       },
     });
   }
@@ -236,6 +255,56 @@ async function resolveMerchantTimezone(merchantId, db = planLimitsPrisma) {
     select: { primaryTimezone: true },
   });
   return merchant?.primaryTimezone ?? "UTC";
+}
+
+async function resolveMerchantCurrency(merchantId, db = planLimitsPrisma) {
+  const merchant = await db.merchantAccount.findUnique({
+    where: { id: merchantId },
+    select: { primaryCurrency: true },
+  });
+  return merchant?.primaryCurrency ?? "USD";
+}
+
+async function recordPlanOverage({
+  merchantId,
+  usage,
+  limit,
+  incomingOrders,
+  shopDomain,
+  monthContext,
+  db = planLimitsPrisma,
+}) {
+  if (typeof db?.planOverageRecord?.upsert !== "function") return null;
+  const { year, month } = monthContext ?? (await getCurrentMonthContext({ merchantId, db }));
+  const currency = await resolveMerchantCurrency(merchantId, db);
+  const idempotencyKey = buildOverageIdempotencyKey({ merchantId, year, month });
+  const units = Math.max(Number(incomingOrders ?? 0), 0);
+
+  return db.planOverageRecord.upsert({
+    where: { idempotencyKey },
+    create: {
+      merchantId,
+      metric: "orders",
+      year,
+      month,
+      units,
+      unitAmount: 0,
+      currency,
+      description: `Orders exceeded monthly limit: ${usage} used + ${incomingOrders} incoming > ${limit}`,
+      status: "PENDING",
+      shopDomain,
+    },
+    update: {
+      units: { increment: units },
+      description: `Orders exceeded monthly limit: ${usage} used + ${incomingOrders} incoming > ${limit}`,
+      status: "PENDING",
+      shopDomain,
+    },
+  });
+}
+
+function buildOverageIdempotencyKey({ merchantId, year, month }) {
+  return `orders:${merchantId}:${year}:${month}`;
 }
 
 function assertSubscriptionActive(subscription) {

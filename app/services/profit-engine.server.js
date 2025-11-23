@@ -18,6 +18,7 @@ import {
 } from "./profit-engine/update-daily-metrics.js";
 import { extractRefunds, syncRefundRecords } from "./profit-engine/refunds.js";
 import { getLogisticsCost as defaultGetLogisticsCost } from "./logistics.server.js";
+import { sendDigestEmail } from "./email.server.js";
 
 const { CostType, CredentialProvider } = pkg;
 const ATTRIBUTION_CHANNELS = [CredentialProvider.META_ADS];
@@ -32,9 +33,8 @@ const defaultDependencies = {
   getAttributionRules: defaultGetAttributionRules,
   recordOrderProcessing,
   getLogisticsCost: defaultGetLogisticsCost,
-  // TODO: Wire these to billing/alerting before enabling paid plans.
-  processPlanOverageCharge: async () => {},
-  notifyPlanOverage: async () => {},
+  processPlanOverageCharge: createNoopPlanOverageChargeHandler(),
+  notifyPlanOverage: createPlanOverageNotifier(),
 };
 
 let profitEngineDependencies = { ...defaultDependencies };
@@ -348,6 +348,66 @@ export async function processShopifyOrder({ store, payload }) {
 
     throw error;
   }
+}
+
+function createNoopPlanOverageChargeHandler(logger = profitEngineLogger) {
+  let warned = false;
+  return async () => {
+    if (process.env.NODE_ENV === "production" && !warned) {
+      logger.warn("plan_overage_charge_unconfigured", {
+        message:
+          "processPlanOverageCharge is still a no-op. Wire this to billing before enabling paid plans.",
+      });
+      warned = true;
+    }
+  };
+}
+
+function createPlanOverageNotifier(logger = profitEngineLogger) {
+  const recipients = process.env.PLAN_OVERAGE_ALERT_RECIPIENTS;
+  let warned = false;
+
+  return async ({ merchantId, limit, usage }) => {
+    if (!recipients) {
+      if (process.env.NODE_ENV === "production" && !warned) {
+        logger.warn("plan_overage_notification_unconfigured", {
+          merchantId,
+          limit,
+          usage,
+        });
+        warned = true;
+      }
+      return;
+    }
+
+    const subject = "Plan limit reached";
+    const body = [
+      "A merchant exceeded their monthly plan allowance.",
+      merchantId ? `Merchant ID: ${merchantId}` : null,
+      limit !== undefined ? `Order limit: ${limit}` : null,
+      usage !== undefined ? `Current usage: ${usage}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      const sent = await sendDigestEmail({ recipients, subject, body });
+      if (!sent && process.env.NODE_ENV === "production") {
+        logger.warn("plan_overage_notification_failed", {
+          merchantId,
+          limit,
+          usage,
+        });
+      }
+    } catch (error) {
+      logger.error("plan_overage_notification_failed", {
+        merchantId,
+        limit,
+        usage,
+        error,
+      });
+    }
+  };
 }
 
 export function buildDemoOrder() {

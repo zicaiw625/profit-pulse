@@ -58,6 +58,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | --- | --- | --- |
 | `SHOPIFY_BILLING_TEST_MODE` | ⚠️ | When set to `true`, enables Shopify billing test mode to avoid live charges during development. |
 | `ALLOW_INACTIVE_SUBSCRIPTIONS` | ⚠️ | Set to `true` only in trials/PoC environments to bypass subscription status checks; defaults to strict enforcement. |
+| `PLAN_OVERAGE_ALERT_RECIPIENTS` | ⚠️ | Comma-separated email list to notify when plan limits are hit. Uses `PROFIT_PULSE_EMAIL_ENDPOINT` if configured; otherwise logs locally. |
 
 ## Seed & demo data
 
@@ -70,6 +71,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
 - Subscription status is enforced before counting orders; only use `ALLOW_INACTIVE_SUBSCRIPTIONS=true` if you intentionally want to keep syncing during a trial.
+- Configure `PLAN_OVERAGE_ALERT_RECIPIENTS` (and `PROFIT_PULSE_EMAIL_ENDPOINT` if you have one) to receive notifications when merchants hit plan limits.
 - Set `OAUTH_STATE_SECRET` in production to a high-entropy value; never rely on the development fallback when running a deployed instance.
 - Keep Meta Ads and PayPal variables scoped to each environment; restarting the app refreshes tokens if credentials become invalid.
 - Before running multiple app instances/pods, configure the Upstash variables so memoized cache entries are shared; keeping the in-memory cache is only appropriate for single-node dev and will increase redundant external calls in multi-node setups.

@@ -31,7 +31,36 @@ export function validateRequiredEnv() {
     );
   }
 
+  if (process.env.NODE_ENV === "production") {
+    maybeWarnOptionalProdVars();
+  }
+
   validated = true;
 }
 
 export { REQUIRED_ENV_VARS, PRODUCTION_ONLY_ENV_VARS };
+
+function maybeWarnOptionalProdVars() {
+  const hasUpstash =
+    typeof process.env.UPSTASH_REDIS_REST_URL === "string" &&
+    process.env.UPSTASH_REDIS_REST_URL.trim() !== "" &&
+    typeof process.env.UPSTASH_REDIS_REST_TOKEN === "string" &&
+    process.env.UPSTASH_REDIS_REST_TOKEN.trim() !== "";
+  if (!hasUpstash) {
+    // Multi-instance deployments should share cache state; warn loudly if Redis is not configured.
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[env] UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN are not set. Configure a shared cache before scaling horizontally.",
+    );
+  }
+
+  if (
+    process.env.PLAN_OVERAGE_ALERT_RECIPIENTS &&
+    !process.env.PROFIT_PULSE_EMAIL_ENDPOINT
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[env] PLAN_OVERAGE_ALERT_RECIPIENTS configured without PROFIT_PULSE_EMAIL_ENDPOINT; overage alerts will only be logged locally.",
+    );
+  }
+}

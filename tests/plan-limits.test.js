@@ -18,7 +18,10 @@ const BASE_PRISMA_STUB = {
     }),
   },
   merchantAccount: {
-    findUnique: async () => ({ primaryTimezone: "UTC" }),
+    findUnique: async () => ({
+      primaryTimezone: "UTC",
+      primaryCurrency: "USD",
+    }),
   },
   store: {
     count: async () => 1,
@@ -99,6 +102,42 @@ describe("plan-limits.server", () => {
     assert.equal(tx.$executeRaw.mock.callCount(), 1);
     assert.equal(tx.$queryRaw.mock.callCount(), 1);
     assert.equal(tx.monthlyOrderUsage.update.mock.callCount(), 1);
+  });
+
+  it("persists a plan overage record when the limit is exceeded", async () => {
+    const overageCalls = [];
+    const prismaMock = {
+      ...BASE_PRISMA_STUB,
+      monthlyOrderUsage: {
+        findUnique: async () => ({ orders: 1000 }),
+      },
+      planOverageRecord: {
+        upsert: async (payload) => {
+          overageCalls.push(payload);
+          return { id: "por-1" };
+        },
+      },
+    };
+    setPlanLimitsPrismaForTests(prismaMock);
+
+    await assert.rejects(
+      () =>
+        ensureOrderCapacity({
+          merchantId: "m-overage",
+          incomingOrders: 10,
+          shopDomain: "demo-overage.myshopify.com",
+        }),
+      (error) => {
+        assert.ok(error instanceof PlanLimitError);
+        assert.equal(error.code, "ORDER_LIMIT_REACHED");
+        assert.equal(error.detail.overageRecordId, "por-1");
+        return true;
+      },
+    );
+
+    assert.equal(overageCalls.length, 1);
+    assert.equal(overageCalls[0].create.merchantId, "m-overage");
+    assert.equal(overageCalls[0].create.shopDomain, "demo-overage.myshopify.com");
   });
 
   it("rejects inactive subscriptions when the trial has ended", async () => {
