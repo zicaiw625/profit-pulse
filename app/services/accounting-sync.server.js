@@ -11,6 +11,7 @@ export async function syncAccountingProvider({ store, provider, rangeDays = 30 }
   if (!store?.id) {
     throw new Error("Store is required to sync accounting data");
   }
+  // @future: add signed payloads/retries per provider once webhooks are supported.
   const normalizedProvider = (provider || "").toUpperCase();
   const endpoint = PROVIDER_ENDPOINTS[normalizedProvider];
   if (!endpoint) {

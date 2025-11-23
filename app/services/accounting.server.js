@@ -27,6 +27,7 @@ export async function getAccountingMonthlySummary({
   startCursor.setUTCMonth(startCursor.getUTCMonth() - Math.max(months, 1) + 1);
   const start = startOfDay(startCursor, { timezone });
 
+  // @future: allow channel/product filters instead of a hard-coded TOTAL rollup.
   const metrics = await prisma.dailyMetric.findMany({
     where: {
       storeId,

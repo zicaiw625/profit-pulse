@@ -4,7 +4,7 @@ const HELP_CONTENT = {
       "Confirm Shopify OAuth is installed correctly and give it time to sync the most recent 60 days of orders.",
       "In Settings, connect your Meta Ads account to pull spend, clicks, and conversions into the dashboard.",
       "Upload or edit SKU costs and payment fee templates to keep net profit accurate.",
-      "Set the primary accounting currency and FX mode to normalize multi-currency orders.",
+      "Set the primary currency and FX mode; alerts stay simple for now and richer rules remain on the roadmap.",
     ],
     metricDefinitions: [
       {
@@ -51,7 +51,7 @@ const HELP_CONTENT = {
       "确认 Shopify OAuth 安装无误，并留出时间让最近 60 天订单同步完成。",
       "在设置中连接 Meta Ads 账户，把花费、点击、转化拉入仪表盘。",
       "上传或编辑 SKU 成本、支付手续费模板，保证净利润计算准确。",
-      "设置主记账货币及汇率模式，确保多币种订单可统一统计。",
+      "设置主记账货币及汇率模式；提醒目前保持基础形态，复杂规则仍在规划中。",
     ],
     metricDefinitions: [
       {

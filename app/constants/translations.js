@@ -5,6 +5,7 @@ export const TRANSLATION_KEYS = {
   STEP_IMPORT_COSTS: "onboarding.step.costs",
   STEP_LINK_ADS: "onboarding.step.ads",
   STEP_SETUP_ALERTS: "onboarding.step.alerts",
+  // @future: builder/LTV/tax copy stays hidden until the advanced reporting surfaces.
   REPORTS_BUILDER_HEADING: "reports.builder.heading",
   REPORTS_BUILDER_DESC: "reports.builder.description",
   REPORTS_DIMENSION_LABEL: "reports.builder.dimensionLabel",
@@ -81,7 +82,7 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
       "3. Connect Meta Ads to feed spend into the attribution pipeline and track ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Set the workspace currency and exchange-rate mode for multi-currency orders.",
+      "4. Pick the workspace currency and FX mode; alerts stay lightweight for now with richer rules still on the roadmap.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Advanced report builder",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Choose a dimension and metrics to slice revenue, profit, and spend across time.",
@@ -164,7 +165,7 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
       "3. 连接 Meta 广告，花费数据即时进入归因与 ROAS 追踪。",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. 设置主记账货币与汇率模式，统一多币种订单。",
+      "4. 选择工作区主货币与汇率模式；提醒目前保持基础形态，更复杂的规则还在规划中。",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "高级报表构建器",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "选择维度与指标，按时间段切割营收、利润和花费。",
@@ -246,7 +247,7 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
       "3. Vincula Meta Ads para incorporar el gasto publicitario en la atribución y vigilar el ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Define la moneda principal y el modo de tipo de cambio para unificar pedidos en varias divisas.",
+      "4. Define la moneda principal y el modo de tipo de cambio; las alertas siguen siendo básicas por ahora y las reglas avanzadas siguen en la hoja de ruta.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Constructor avanzado de informes",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Elige una dimensión y métricas para analizar ingresos, beneficios y gasto en distintos periodos.",
@@ -288,7 +289,7 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
       "3. Connectez Meta Ads afin d’injecter les dépenses dans l’attribution et suivre le ROAS.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Définissez la devise principale et la stratégie de change pour normaliser les commandes multi-devises.",
+      "4. Choisissez la devise et le mode de change de l’espace de travail ; les alertes restent simples pour l’instant et les règles avancées arriveront plus tard.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Générateur de rapports avancé",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Choisissez une dimension et des métriques pour analyser revenus, profits et dépenses dans le temps.",
@@ -330,7 +331,7 @@ export const TRANSLATIONS = {
     [TRANSLATION_KEYS.STEP_LINK_ADS]:
       "3. Meta Ads verknüpfen, um Werbeausgaben in die Attribution einzuspeisen und ROAS zu verfolgen.",
     [TRANSLATION_KEYS.STEP_SETUP_ALERTS]:
-      "4. Hauptwährung und Wechselkursmodus festlegen, um Mehrwährungsbestellungen zu vereinheitlichen.",
+      "4. Arbeitsbereichs-Währung und Wechselkursmodus festlegen; Hinweise sind momentan einfach, erweiterte Regeln stehen noch auf der Roadmap.",
     [TRANSLATION_KEYS.REPORTS_BUILDER_HEADING]: "Erweiterter Report-Builder",
     [TRANSLATION_KEYS.REPORTS_BUILDER_DESC]:
       "Wählen Sie Dimension und Kennzahlen, um Umsatz, Profit und Ausgaben zeitlich auszuwerten.",

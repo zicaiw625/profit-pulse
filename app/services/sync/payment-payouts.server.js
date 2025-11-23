@@ -12,6 +12,7 @@ const FALLBACK_EXTERNAL_PAYOUT_CONCURRENCY = 5;
 const MAX_EXTERNAL_PAYOUT_CONCURRENCY = 10;
 
 // Optional providers: provide no-op defaults to satisfy tests without requiring SDKs
+// @future: replace with real Stripe/Klarna payout fetchers once credentials are wired.
 const fetchStripePayouts = async () => [];
 const fetchKlarnaPayouts = async () => [];
 

@@ -123,7 +123,7 @@ export default function DashboardIndex() {
             </label>
             <label>
               {ui.filters.quickRange}
-              <select name="days" defaultValue={filters.days || "14"}>
+              <select name="days" defaultValue={filters.days || "30"}>
                 <option value="7">{ui.filters.quickRanges.last7}</option>
                 <option value="14">{ui.filters.quickRanges.last14}</option>
                 <option value="30">{ui.filters.quickRanges.last30}</option>

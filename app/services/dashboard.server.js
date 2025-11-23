@@ -9,7 +9,7 @@ import {
   startOfDay,
 } from "../utils/dates.server.js";
 
-const DEFAULT_RANGE_DAYS = 14;
+const DEFAULT_RANGE_DAYS = 30;
 const CACHE_TTL_MS = 15 * 1000;
 
 export async function getDashboardOverview({
