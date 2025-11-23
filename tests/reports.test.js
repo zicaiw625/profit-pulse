@@ -72,6 +72,50 @@ test("getCustomReportData appends custom formulas", async () => {
   }
 });
 
+test("getCustomReportData rejects formulas outside the safe grammar", async () => {
+  const fakePrisma = {
+    store: {
+      findUnique: async () => buildStoreContext(),
+    },
+    dailyMetric: {
+      async groupBy() {
+        return [
+          {
+            channel: null,
+            _sum: { revenue: 10, netProfit: 5, adSpend: 2 },
+          },
+        ];
+      },
+    },
+    order: { findMany: async () => [] },
+    orderCost: { findMany: async () => [] },
+    refundRecord: { findMany: async () => [] },
+    orderAttribution: { findMany: async () => [] },
+  };
+
+  setReportServiceDependenciesForTests({
+    prismaClient: fakePrisma,
+  });
+
+  try {
+    const result = await getCustomReportData({
+      storeId: "store1",
+      metrics: ["revenue", "netProfit", "adSpend"],
+      // Curly braces/function expressions are not allowed by the safe evaluator.
+      formula: "netProfit + (function(){ return 1; })()",
+      formulaLabel: "unsafe",
+    });
+
+    const customMetric = result.rows[0].metrics.find(
+      (metric) => metric.label === "unsafe",
+    );
+    assert.ok(customMetric);
+    assert.equal(customMetric.value, null);
+  } finally {
+    resetReportServiceDependenciesForTests();
+  }
+});
+
 test("getReportingOverview memoizes and applies fixed cost allocations", async () => {
   const memoizeCalls = [];
   const fakePrisma = {

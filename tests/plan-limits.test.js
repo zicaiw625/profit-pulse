@@ -14,6 +14,7 @@ const BASE_PRISMA_STUB = {
       plan: PlanTier.BASIC,
       orderLimit: 1000,
       storeLimit: 1,
+      status: "ACTIVE",
     }),
   },
   merchantAccount: {
@@ -75,6 +76,7 @@ describe("plan-limits.server", () => {
         findUnique: async () => ({
           plan: PlanTier.PRO,
           orderLimit: 5000,
+          status: "ACTIVE",
         }),
       },
       merchantAccount: {
@@ -97,5 +99,65 @@ describe("plan-limits.server", () => {
     assert.equal(tx.$executeRaw.mock.callCount(), 1);
     assert.equal(tx.$queryRaw.mock.callCount(), 1);
     assert.equal(tx.monthlyOrderUsage.update.mock.callCount(), 1);
+  });
+
+  it("rejects inactive subscriptions when the trial has ended", async () => {
+    const prismaMock = {
+      ...BASE_PRISMA_STUB,
+      subscription: {
+        findUnique: async () => ({
+          plan: PlanTier.BASIC,
+          orderLimit: 1000,
+          storeLimit: 1,
+          status: "PAST_DUE",
+          trialEndsAt: new Date(0),
+        }),
+      },
+      monthlyOrderUsage: {
+        findUnique: async () => ({ orders: 0 }),
+      },
+    };
+    setPlanLimitsPrismaForTests(prismaMock);
+
+    await assert.rejects(
+      () => ensureOrderCapacity({ merchantId: "m-inactive" }),
+      (error) => {
+        assert.ok(error instanceof PlanLimitError);
+        assert.equal(error.code, "SUBSCRIPTION_INACTIVE");
+        return true;
+      },
+    );
+  });
+
+  it("allows temporarily relaxing subscription checks via env override", async () => {
+    const original = process.env.ALLOW_INACTIVE_SUBSCRIPTIONS;
+    process.env.ALLOW_INACTIVE_SUBSCRIPTIONS = "true";
+
+    const prismaMock = {
+      ...BASE_PRISMA_STUB,
+      subscription: {
+        findUnique: async () => ({
+          plan: PlanTier.BASIC,
+          orderLimit: 1000,
+          storeLimit: 1,
+          status: "CANCELLED",
+          trialEndsAt: null,
+        }),
+      },
+      monthlyOrderUsage: {
+        findUnique: async () => ({ orders: 0 }),
+      },
+    };
+    setPlanLimitsPrismaForTests(prismaMock);
+
+    try {
+      await ensureOrderCapacity({ merchantId: "m-inactive-overridden" });
+    } finally {
+      if (original === undefined) {
+        delete process.env.ALLOW_INACTIVE_SUBSCRIPTIONS;
+      } else {
+        process.env.ALLOW_INACTIVE_SUBSCRIPTIONS = original;
+      }
+    }
   });
 });

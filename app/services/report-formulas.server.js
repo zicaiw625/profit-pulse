@@ -4,6 +4,9 @@ import { createScopedLogger } from "../utils/logger.server.js";
 const defaultLogger = createScopedLogger({ service: "report-formulas" });
 let formulaLogger = defaultLogger;
 const IDENTIFIER_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
+// NOTE: Keep the allowed characters intentionally narrow (no quotes, ternaries,
+// logical operators, or array/object literals). If the grammar needs to expand,
+// replace this evaluator with a dedicated parser rather than widening the regex.
 const VALID_CHAR_PATTERN = /^[-0-9A-Za-z_+*/%.()\s]+$/;
 
 export function setReportFormulaLoggerForTests(logger) {

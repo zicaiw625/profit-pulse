@@ -1,4 +1,5 @@
 import defaultPrisma from "../db.server.js";
+import { evaluateFormulaExpression } from "./report-formulas.server.js";
 import {
   resolveTimezone,
   startOfDay,
@@ -69,7 +70,8 @@ export async function getCustomReportData({
       value: Number(group._sum?.[key] ?? 0),
     }));
     if (formula && formulaLabel) {
-      const value = evaluateFormula(formula, context);
+      // Use the sanitized evaluator to avoid executing arbitrary JS in formulas.
+      const value = evaluateFormulaExpression(formula, context);
       metricValues.push({ label: formulaLabel, value });
     }
     return {
@@ -342,19 +344,5 @@ function buildProductSorter(sortBy) {
     case "netProfit":
     default:
       return (a, b) => b.netProfit - a.netProfit;
-  }
-}
-
-function evaluateFormula(formula, context = {}) {
-  try {
-    const evaluator = new Function(
-      "ctx",
-      `with (ctx) { return ${formula}; }`,
-    );
-    const value = evaluator(context);
-    return Number.isFinite(value) ? Number(value) : null;
-  } catch (error) {
-    // keep test-friendly fallback
-    return null;
   }
 }

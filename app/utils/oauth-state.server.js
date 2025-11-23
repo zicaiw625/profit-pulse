@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+// Dev-only fallback; production runs are guarded by validateRequiredEnv to force a real secret.
 const DEFAULT_SECRET = "development-oauth-state-secret";
 
 function getStateSecret() {

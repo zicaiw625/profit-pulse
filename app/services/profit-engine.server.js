@@ -32,6 +32,7 @@ const defaultDependencies = {
   getAttributionRules: defaultGetAttributionRules,
   recordOrderProcessing,
   getLogisticsCost: defaultGetLogisticsCost,
+  // TODO: Wire these to billing/alerting before enabling paid plans.
   processPlanOverageCharge: async () => {},
   notifyPlanOverage: async () => {},
 };

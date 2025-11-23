@@ -12,7 +12,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `SCOPES` | ✅ | Comma-separated list of Admin API scopes requested on install (e.g. `read_orders,read_products`). |
 | `DATABASE_URL` | ✅ | Prisma connection string (PostgreSQL recommended). |
 | `CREDENTIAL_ENCRYPTION_KEY` | ✅ | 32-byte secret used to encrypt third-party credentials at rest. |
-| `OAUTH_STATE_SECRET` | ⚠️ | Optional override for OAuth state signing. Falls back to `SHOPIFY_API_SECRET` when omitted. |
+| `OAUTH_STATE_SECRET` | ✅ (production) | Secret used to sign OAuth state. Required in production; development falls back to `SHOPIFY_API_SECRET`, but do not rely on defaults outside local dev. |
 | `SHOP_CUSTOM_DOMAIN` | ⚠️ | If set, restricts installs to a single custom shop domain. Useful for pilot rollouts. |
 
 ## Background sync tuning
@@ -57,6 +57,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | Variable | Required | Description |
 | --- | --- | --- |
 | `SHOPIFY_BILLING_TEST_MODE` | ⚠️ | When set to `true`, enables Shopify billing test mode to avoid live charges during development. |
+| `ALLOW_INACTIVE_SUBSCRIPTIONS` | ⚠️ | Set to `true` only in trials/PoC environments to bypass subscription status checks; defaults to strict enforcement. |
 
 ## Seed & demo data
 
@@ -68,8 +69,10 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 ## Operational tips
 
 - Keep secrets (API keys, encryption key, OAuth secrets) out of version control. Use your hosting provider's secret manager.
+- Subscription status is enforced before counting orders; only use `ALLOW_INACTIVE_SUBSCRIPTIONS=true` if you intentionally want to keep syncing during a trial.
+- Set `OAUTH_STATE_SECRET` in production to a high-entropy value; never rely on the development fallback when running a deployed instance.
 - Keep Meta Ads and PayPal variables scoped to each environment; restarting the app refreshes tokens if credentials become invalid.
-- For multi-instance deployments, set the Upstash variables above to share memoized data across nodes; when omitted, the cache remains process-local and functions safely fall back to recomputing.
+- Before running multiple app instances/pods, configure the Upstash variables so memoized cache entries are shared; keeping the in-memory cache is only appropriate for single-node dev and will increase redundant external calls in multi-node setups.
 - Run `npm test` locally (or `node --test`) to verify profit engine and reporting logic whenever you touch services. The suites rely on the same `.env` configuration as `npm run dev`, so make sure the keys above are populated first.
 - Seed demo data from the Settings page (“Seed demo costs”) after installing the embedded app on a development store—this loads SKU costs so dashboards/product tables light up immediately.
 

@@ -239,19 +239,30 @@ async function resolveMerchantTimezone(merchantId, db = planLimitsPrisma) {
 }
 
 function assertSubscriptionActive(subscription) {
-  if (!subscription) return;
+  if (!subscription || inactiveSubscriptionsAllowed()) return;
   const now = Date.now();
   const trialActive =
     subscription.trialEndsAt &&
     new Date(subscription.trialEndsAt).getTime() > now;
-  //if (subscription.status !== "ACTIVE" && !trialActive) {
-  //  throw new PlanLimitError({
-  //    code: "SUBSCRIPTION_INACTIVE",
-  //    message:
-  //      "Subscription is inactive. Activate or upgrade your plan to continue syncing orders.",
-  //    detail: {
-  //      status: subscription.status ?? "INACTIVE",
-  //    },
-  //  });
-  //}
+  const status = subscription.status ?? "ACTIVE";
+  if (status !== "ACTIVE" && !trialActive) {
+    throw new PlanLimitError({
+      code: "SUBSCRIPTION_INACTIVE",
+      message:
+        "Subscription is inactive. Activate or upgrade your plan to continue syncing orders.",
+      detail: {
+        status,
+        trialEndsAt: subscription.trialEndsAt ?? null,
+      },
+    });
+  }
+}
+
+// Allow trials/PoC environments to opt out of status enforcement by setting
+// ALLOW_INACTIVE_SUBSCRIPTIONS=true. Defaults to strict enforcement.
+function inactiveSubscriptionsAllowed() {
+  const override = process.env.ALLOW_INACTIVE_SUBSCRIPTIONS;
+  if (typeof override !== "string") return false;
+  const normalized = override.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
 }

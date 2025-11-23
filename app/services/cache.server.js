@@ -185,6 +185,15 @@ if (upstashUrl && upstashToken) {
   }
 }
 
+if (activeBackend.name === "memory" && process.env.NODE_ENV === "production") {
+  cacheLogger.warn(
+    "Using process-local cache backend in production; configure UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN so multi-instance deployments share memoized results.",
+    {
+      backend: activeBackend.name,
+    },
+  );
+}
+
 export function buildCacheKey(prefix, identifier, rangeStartIso) {
   const keyParts = [prefix, identifier];
   if (rangeStartIso) {

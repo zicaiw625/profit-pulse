@@ -6,13 +6,19 @@ const REQUIRED_ENV_VARS = [
   "DATABASE_URL",
   "CREDENTIAL_ENCRYPTION_KEY",
 ];
+const PRODUCTION_ONLY_ENV_VARS = ["OAUTH_STATE_SECRET"];
 
 let validated = false;
 
 export function validateRequiredEnv() {
   if (validated) return;
 
-  const missing = REQUIRED_ENV_VARS.filter((key) => {
+  const required = [...REQUIRED_ENV_VARS];
+  if (process.env.NODE_ENV === "production") {
+    required.push(...PRODUCTION_ONLY_ENV_VARS);
+  }
+
+  const missing = required.filter((key) => {
     const value = process.env[key];
     return typeof value !== "string" || value.trim() === "";
   });
@@ -21,11 +27,11 @@ export function validateRequiredEnv() {
     throw new Error(
       `Missing required environment variables: ${missing.join(
         ", ",
-      )}. Refer to ENVIRONMENT.md for setup instructions.`,
+      )}. Refer to ENVIRONMENT.md for setup instructions. In production, set OAUTH_STATE_SECRET explicitly instead of relying on fallbacks.`,
     );
   }
 
   validated = true;
 }
 
-export { REQUIRED_ENV_VARS };
+export { REQUIRED_ENV_VARS, PRODUCTION_ONLY_ENV_VARS };
