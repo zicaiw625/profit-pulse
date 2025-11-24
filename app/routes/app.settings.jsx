@@ -193,7 +193,6 @@ export default function SettingsPage() {
             costConfig={settings.costConfig}
             primaryCurrency={settings.primaryCurrency}
             copy={copy.costs}
-            lang={lang}
           />
         </s-section>
       </div>
@@ -547,9 +546,7 @@ function MetaAdsConnectForm({ actionUrl, copy, defaults, hasConnection }) {
   );
 }
 
-function CostConfiguration({ costConfig, primaryCurrency, copy, lang }) {
-  const inputLang = lang === "zh" ? "zh-CN" : "en";
-
+function CostConfiguration({ costConfig, primaryCurrency, copy }) {
   return (
     <s-stack direction="block" gap="base">
       <Form method="post" encType="multipart/form-data">
@@ -557,12 +554,7 @@ function CostConfiguration({ costConfig, primaryCurrency, copy, lang }) {
         <s-stack direction="inline" gap="base" wrap align="end">
           <label>
             {copy.uploadLabel}
-            <input
-              type="file"
-              name="file"
-              accept=".csv,text/csv"
-              lang={inputLang}
-            />
+            <input type="file" name="file" accept=".csv,text/csv" />
           </label>
           <s-button type="submit" variant="primary">
             {copy.import}

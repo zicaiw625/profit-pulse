@@ -45,7 +45,6 @@ export default function OrdersPage() {
   const buildAppUrl = useAppUrlBuilder();
   const { lang } = useLocale();
   const copy = ORDERS_COPY[lang] ?? ORDERS_COPY.en;
-  const inputLang = lang === "zh" ? "zh-CN" : "en";
   const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
     const value = searchParams.get(key);
     return value ? { key, value } : null;
@@ -61,21 +60,11 @@ export default function OrdersPage() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {copy.startDate}
-              <input
-                type="date"
-                name="start"
-                defaultValue={filters.start || ""}
-                lang={inputLang}
-              />
+              <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
               {copy.endDate}
-              <input
-                type="date"
-                name="end"
-                defaultValue={filters.end || ""}
-                lang={inputLang}
-              />
+              <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
               {copy.refundHandling}
