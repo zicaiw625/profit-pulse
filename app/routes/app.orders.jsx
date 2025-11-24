@@ -60,11 +60,11 @@ export default function OrdersPage() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {copy.startDate}
-              <input type="date" name="start" defaultValue={filters.start || ""} />
+              <input lang="en" type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
               {copy.endDate}
-              <input type="date" name="end" defaultValue={filters.end || ""} />
+              <input lang="en" type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
               {copy.refundHandling}
