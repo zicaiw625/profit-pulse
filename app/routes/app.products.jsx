@@ -46,6 +46,7 @@ export default function ProductsPage() {
   const buildAppUrl = useAppUrlBuilder();
   const { lang } = useLocale();
   const copy = PRODUCTS_COPY[lang] ?? PRODUCTS_COPY.en;
+  const inputLang = lang === "zh" ? "zh-CN" : "en";
   const preservedFormParams = APP_PRESERVED_PARAMS.map((key) => {
     const value = searchParams.get(key);
     return value ? { key, value } : null;
@@ -62,11 +63,21 @@ export default function ProductsPage() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {copy.startDate}
-              <input type="date" name="start" defaultValue={filters.start || ""} />
+              <input
+                type="date"
+                name="start"
+                defaultValue={filters.start || ""}
+                lang={inputLang}
+              />
             </label>
             <label>
               {copy.endDate}
-              <input type="date" name="end" defaultValue={filters.end || ""} />
+              <input
+                type="date"
+                name="end"
+                defaultValue={filters.end || ""}
+                lang={inputLang}
+              />
             </label>
             <label>
               {copy.sortBy}

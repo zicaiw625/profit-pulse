@@ -65,6 +65,7 @@ export default function DashboardIndex() {
   const missingCostPercent = missingCost
     ? (missingCost.percent * 100).toFixed(1)
     : null;
+  const inputLang = lang === "zh" ? "zh-CN" : "en";
 
   return (
     <div suppressHydrationWarning>
@@ -115,11 +116,21 @@ export default function DashboardIndex() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {ui.filters.startDate}
-              <input type="date" name="start" defaultValue={filters.start || ""} />
+              <input
+                type="date"
+                name="start"
+                defaultValue={filters.start || ""}
+                lang={inputLang}
+              />
             </label>
             <label>
               {ui.filters.endDate}
-              <input type="date" name="end" defaultValue={filters.end || ""} />
+              <input
+                type="date"
+                name="end"
+                defaultValue={filters.end || ""}
+                lang={inputLang}
+              />
             </label>
             <label>
               {ui.filters.quickRange}
