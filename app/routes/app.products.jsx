@@ -62,11 +62,11 @@ export default function ProductsPage() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {copy.startDate}
-              <input lang="en" type="date" name="start" defaultValue={filters.start || ""} />
+              <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
               {copy.endDate}
-              <input lang="en" type="date" name="end" defaultValue={filters.end || ""} />
+              <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
               {copy.sortBy}

@@ -115,11 +115,11 @@ export default function DashboardIndex() {
           <s-stack direction="inline" gap="base" wrap align="end">
             <label>
               {ui.filters.startDate}
-              <input lang="en" type="date" name="start" defaultValue={filters.start || ""} />
+              <input type="date" name="start" defaultValue={filters.start || ""} />
             </label>
             <label>
               {ui.filters.endDate}
-              <input lang="en" type="date" name="end" defaultValue={filters.end || ""} />
+              <input type="date" name="end" defaultValue={filters.end || ""} />
             </label>
             <label>
               {ui.filters.quickRange}
