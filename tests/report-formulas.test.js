@@ -91,6 +91,24 @@ describe('evaluateFormulaExpression', () => {
     assert.equal(result, 1);
   });
 
+  it('coerces non-finite provided values to zero before evaluation', () => {
+    const result = evaluateFormulaExpression('netProfit + adSpend', {
+      netProfit: Number.POSITIVE_INFINITY,
+      adSpend: 12,
+    });
+
+    assert.equal(result, 12);
+  });
+
+  it('accepts values that stringify using scientific notation', () => {
+    const result = evaluateFormulaExpression('netProfit + adSpend', {
+      netProfit: 1e-8,
+      adSpend: 1,
+    });
+
+    assert.ok(Math.abs(result - 1.00000001) < 1e-12);
+  });
+
   it('ignores non-string expressions', () => {
     const result = evaluateFormulaExpression(null, { netProfit: 1 });
     assert.equal(result, null);

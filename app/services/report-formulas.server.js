@@ -4,10 +4,21 @@ import { createScopedLogger } from "../utils/logger.server.js";
 const defaultLogger = createScopedLogger({ service: "report-formulas" });
 let formulaLogger = defaultLogger;
 const IDENTIFIER_PATTERN = /[A-Za-z_][A-Za-z0-9_]*/g;
+const NUMERIC_LITERAL_PATTERN = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i;
+const NUMERIC_EXPRESSION_PATTERN = /^[-0-9+*/%.()\sEe]+$/;
 // NOTE: Keep the allowed characters intentionally narrow (no quotes, ternaries,
 // logical operators, or array/object literals). If the grammar needs to expand,
 // replace this evaluator with a dedicated parser rather than widening the regex.
 const VALID_CHAR_PATTERN = /^[-0-9A-Za-z_+*/%.()\s]+$/;
+
+function toNumericLiteral(value) {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) {
+    return "0";
+  }
+  const literal = numeric.toString();
+  return NUMERIC_LITERAL_PATTERN.test(literal) ? literal : "0";
+}
 
 export function setReportFormulaLoggerForTests(logger) {
   formulaLogger = logger ?? defaultLogger;
@@ -50,11 +61,17 @@ export function evaluateFormulaExpression(expression, values = {}) {
   const sanitized = trimmed;
   const substituted = sanitized.replace(IDENTIFIER_PATTERN, (token) => {
     if (Object.prototype.hasOwnProperty.call(values, token)) {
-      const numeric = Number(values[token] ?? 0);
-      return Number.isFinite(numeric) ? String(numeric) : "0";
+      return toNumericLiteral(values[token]);
     }
     return "0";
   });
+
+  if (!NUMERIC_EXPRESSION_PATTERN.test(substituted)) {
+    formulaLogger?.warn?.("report_formulas.rejected", {
+      reason: "invalid_substitution",
+    });
+    return null;
+  }
 
   try {
     const result = Function(`"use strict"; return (${substituted});`)();
