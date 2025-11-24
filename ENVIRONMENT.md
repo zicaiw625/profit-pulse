@@ -21,6 +21,12 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 | `OAUTH_STATE_SECRET` | ✅ (production) | Secret used to sign OAuth state. Required in production; development falls back to `SHOPIFY_API_SECRET`, but do not rely on defaults outside local dev. |
 | `SHOP_CUSTOM_DOMAIN` | ⚠️ | If set, restricts installs to a single custom shop domain. Useful for pilot rollouts. |
 
+## Privacy & retention
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `RETENTION_CRON_SECRET` | ⚠️ | Bearer token for calling `/internal/retention/cleanup` when scheduling the uninstall data purge job. Defaults to `SHOPIFY_API_SECRET` if unset. |
+
 ## Background sync tuning
 
 | Variable | Required | Description |

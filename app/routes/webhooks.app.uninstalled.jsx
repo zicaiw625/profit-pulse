@@ -1,18 +1,41 @@
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { createScopedLogger } from "../utils/logger.server.js";
+import {
+  UNINSTALL_RETENTION_DAYS,
+  UNINSTALL_RETENTION_WINDOW_MS,
+} from "../constants/retention.js";
+import { markStoreDisconnected } from "../services/retention.server.js";
+import { createScopedLogger, serializeError } from "../utils/logger.server.js";
 
 const webhookLogger = createScopedLogger({ route: "webhooks.app.uninstalled" });
 
 export const action = async ({ request }) => {
-  const { shop, session, topic } = await authenticate.webhook(request);
+  const { shop, topic } = await authenticate.webhook(request);
 
   webhookLogger.info("webhook_received", { topic, shop });
 
-  // Webhook requests can trigger multiple times and after an app has already been uninstalled.
-  // If this webhook already ran, the session may have been deleted previously.
-  if (session) {
-    await db.session.deleteMany({ where: { shop } });
+  await db.session.deleteMany({ where: { shop } });
+
+  try {
+    const store = await markStoreDisconnected({ shopDomain: shop });
+    if (store) {
+      const deleteAfter = new Date(
+        store.disconnectedAt.getTime() + UNINSTALL_RETENTION_WINDOW_MS,
+      ).toISOString();
+      webhookLogger.info("store_marked_disconnected", {
+        shop,
+        storeId: store.id,
+        deleteAfter,
+      });
+    } else {
+      webhookLogger.warn("store_not_found_for_uninstall", { shop });
+    }
+  } catch (error) {
+    webhookLogger.error("uninstall_cleanup_schedule_failed", {
+      shop,
+      topic,
+      error: serializeError(error),
+    });
   }
 
   return new Response();
