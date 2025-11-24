@@ -1,7 +1,6 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { useLocale } from "../hooks/useLocale";
-import { UNINSTALL_RETENTION_DAYS } from "../constants/retention.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -41,7 +40,7 @@ const PRIVACY_COPY = {
       {
         title: "Retention & deletion",
         body: [
-          `Merchants can revoke permissions anytime via Shopify app settings; syncing stops and we delete associated store data within ${UNINSTALL_RETENTION_DAYS} days of uninstall, keeping only minimal audit logs.`,
+          "Merchants can revoke permissions anytime via Shopify app settings; syncing stops and we retain the last aggregated logs.",
           "For deletion requests (e.g., GDPR), contact support and we can purge orders, costs, fixed costs, and notification records linked to the merchant.",
         ],
       },
@@ -79,7 +78,7 @@ const PRIVACY_COPY = {
       {
         title: "保留与删除",
         body: [
-          `商家可随时通过 Shopify 应用设置撤销权限，应用将停止同步，并会在卸载后 ${UNINSTALL_RETENTION_DAYS} 天内删除与店铺相关的数据（仅保留必要的审计日志）。`,
+          "商家可随时通过 Shopify 应用设置撤销权限，应用将停止同步新数据并保留最后一次汇总的日志。",
           "若需强制删除数据（例如应对 GDPR 请求），请联系支持，我们可以清空与商户关联的订单、成本、固定成本与通知记录。",
         ],
       },

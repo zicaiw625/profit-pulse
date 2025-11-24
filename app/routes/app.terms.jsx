@@ -1,7 +1,6 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { useLocale } from "../hooks/useLocale";
-import { UNINSTALL_RETENTION_DAYS } from "../constants/retention.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -29,7 +28,7 @@ const TERMS_COPY = {
       {
         title: "Data retention",
         body:
-          `Merchants can uninstall anytime via Shopify admin > Apps > Profit Pulse; after disconnecting we stop syncing and will remove associated records within ${UNINSTALL_RETENTION_DAYS} days.`,
+          "Merchants can uninstall anytime via Shopify admin > Apps > Profit Pulse; after disconnecting we stop syncing and will remove associated records within a reasonable timeframe.",
       },
       {
         title: "Intellectual property",
@@ -58,7 +57,7 @@ const TERMS_COPY = {
       {
         title: "数据保留",
         body:
-          `商家可以随时通过 Shopify 商店 > 应用 > Profit Pulse 选择注销，删除连接后我们会停止同步，并会在卸载后 ${UNINSTALL_RETENTION_DAYS} 天内清除关联记录。`,
+          "商家可以随时通过 Shopify 商店 > 应用 > Profit Pulse 选择注销，删除连接后我们会停止同步并在合理时间内清除关联记录。",
       },
       {
         title: "知识产权",

@@ -4,7 +4,7 @@ import { DEFAULT_PLAN, PLAN_DEFINITIONS } from "../config/billing.js";
 import { PlanLimitError } from "../errors/plan-limit-error.js";
 import { createScopedLogger } from "../utils/logger.server.js";
 
-const { PlanTier, Prisma, StoreStatus } = pkg;
+const { PlanTier, Prisma } = pkg;
 const defaultPlan = DEFAULT_PLAN;
 const storeLogger = createScopedLogger({ service: "store" });
 
@@ -19,16 +19,6 @@ export async function ensureMerchantAndStore(shopDomain, ownerEmail) {
   });
 
   if (existingStore) {
-    if (existingStore.status === StoreStatus.DISCONNECTED) {
-      return prisma.store.update({
-        where: { id: existingStore.id },
-        data: {
-          status: StoreStatus.ACTIVE,
-          disconnectedAt: null,
-        },
-        include: { merchant: true },
-      });
-    }
     return existingStore;
   }
 
