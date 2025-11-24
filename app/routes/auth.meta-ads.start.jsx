@@ -8,7 +8,8 @@ import { getEnvVar } from "../utils/env.server.js";
 const oauthLogger = createScopedLogger({ route: "auth.meta-ads.start" });
 
 function buildSettingsRedirect({ provider, status, message, lang }) {
-  const url = new URL("/app/settings", "http://localhost");
+  const baseUrl = getEnvVar("SHOPIFY_APP_URL");
+  const url = new URL("/app/settings", baseUrl);
   url.searchParams.set("oauth", provider);
   url.searchParams.set("status", status);
   if (message) {
@@ -17,10 +18,9 @@ function buildSettingsRedirect({ provider, status, message, lang }) {
   if (lang) {
     url.searchParams.set("lang", lang);
   }
-  const location = `${url.pathname}?${url.searchParams.toString()}`;
   return new Response(null, {
     status: 302,
-    headers: { Location: location },
+    headers: { Location: url.toString() },
   });
 }
 
