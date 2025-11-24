@@ -1,14 +1,18 @@
 import crypto from "node:crypto";
+import { getEnvVar, isProductionEnv } from "./env.server.js";
 
 // Dev-only fallback; production runs are guarded by validateRequiredEnv to force a real secret.
 const DEFAULT_SECRET = "development-oauth-state-secret";
 
 function getStateSecret() {
-  const secret =
-    process.env.OAUTH_STATE_SECRET ||
-    process.env.SHOPIFY_API_SECRET ||
-    DEFAULT_SECRET;
-  return secret;
+  const devFallback =
+    isProductionEnv() === false
+      ? process.env.SHOPIFY_API_SECRET || DEFAULT_SECRET
+      : undefined;
+  return getEnvVar("OAUTH_STATE_SECRET", {
+    optional: !isProductionEnv(),
+    devFallback,
+  });
 }
 
 function base64UrlEncode(buffer) {

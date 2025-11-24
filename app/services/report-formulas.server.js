@@ -90,3 +90,5 @@ export function evaluateFormulaExpression(expression, values = {}) {
 // (`+`, `-`, `*`, `/`, parentheses, identifiers, and numeric literals). Do not extend the allowed
 // character set or introduce additional JavaScript syntax here without replacing the evaluator,
 // otherwise the `Function` call above could become a code execution vector.
+// Future hardening: replace this sanitizer with a dedicated expression parser/interpreter
+// (e.g. jsep/nearley + custom evaluator) instead of widening the Function-based approach.

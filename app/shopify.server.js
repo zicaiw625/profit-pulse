@@ -8,6 +8,12 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server.js";
 import { BILLING_CONFIG } from "./config/billing.js";
+import {
+  getEnvVar,
+  getRuntimeEnvironment,
+  isProductionEnv,
+  validateRequiredEnv,
+} from "./utils/env.server.js";
 
 const REQUIRED_SCOPES = [
   "read_orders",
@@ -17,8 +23,17 @@ const REQUIRED_SCOPES = [
   "read_inventory",
 ];
 
-function resolveScopes() {
-  const envScopes = (process.env.SCOPES ?? "")
+validateRequiredEnv();
+
+const runtimeEnv = getRuntimeEnvironment();
+const apiKey = getEnvVar("SHOPIFY_API_KEY");
+const apiSecretKey = getEnvVar("SHOPIFY_API_SECRET");
+const appUrl = getEnvVar("SHOPIFY_APP_URL");
+const scopes = resolveScopes(getEnvVar("SCOPES"));
+const databaseUrl = getEnvVar("DATABASE_URL");
+
+function resolveScopes(scopeString) {
+  const envScopes = (scopeString ?? "")
     .split(",")
     .map((scope) => scope.trim())
     .filter(Boolean);
@@ -27,7 +42,12 @@ function resolveScopes() {
   return Array.from(merged);
 }
 
-const useMemorySession = !process.env.DATABASE_URL;
+const useMemorySession = !databaseUrl;
+if (useMemorySession && isProductionEnv()) {
+  throw new Error(
+    "DATABASE_URL is required in production so Shopify sessions persist outside the Node.js process.",
+  );
+}
 const memorySessionStore = new Map();
 
 const sessionStorageInstance = useMemorySession
@@ -53,17 +73,17 @@ const sessionStorageInstance = useMemorySession
   : new PrismaSessionStorage(prisma);
 
 const shopify = shopifyApp({
-  apiKey: process.env.SHOPIFY_API_KEY || "test-key",
-  apiSecretKey: process.env.SHOPIFY_API_SECRET || "test-secret",
+  apiKey,
+  apiSecretKey,
   apiVersion: ApiVersion.October25,
-  scopes: resolveScopes(),
-  appUrl: process.env.SHOPIFY_APP_URL || "http://localhost",
+  scopes,
+  appUrl,
   authPathPrefix: "/auth",
   sessionStorage: sessionStorageInstance,
   distribution: AppDistribution.AppStore,
   billing: BILLING_CONFIG,
   logger: {
-    level: LogSeverity.Debug,
+    level: runtimeEnv === "development" ? LogSeverity.Debug : LogSeverity.Info,
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }

@@ -19,6 +19,7 @@ import {
 import { extractRefunds, syncRefundRecords } from "./profit-engine/refunds.js";
 import { getLogisticsCost as defaultGetLogisticsCost } from "./logistics.server.js";
 import { sendDigestEmail } from "./email.server.js";
+import { isProductionEnv } from "../utils/env.server.js";
 
 const { CostType, CredentialProvider } = pkg;
 const ATTRIBUTION_CHANNELS = [CredentialProvider.META_ADS];
@@ -353,7 +354,7 @@ export async function processShopifyOrder({ store, payload }) {
 function createNoopPlanOverageChargeHandler(logger = profitEngineLogger) {
   let warned = false;
   return async () => {
-    if (process.env.NODE_ENV === "production" && !warned) {
+    if (isProductionEnv() && !warned) {
       logger.warn("plan_overage_charge_unconfigured", {
         message:
           "processPlanOverageCharge is still a no-op. Wire this to billing before enabling paid plans.",
@@ -369,7 +370,7 @@ function createPlanOverageNotifier(logger = profitEngineLogger) {
 
   return async ({ merchantId, limit, usage }) => {
     if (!recipients) {
-      if (process.env.NODE_ENV === "production" && !warned) {
+      if (isProductionEnv() && !warned) {
         logger.warn("plan_overage_notification_unconfigured", {
           merchantId,
           limit,
@@ -392,7 +393,7 @@ function createPlanOverageNotifier(logger = profitEngineLogger) {
 
     try {
       const sent = await sendDigestEmail({ recipients, subject, body });
-      if (!sent && process.env.NODE_ENV === "production") {
+      if (!sent && isProductionEnv()) {
         logger.warn("plan_overage_notification_failed", {
           merchantId,
           limit,

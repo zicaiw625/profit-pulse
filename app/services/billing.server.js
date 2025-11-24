@@ -8,14 +8,14 @@ import {
   BILLABLE_PLANS,
 } from "../config/billing.js";
 import { createScopedLogger } from "../utils/logger.server.js";
+import { isProductionEnv } from "../utils/env.server.js";
 
 const BILLING_PLAN_KEYS = BILLABLE_PLANS.map((plan) => plan.billingKey);
 
 const billingLogger = createScopedLogger({ service: "billing" });
 
 const BILLING_TEST_MODE =
-  process.env.SHOPIFY_BILLING_TEST_MODE === "true" ||
-  process.env.NODE_ENV !== "production";
+  process.env.SHOPIFY_BILLING_TEST_MODE === "true" || !isProductionEnv();
 
 export function getPlanOptions() {
   return listPlanOptions();

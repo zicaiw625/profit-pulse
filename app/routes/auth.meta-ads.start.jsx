@@ -3,6 +3,7 @@ import { ensureMerchantAndStore } from "../models/store.server";
 import { buildMetaAdsAuthorizationUrl } from "../services/oauth/meta-ads.server.js";
 import { createSignedState } from "../utils/oauth-state.server.js";
 import { createScopedLogger, serializeError } from "../utils/logger.server.js";
+import { getEnvVar } from "../utils/env.server.js";
 
 const oauthLogger = createScopedLogger({ route: "auth.meta-ads.start" });
 
@@ -35,10 +36,7 @@ function normalizeAccountId(raw) {
 }
 
 function resolveAbsoluteUrl(pathname) {
-  const baseUrl = process.env.SHOPIFY_APP_URL;
-  if (!baseUrl) {
-    throw new Error("SHOPIFY_APP_URL is not configured");
-  }
+  const baseUrl = getEnvVar("SHOPIFY_APP_URL");
   return new URL(pathname, baseUrl).toString();
 }
 

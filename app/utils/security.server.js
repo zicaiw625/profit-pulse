@@ -35,6 +35,11 @@ export function applySecurityHeaders(headers, { cspNonce } = {}) {
       headers.set(name, value);
     }
   });
+  if (!headers.has("X-Frame-Options")) {
+    // Keep the embedded app compatible with Shopify Admin iframes; CSP frame-ancestors
+    // enforces the allowlist, so X-Frame-Options stays permissive.
+    headers.set("X-Frame-Options", "ALLOWALL");
+  }
 }
 
 const CREDENTIAL_SECRET_PREFIX = "enc.v1:";

@@ -8,30 +8,93 @@ const REQUIRED_ENV_VARS = [
 ];
 const PRODUCTION_ONLY_ENV_VARS = ["OAUTH_STATE_SECRET"];
 
+const DEV_FALLBACKS = {
+  SHOPIFY_API_KEY: "dev-shopify-api-key",
+  SHOPIFY_API_SECRET: "dev-shopify-api-secret",
+  SHOPIFY_APP_URL: "http://localhost",
+  SCOPES: "read_orders,read_refunds,read_customers,read_products,read_inventory",
+};
+
 let validated = false;
+const devFallbacksUsed = new Set();
+
+export function getRuntimeEnvironment() {
+  return (process.env.APP_ENV || process.env.NODE_ENV || "development").toLowerCase();
+}
+
+export function isProductionEnv() {
+  return getRuntimeEnvironment() === "production";
+}
+
+function hasValue(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+export function getEnvVar(key, options = {}) {
+  const { optional = false, devFallback = DEV_FALLBACKS[key] } = options;
+  const raw = process.env[key];
+  if (hasValue(raw)) {
+    return raw.trim();
+  }
+
+  if (!isProductionEnv() && devFallback) {
+    if (!devFallbacksUsed.has(key)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[env] Using development fallback for ${key}. Set the variable locally to silence this warning.`,
+      );
+      devFallbacksUsed.add(key);
+    }
+    return devFallback;
+  }
+
+  if (optional) {
+    return undefined;
+  }
+
+  throw new Error(
+    `Missing required environment variable: ${key}. Runtime environment: ${getRuntimeEnvironment()}. See ENVIRONMENT.md for setup instructions.`,
+  );
+}
 
 export function validateRequiredEnv() {
   if (validated) return;
 
-  const required = [...REQUIRED_ENV_VARS];
-  if (process.env.NODE_ENV === "production") {
-    required.push(...PRODUCTION_ONLY_ENV_VARS);
-  }
-
-  const missing = required.filter((key) => {
-    const value = process.env[key];
-    return typeof value !== "string" || value.trim() === "";
+  const missing = [];
+  REQUIRED_ENV_VARS.forEach((key) => {
+    try {
+      getEnvVar(key);
+    } catch (error) {
+      missing.push(key);
+    }
   });
 
+  if (isProductionEnv()) {
+    PRODUCTION_ONLY_ENV_VARS.forEach((key) => {
+      if (!hasValue(process.env[key])) {
+        missing.push(key);
+      }
+    });
+
+    const hasUpstash =
+      hasValue(process.env.UPSTASH_REDIS_REST_URL) &&
+      hasValue(process.env.UPSTASH_REDIS_REST_TOKEN);
+    if (!hasUpstash) {
+      missing.push("UPSTASH_REDIS_REST_URL");
+      missing.push("UPSTASH_REDIS_REST_TOKEN");
+    }
+  }
+
   if (missing.length > 0) {
+    const unique = Array.from(new Set(missing));
     throw new Error(
-      `Missing required environment variables: ${missing.join(
+      `Missing required environment variables: ${unique.join(
         ", ",
-      )}. Refer to ENVIRONMENT.md for setup instructions. In production, set OAUTH_STATE_SECRET explicitly instead of relying on fallbacks.`,
+      )}. Production runs also require shared cache credentials (UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN).`,
     );
   }
 
-  if (process.env.NODE_ENV === "production") {
+  if (isProductionEnv()) {
     maybeWarnOptionalProdVars();
   }
 
@@ -41,19 +104,6 @@ export function validateRequiredEnv() {
 export { REQUIRED_ENV_VARS, PRODUCTION_ONLY_ENV_VARS };
 
 function maybeWarnOptionalProdVars() {
-  const hasUpstash =
-    typeof process.env.UPSTASH_REDIS_REST_URL === "string" &&
-    process.env.UPSTASH_REDIS_REST_URL.trim() !== "" &&
-    typeof process.env.UPSTASH_REDIS_REST_TOKEN === "string" &&
-    process.env.UPSTASH_REDIS_REST_TOKEN.trim() !== "";
-  if (!hasUpstash) {
-    // Multi-instance deployments should share cache state; warn loudly if Redis is not configured.
-    // eslint-disable-next-line no-console
-    console.warn(
-      "[env] UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN are not set. Configure a shared cache before scaling horizontally.",
-    );
-  }
-
   if (
     process.env.PLAN_OVERAGE_ALERT_RECIPIENTS &&
     !process.env.PROFIT_PULSE_EMAIL_ENDPOINT

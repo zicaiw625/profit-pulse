@@ -1,6 +1,7 @@
 import { ExternalServiceError } from "../errors/external-service-error.js";
 import { fetchWithTimeout } from "../utils/http.server.js";
 import { createScopedLogger } from "../utils/logger.server.js";
+import { isProductionEnv } from "../utils/env.server.js";
 
 const cacheLogger = createScopedLogger({ service: "cache" });
 
@@ -170,7 +171,13 @@ let activeBackend = createMemoryCacheBackend();
 
 const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
 const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-if (upstashUrl && upstashToken) {
+if (!upstashUrl || !upstashToken) {
+  if (isProductionEnv()) {
+    throw new Error(
+      "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required in production to avoid process-local caches.",
+    );
+  }
+} else {
   try {
     activeBackend = createUpstashCacheBackend({ url: upstashUrl, token: upstashToken });
     cacheLogger.info("Using Upstash Redis cache backend", {
@@ -182,10 +189,15 @@ if (upstashUrl && upstashToken) {
       backend: "upstash",
       error: error.message,
     });
+    if (isProductionEnv()) {
+      throw new Error(
+        "Upstash cache backend failed to initialize in production. Check UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN.",
+      );
+    }
   }
 }
 
-if (activeBackend.name === "memory" && process.env.NODE_ENV === "production") {
+if (activeBackend.name === "memory" && isProductionEnv()) {
   cacheLogger.warn(
     "Using process-local cache backend in production; configure UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN so multi-instance deployments share memoized results.",
     {

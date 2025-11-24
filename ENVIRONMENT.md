@@ -2,6 +2,12 @@
 
 Profit Pulse validates a small set of core variables on startup and conditionally enables integrations when optional variables are present. Use this guide to understand what each value controls and when it is required.
 
+## Runtime environments
+
+- `APP_ENV` (preferred) or `NODE_ENV` determines whether the app is running in production. Production mode disables all fallbacks and will abort startup if any required variable is missing.
+- Development-only fallbacks exist for `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, and `SCOPES`. When they are used, a console warning is emitted so you can fill the real values locally.
+- `validateRequiredEnv()` executes during server startup to prevent “sick” deployments: missing Shopify secrets, database URLs, encryption keys, OAuth state secret (production), and shared cache credentials will throw immediately.
+
 ## Core requirements
 
 | Variable | Required | Description |
@@ -27,8 +33,8 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `UPSTASH_REDIS_REST_URL` | ⚠️ | HTTPS base URL for an Upstash Redis REST instance. When paired with `UPSTASH_REDIS_REST_TOKEN`, memoized cache reads/writes are shared across all Profit Pulse instances. |
-| `UPSTASH_REDIS_REST_TOKEN` | ⚠️ | Bearer token for the Upstash REST endpoint. Required when `UPSTASH_REDIS_REST_URL` is set. |
+| `UPSTASH_REDIS_REST_URL` | ✅ (production) | HTTPS base URL for an Upstash Redis REST instance. Required in production so caches are shared across instances; development can fall back to process-local memory. |
+| `UPSTASH_REDIS_REST_TOKEN` | ✅ (production) | Bearer token for the Upstash REST endpoint. Required when `UPSTASH_REDIS_REST_URL` is set (and in production). |
 
 ## Exchange rates
 
