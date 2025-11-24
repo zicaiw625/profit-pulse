@@ -6,7 +6,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 - `APP_ENV` (preferred) or `NODE_ENV` determines whether the app is running in production. Production mode disables all fallbacks and will abort startup if any required variable is missing.
 - Development-only fallbacks exist for `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, and `SCOPES`. When they are used, a console warning is emitted so you can fill the real values locally.
-- `validateRequiredEnv()` executes during server startup to prevent “sick” deployments: missing Shopify secrets, database URLs, encryption keys, OAuth state secret (production), and shared cache credentials will throw immediately.
+- `validateRequiredEnv()` executes during server startup to prevent “sick” deployments: missing Shopify secrets, database URLs, encryption keys, and the OAuth state secret (production) will throw immediately.
 
 ## Core requirements
 
@@ -31,10 +31,7 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 
 ## Caching
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `UPSTASH_REDIS_REST_URL` | ✅ (production) | HTTPS base URL for an Upstash Redis REST instance. Required in production so caches are shared across instances; development can fall back to process-local memory. |
-| `UPSTASH_REDIS_REST_TOKEN` | ✅ (production) | Bearer token for the Upstash REST endpoint. Required when `UPSTASH_REDIS_REST_URL` is set (and in production). |
+No external cache is configured. The app uses an in-process memoization Map suitable for single-instance deployments. If you add a distributed cache in the future, wire it in `app/services/cache.server.js`.
 
 ## Exchange rates
 
@@ -80,13 +77,13 @@ Profit Pulse validates a small set of core variables on startup and conditionall
 - Configure `PLAN_OVERAGE_ALERT_RECIPIENTS` (and `PROFIT_PULSE_EMAIL_ENDPOINT` if you have one) to receive notifications when merchants hit plan limits.
 - Set `OAUTH_STATE_SECRET` in production to a high-entropy value; never rely on the development fallback when running a deployed instance.
 - Keep Meta Ads and PayPal variables scoped to each environment; restarting the app refreshes tokens if credentials become invalid.
-- Before running multiple app instances/pods, configure the Upstash variables so memoized cache entries are shared; keeping the in-memory cache is only appropriate for single-node dev and will increase redundant external calls in multi-node setups.
+- For multi-instance deployments, consider swapping `app/services/cache.server.js` to a shared cache so memoized values stay consistent; the default in-process cache is suited to single-node setups.
 - Run `npm test` locally (or `node --test`) to verify profit engine and reporting logic whenever you touch services. The suites rely on the same `.env` configuration as `npm run dev`, so make sure the keys above are populated first.
 - Seed demo data from the Settings page (“Seed demo costs”) after installing the embedded app on a development store—this loads SKU costs so dashboards/product tables light up immediately.
 
 ## First-time developer & testing flow
 
-1. Copy `.env.example` to `.env` and fill the mandatory keys (`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL`, and `CREDENTIAL_ENCRYPTION_KEY`). Optional integrations (Meta Ads, PayPal, Upstash) can be added later.
+1. Copy `.env.example` to `.env` and fill the mandatory keys (`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `SCOPES`, `DATABASE_URL`, and `CREDENTIAL_ENCRYPTION_KEY`). Optional integrations (Meta Ads, PayPal) can be added later.
 2. Run `npm install` (requires network access) and `npx prisma migrate deploy` to prepare the database.
 3. Start the embedded app with `npm run dev` via the Shopify CLI, install it on a development store, and complete the onboarding checklist (connect Meta Ads, import/seed COGS).
 4. Use the Settings page “Seed demo costs” button to hydrate SKU costs, then verify dashboards/orders/products have data.

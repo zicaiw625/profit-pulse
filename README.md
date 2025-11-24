@@ -104,7 +104,7 @@ npm test
 
 ## Caching and scale-out
 
-- The default cache backend is in-process for simplicity. Set both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to enable a shared Upstash Redis cache accessed via HTTPS, which keeps memoized FX rates and dashboard aggregates coherent across instances.
+- The cache backend is in-process for simplicity. If you deploy multiple instances and need shared memoization, plug a centralized cache into `app/services/cache.server.js`.
 - When no external backend is configured, memoized functions remain safe to call—they simply recompute results per instance.
 
 ## Contributing

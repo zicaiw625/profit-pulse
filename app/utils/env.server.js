@@ -75,14 +75,6 @@ export function validateRequiredEnv() {
         missing.push(key);
       }
     });
-
-    const hasUpstash =
-      hasValue(process.env.UPSTASH_REDIS_REST_URL) &&
-      hasValue(process.env.UPSTASH_REDIS_REST_TOKEN);
-    if (!hasUpstash) {
-      missing.push("UPSTASH_REDIS_REST_URL");
-      missing.push("UPSTASH_REDIS_REST_TOKEN");
-    }
   }
 
   if (missing.length > 0) {
@@ -90,7 +82,7 @@ export function validateRequiredEnv() {
     throw new Error(
       `Missing required environment variables: ${unique.join(
         ", ",
-      )}. Production runs also require shared cache credentials (UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN).`,
+      )}.`,
     );
   }
 

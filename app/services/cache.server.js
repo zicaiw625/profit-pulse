@@ -1,19 +1,10 @@
-import { ExternalServiceError } from "../errors/external-service-error.js";
-import { fetchWithTimeout } from "../utils/http.server.js";
-import { createScopedLogger } from "../utils/logger.server.js";
-import { isProductionEnv } from "../utils/env.server.js";
+// Simple in-process cache backend. Replace this module with a centralized cache if
+// you need shared memoization across multiple app instances.
 
-const cacheLogger = createScopedLogger({ service: "cache" });
-
-// NOTE: The default backend below keeps memoized entries inside a single Node.js
-// process via a module-scoped Map. It is perfect for single-instance deployments,
-// but multi-instance or serverless environments will not share cache state. Configure
-// the Upstash backend (or swap in another centralized store) when horizontal scaling
-// is required to avoid redundant recomputation. Current keys (e.g. `exchange-rate:`
-// and `reporting-overview:`) are intentionally tolerant of short-lived divergence
-// between instances—stale values only trigger extra recomputation and do not affect
-// writes. Document any new keys that must stay strongly consistent so they can be
-// migrated to a shared backend before launch.
+// NOTE: The cache backend keeps memoized entries inside a single Node.js process via
+// a module-scoped Map. In multi-instance/serverless deployments this cache is not
+// shared, so any new keys should remain tolerant of short-lived divergence. If you
+// later need a shared cache, swap this module to a centralized store.
 
 function createMemoryCacheBackend() {
   const cacheStore = new Map();
@@ -62,149 +53,7 @@ function createMemoryCacheBackend() {
   };
 }
 
-function createUpstashCacheBackend({ url, token }) {
-  const normalizedBase = url.replace(/\/+$/, "");
-  const endpoint = `${normalizedBase}/pipeline`;
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  };
-  const inflight = new Map();
-
-  async function execute(command) {
-    const response = await fetchWithTimeout("upstash-cache", endpoint, {
-      method: "POST",
-      headers,
-      body: JSON.stringify([command]),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new ExternalServiceError("upstash-cache", {
-        status: response.status,
-        message: "Upstash cache request failed",
-        detail: text?.slice(0, 200) ?? "",
-      });
-    }
-    const payload = await response.json();
-    const [result] = Array.isArray(payload) ? payload : [];
-    if (!result) {
-      return null;
-    }
-    if (result.error) {
-      throw new Error(result.error);
-    }
-    return result.result ?? null;
-  }
-
-  return {
-    name: "upstash",
-    async memoize(key, ttlMs, compute) {
-      const ttl = Math.max(Number(ttlMs ?? 0), 0);
-      if (ttl === 0) {
-        return compute();
-      }
-
-      if (inflight.has(key)) {
-        return inflight.get(key);
-      }
-
-      const promise = (async () => {
-        try {
-          const cached = await execute(["GET", key]);
-          if (cached !== null && cached !== undefined) {
-            return JSON.parse(cached);
-          }
-        } catch (error) {
-          cacheLogger.warn("Failed to read Upstash cache entry", {
-            context: {
-              backend: "upstash",
-              key,
-            },
-            error: error.message,
-          });
-        }
-
-        const value = await compute();
-
-        try {
-          const serialized = JSON.stringify(value);
-          await execute(["SET", key, serialized, "PX", String(ttl)]);
-        } catch (error) {
-          cacheLogger.warn("Failed to store Upstash cache entry", {
-            context: {
-              backend: "upstash",
-              key,
-            },
-            error: error.message,
-          });
-        }
-
-        return value;
-      })().finally(() => {
-        inflight.delete(key);
-      });
-
-      inflight.set(key, promise);
-      return promise;
-    },
-    async clear(key) {
-      inflight.delete(key);
-      try {
-        await execute(["DEL", key]);
-      } catch (error) {
-        cacheLogger.warn("Failed to clear Upstash cache entry", {
-          context: {
-            backend: "upstash",
-            key,
-          },
-          error: error.message,
-        });
-      }
-    },
-    async shutdown() {
-      inflight.clear();
-    },
-  };
-}
-
 let activeBackend = createMemoryCacheBackend();
-
-const upstashUrl = process.env.UPSTASH_REDIS_REST_URL;
-const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-if (!upstashUrl || !upstashToken) {
-  if (isProductionEnv()) {
-    throw new Error(
-      "UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required in production to avoid process-local caches.",
-    );
-  }
-} else {
-  try {
-    activeBackend = createUpstashCacheBackend({ url: upstashUrl, token: upstashToken });
-    cacheLogger.info("Using Upstash Redis cache backend", {
-      backend: "upstash",
-      url: sanitizeUpstashUrl(upstashUrl),
-    });
-  } catch (error) {
-    cacheLogger.warn("Failed to initialize Upstash cache backend", {
-      backend: "upstash",
-      error: error.message,
-    });
-    if (isProductionEnv()) {
-      throw new Error(
-        "Upstash cache backend failed to initialize in production. Check UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN.",
-      );
-    }
-  }
-}
-
-if (activeBackend.name === "memory" && isProductionEnv()) {
-  cacheLogger.warn(
-    "Using process-local cache backend in production; configure UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN so multi-instance deployments share memoized results.",
-    {
-      backend: activeBackend.name,
-    },
-  );
-}
 
 export function buildCacheKey(prefix, identifier, rangeStartIso) {
   const keyParts = [prefix, identifier];
@@ -244,15 +93,3 @@ export async function shutdownCache() {
 }
 
 export const memoryCacheBackendFactory = createMemoryCacheBackend;
-
-function sanitizeUpstashUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.searchParams.has("token")) {
-      parsed.searchParams.set("token", "***");
-    }
-    return parsed.toString();
-  } catch {
-    return "[invalid-url]";
-  }
-}

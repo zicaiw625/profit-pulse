@@ -24,9 +24,8 @@
   - [ ] 配置生产环境的 `DATABASE_URL` 指向可靠数据库（Postgres/MySQL 等）。
   - [ ] 确认 Shopify session 存储实际走 `PrismaSessionStorage`，不是内存 `Map()`。
 - [ ] 避免生产使用进程内缓存
-  - [ ] 若有 `Upstash Redis` 等缓存配置：生产环境必须提供 `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`。
-  - [ ] 缺失时在生产直接报错，不回退到内存缓存。
-  - [ ] 多实例部署时，确保所有实例共享缓存 & 会话。
+  - [ ] 如需分布式缓存，提前接入外部服务；当前默认仅使用进程内缓存，适合单实例部署。
+  - [ ] 多实例部署时，确保所有实例共享缓存 & 会话（或接受短暂不一致）。
 
 ## 三、安全性加固
 
