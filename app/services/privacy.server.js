@@ -276,6 +276,71 @@ export async function queueShopRedactionRequest({
   return request;
 }
 
+export async function hardDeleteStoreData(storeId) {
+  if (!storeId) {
+    throw new Error("storeId is required to hard delete store data");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const store = await tx.store.findUnique({
+      where: { id: storeId },
+      select: { id: true, shopDomain: true },
+    });
+
+    if (!store) {
+      return { deleted: false, reason: "not_found" };
+    }
+
+    const stats = {};
+
+    stats.childStores = (
+      await tx.store.updateMany({
+        where: { parentStoreId: storeId },
+        data: { parentStoreId: null },
+      })
+    ).count;
+
+    stats.gdprRequests = (await tx.gdprRequest.deleteMany({ where: { storeId } })).count;
+    stats.syncJobs = (await tx.syncJob.deleteMany({ where: { storeId } })).count;
+    stats.dailyMetrics = (await tx.dailyMetric.deleteMany({ where: { storeId } })).count;
+    stats.reconciliationIssues = (
+      await tx.reconciliationIssue.deleteMany({ where: { storeId } })
+    ).count;
+    stats.adSpendRecords = (await tx.adSpendRecord.deleteMany({ where: { storeId } })).count;
+    stats.paymentPayouts = (await tx.paymentPayout.deleteMany({ where: { storeId } })).count;
+    stats.inventoryLevels = (await tx.inventoryLevel.deleteMany({ where: { storeId } })).count;
+    stats.logisticsRules = (await tx.logisticsRule.deleteMany({ where: { storeId } })).count;
+    stats.logisticsCredentials = (
+      await tx.logisticsCredential.deleteMany({ where: { storeId } })
+    ).count;
+    stats.adAccountCredentials = (
+      await tx.adAccountCredential.deleteMany({ where: { storeId } })
+    ).count;
+    stats.skuCosts = (await tx.skuCost.deleteMany({ where: { storeId } })).count;
+    stats.taxRates = (await tx.taxRate.deleteMany({ where: { storeId } })).count;
+    stats.costTemplateLines = (
+      await tx.costTemplateLine.deleteMany({ where: { template: { storeId } } })
+    ).count;
+    stats.costTemplates = (await tx.costTemplate.deleteMany({ where: { storeId } })).count;
+    stats.refundRecords = (await tx.refundRecord.deleteMany({ where: { storeId } })).count;
+    stats.orders = (await tx.order.deleteMany({ where: { storeId } })).count;
+
+    await tx.store.delete({ where: { id: storeId } });
+
+    stats.sessions = (await tx.session.deleteMany({ where: { shop: store.shopDomain } })).count;
+    stats.planOverages = (
+      await tx.planOverageRecord.deleteMany({ where: { shopDomain: store.shopDomain } })
+    ).count;
+
+    return {
+      deleted: true,
+      storeId: store.id,
+      shopDomain: store.shopDomain,
+      stats,
+    };
+  });
+}
+
 export async function summarizeGdprActivity({ merchantId }) {
   if (!merchantId) {
     return { total: 0, pending: 0, lastProcessed: null };
