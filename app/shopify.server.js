@@ -17,7 +17,6 @@ import {
 
 const REQUIRED_SCOPES = [
   "read_orders",
-  "read_refunds",
   "read_customers",
   "read_products",
   "read_inventory",

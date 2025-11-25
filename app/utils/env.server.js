@@ -14,7 +14,7 @@ const DEV_FALLBACKS = {
   SHOPIFY_API_KEY: "dev-shopify-api-key",
   SHOPIFY_API_SECRET: "dev-shopify-api-secret",
   SHOPIFY_APP_URL: "http://localhost",
-  SCOPES: "read_orders,read_refunds,read_customers,read_products,read_inventory",
+  SCOPES: "read_orders,read_customers,read_products,read_inventory",
 };
 
 let validated = false;
