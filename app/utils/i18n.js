@@ -1,4 +1,4 @@
-import { TRANSLATIONS } from "../constants/translations";
+import { TRANSLATIONS } from "../constants/translations.js";
 
 export const SUPPORTED_LANGS = ["en", "zh"];
 export const DEFAULT_LANG = "en";

@@ -3,10 +3,12 @@ const REQUIRED_ENV_VARS = [
   "SHOPIFY_API_SECRET",
   "SHOPIFY_APP_URL",
   "SCOPES",
+];
+const PRODUCTION_ONLY_ENV_VARS = [
+  "OAUTH_STATE_SECRET",
   "DATABASE_URL",
   "CREDENTIAL_ENCRYPTION_KEY",
 ];
-const PRODUCTION_ONLY_ENV_VARS = ["OAUTH_STATE_SECRET"];
 
 const DEV_FALLBACKS = {
   SHOPIFY_API_KEY: "dev-shopify-api-key",
@@ -44,6 +46,9 @@ export function getEnvVar(key, options = {}) {
         `[env] Using development fallback for ${key}. Set the variable locally to silence this warning.`,
       );
       devFallbacksUsed.add(key);
+    }
+    if (!hasValue(process.env[key])) {
+      process.env[key] = devFallback;
     }
     return devFallback;
   }
