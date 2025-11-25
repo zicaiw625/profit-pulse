@@ -30,7 +30,7 @@ const apiKey = getEnvVar("SHOPIFY_API_KEY");
 const apiSecretKey = getEnvVar("SHOPIFY_API_SECRET");
 const appUrl = getEnvVar("SHOPIFY_APP_URL");
 const scopes = resolveScopes(getEnvVar("SCOPES"));
-const databaseUrl = getEnvVar("DATABASE_URL");
+const databaseUrl = getEnvVar("DATABASE_URL", { optional: !isProductionEnv() });
 
 function resolveScopes(scopeString) {
   const envScopes = (scopeString ?? "")
@@ -42,7 +42,7 @@ function resolveScopes(scopeString) {
   return Array.from(merged);
 }
 
-const useMemorySession = !databaseUrl;
+const useMemorySession = runtimeEnv !== "production" || !databaseUrl;
 if (useMemorySession && isProductionEnv()) {
   throw new Error(
     "DATABASE_URL is required in production so Shopify sessions persist outside the Node.js process.",

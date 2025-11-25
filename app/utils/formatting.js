@@ -1,4 +1,4 @@
-import { normalizeLanguage } from "./i18n";
+import { normalizeLanguage } from "./i18n.js";
 
 const DEFAULT_CURRENCY = "USD";
 const CURRENCY_FORMATTER_CACHE = new Map();
